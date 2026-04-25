@@ -1,0 +1,9 @@
+{"meta": {"name": "reservation_basic", "description": "Standard reservation flow — 4 slots, create_reservation fires"}}
+{"role": "user", "text": "Ich möchte einen Tisch für nächsten Freitag reservieren."}
+{"role": "assert", "type": "forbid", "text": "technisches problem"}
+{"role": "user", "text": "Um neunzehn Uhr für vier Personen."}
+{"role": "assert", "type": "contains", "text": "name", "turn": "last"}
+{"role": "user", "text": "Mein Name ist Anna Weber."}
+{"role": "user", "text": "Ja, das stimmt."}
+{"role": "assert", "type": "tool", "name": "create_reservation", "at_end": true}
+{"role": "assert", "type": "tool_not", "name": "create_order", "at_end": true}

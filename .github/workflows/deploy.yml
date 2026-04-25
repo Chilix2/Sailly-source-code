@@ -1,0 +1,62 @@
+name: Deploy
+
+on:
+  push:
+    branches:
+      - main
+      - staging
+      - refactor/phase-9-production-support
+
+jobs:
+  deploy:
+    name: Rolling Deploy
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Pick env file
+        run: |
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            cp configs/env/.env.prod .env
+            echo "DEPLOY_ENV=prod" >> "$GITHUB_ENV"
+          else
+            cp configs/env/.env.staging .env
+            echo "DEPLOY_ENV=staging" >> "$GITHUB_ENV"
+          fi
+
+      - name: Run DB migrations
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          pip install asyncpg
+          for f in migrations/*.sql; do
+            echo "Applying $f"
+            psql "$DATABASE_URL" -f "$f"
+          done
+
+      - name: Rolling deploy
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          # Save SSH key
+          echo "$SSH_KEY" > /tmp/deploy_key
+          chmod 600 /tmp/deploy_key
+
+          bash scripts/deploy_rolling.sh
+
+      - name: Notify Slack on failure
+        if: failure()
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_ALERTS_WEBHOOK }}
+        run: |
+          curl -s -X POST "$SLACK_WEBHOOK" \
+            -H 'Content-Type: application/json' \
+            -d '{"text":"[CRITICAL] Deploy to ${{ env.DEPLOY_ENV }} FAILED for commit ${{ github.sha }}"}'

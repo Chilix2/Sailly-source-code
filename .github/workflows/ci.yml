@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: ["main", "develop"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  vertical-boundary-check:
+    name: Vertical Boundary Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run vertical boundary guard
+        run: |
+          python scripts/verify_no_hardcoded_tenants.py --root .
+
+  tenant-schema-validation:
+    name: Tenant Schema Validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install pydantic pyyaml
+
+      - name: Validate all tenant YAML files
+        run: |
+          python -c "
+          import sys
+          sys.path.insert(0, '.')
+          from server.configs.tenant_schema import validate_all_tenants
+          results = validate_all_tenants('configs/tenants')
+          if not results:
+              print('WARNING: No tenant configs found or all failed validation')
+              sys.exit(1)
+          for tid, schema in results.items():
+              print(f'  OK: {tid} — {schema.restaurant_name}')
+          print(f'Validated {len(results)} tenant(s).')
+          "
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install flake8
+        run: pip install flake8
+
+      - name: Lint server/brain/stt/ (new package)
+        run: |
+          flake8 server/brain/stt/ \
+            --max-line-length=120 \
+            --ignore=E501,W503 \
+            --count

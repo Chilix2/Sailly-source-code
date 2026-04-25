@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+pipecat-ai[google,deepgram,silero]
+google-cloud-texttospeech
+google-genai
+deepgram-sdk
+python-dotenv
+pyyaml
+google-auth

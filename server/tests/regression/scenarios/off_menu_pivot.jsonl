@@ -1,0 +1,9 @@
+{"meta": {"name": "off_menu_pivot", "description": "Caller asks for Pizza (off-menu). Bot must NOT repeat denial more than once."}}
+{"role": "user", "text": "Ich möchte eine Pizza Margherita bestellen."}
+{"role": "assert", "type": "forbid", "text": "technisches problem"}
+{"role": "assert", "type": "contains", "text": "pizza", "turn": "last"}
+{"role": "user", "text": "Gibt es wirklich keine Pizza bei euch?"}
+{"role": "assert", "type": "contains", "text": "pizza", "turn": "last"}
+{"role": "user", "text": "Okay dann hätte ich gerne einen Bulgogi."}
+{"role": "assert", "type": "contains", "text": "bulgogi", "turn": "last"}
+{"role": "assert", "type": "forbid", "text": "pizza haben wir nicht"}
