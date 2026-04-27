@@ -1,10 +1,11 @@
 """
 Tier2AudioRunner -- Phase 2: Full audio round-trip testing.
 
-Pipeline: Google TTS Linear16 8kHz → Deepgram Nova-3 de STT → Gemini LLM → Gemini Flash TTS
+Pipeline: Google TTS Linear16 8kHz → Deepgram Nova-3 de STT → Claude Haiku (Vertex AI, EU) → Gemini Flash TTS
 N=3 runs per scenario. Collects real latencies, audio bytes, WER, tool calls.
 Validates all checkpoints (STT accuracy gate, tool execution, TTS synthesis).
 
+LLM: Claude Haiku 4.5 via Vertex AI, region europe-west3 (Frankfurt) or "eu" multi-region.
 TTS engine is configurable via TTS_ENGINE env var or tts_engine constructor arg:
   gemini-flash  (DEFAULT) — Gemini 2.5 Flash TTS, 321ms avg, emotion tags, EU-compliant
   gemini-pro               — Gemini 2.5 Pro TTS
@@ -56,6 +57,13 @@ class Tier2RunResult:
     score_dimensions: Optional[Dict[str, float]] = None
 
 
+@dataclass
+class _UsageShim:
+    """Maps Anthropic token counts to the field names read by adk_turn_processor."""
+    prompt_token_count: int
+    candidates_token_count: int
+
+
 class Tier2AudioRunner:
     """
     Phase 2 runner: Full audio round-trip.
@@ -65,7 +73,9 @@ class Tier2AudioRunner:
         self,
         google_project_id: str,
         deepgram_api_key: str,
-        gemini_model: str = "gemini-2.5-flash",
+        gemini_model: str = os.environ.get(
+            "MAIN_LLM_MODEL", "claude-haiku-4-5@20251001"
+        ),
         temperature: float = 0.2,
         tts_engine: str = os.environ.get("TTS_ENGINE", "gemini-flash"),
         cost_tracker: Optional["CostTracker"] = None,
@@ -141,31 +151,21 @@ class Tier2AudioRunner:
                 logger.warning(f"Failed to init AudioInjector: {e}")
         
         # Initialize LLM client ONCE per runner (critical latency optimization)
+        # Uses Anthropic Claude Haiku via Vertex AI, EU region — DSGVO-compliant.
+        # Auth via existing GOOGLE_APPLICATION_CREDENTIALS service account (ADC).
         if self.llm_client is None:
             try:
-                import os
-                from google import genai
-                from google.oauth2 import service_account as _sa
-                
-                project = self.google_project_id
-                region = os.environ.get("GEMINI_REGION", "europe-west4")
-                key_file = os.environ.get(
-                    "GOOGLE_APPLICATION_CREDENTIALS",
-                    "/home/charles2/.ssh/sailly-voice-agent-key.json",
+                from anthropic import AsyncAnthropicVertex
+
+                _region = os.environ.get("VERTEX_LLM_REGION", "eu")
+                self.llm_client = AsyncAnthropicVertex(
+                    project_id=self.google_project_id,
+                    region=_region,
                 )
-                
-                credentials = _sa.Credentials.from_service_account_file(
-                    key_file,
-                    scopes=["https://www.googleapis.com/auth/cloud-platform"],
+                logger.info(
+                    f"[LLM] Initialized Claude Haiku client via Vertex AI "
+                    f"(region={_region}, provider=Vertex/Anthropic, TTS=Vertex/Gemini unchanged)"
                 )
-                
-                self.llm_client = genai.Client(
-                    vertexai=True,
-                    project=project,
-                    location=region,
-                    credentials=credentials,
-                )
-                logger.debug("Initialized Gemini LLM client (will reuse for all turns)")
             except Exception as e:
                 logger.warning(f"Failed to init LLM client: {e}")
         
@@ -553,21 +553,14 @@ Nach [TOOL:create_order] → SOFORT [TOOL:send_sms].
                 error_message=str(e),
             )
 
-    def _build_gemini_contents(self, context: List[Dict], user_message: str):
-        """Build the Gemini contents list from conversation history + new user message."""
-        from google.genai import types as genai_types
-        contents = []
+    def _build_claude_messages(self, context: List[Dict], user_message: str) -> List[Dict]:
+        """Build Anthropic messages list from conversation history + new user message."""
+        messages = []
         for msg in (context or []):
-            role = "user" if msg.get("role") == "user" else "model"
-            contents.append(genai_types.Content(
-                role=role,
-                parts=[genai_types.Part(text=msg.get("content", ""))],
-            ))
-        contents.append(genai_types.Content(
-            role="user",
-            parts=[genai_types.Part(text=user_message)],
-        ))
-        return contents
+            role = "user" if msg.get("role") == "user" else "assistant"
+            messages.append({"role": role, "content": msg.get("content", "")})
+        messages.append({"role": "user", "content": user_message})
+        return messages
 
     async def call_gemini_stream(
         self,
@@ -576,7 +569,7 @@ Nach [TOOL:create_order] → SOFORT [TOOL:send_sms].
         tts_callback=None,  # async (chunk: str) -> None, called per sentence
         node_hint: Optional[str] = None,
     ) -> str:
-        """Stream Gemini 2.5 Flash and push sentence chunks to TTS simultaneously.
+        """Stream Claude Haiku via AWS Bedrock (EU) and push sentence chunks to TTS.
 
         As soon as each sentence completes (boundary = . ! ? or newline) it is
         forwarded to ``tts_callback`` so TTS can start speaking ~300 ms after
@@ -588,13 +581,12 @@ Nach [TOOL:create_order] → SOFORT [TOOL:send_sms].
         The full accumulated text is returned so the caller can perform all
         existing state management and tool parsing unchanged.
 
-        Retry policy: 2 attempts x 500 ms backoff for 429 / RESOURCE_EXHAUSTED.
+        Retry policy: 2 attempts x 500 ms backoff for 429 / throttling errors.
         """
         self._init_clients()
-        from google.genai import types as genai_types
 
         system_prompt = self._active_prompt_override or self._build_tier2_prompt()
-        contents = self._build_gemini_contents(context, user_message)
+        messages = self._build_claude_messages(context, user_message)
         # 512 tokens ≈ 2-3 voice sentences — tuned for voice-first responses
         # (Phase 4 B1). Was 20_000 (over-budget for speech).
         # PR-16c: "---" removed from stop_sequences — it was matching Markdown
@@ -603,12 +595,6 @@ Nach [TOOL:create_order] → SOFORT [TOOL:send_sms].
         # Replaced with "\n---\n" which only matches a standalone HR line, not
         # in-line dashes in item descriptions. Structure guard still active via
         # "\n\nBEKANNTE DATEN:" and "\n\n===".
-        config = genai_types.GenerateContentConfig(
-            system_instruction=system_prompt,
-            temperature=self.temperature,
-            max_output_tokens=512,
-            stop_sequences=["\n---\n", "\n\nBEKANNTE DATEN:", "\n\n==="],
-        )
 
         # Per-node model routing — small/fast model on trivial conversational
         # nodes (greeting/faq/goodbye), default model otherwise.
@@ -628,11 +614,10 @@ Nach [TOOL:create_order] → SOFORT [TOOL:send_sms].
         # TTS API calls (~3 calls → ~2 per turn) without any perceptible latency cost
         # since the caller is already listening to sentence 1.
         _MIN_SUBSEQUENT_CHARS = 120
-        # PR-16c+18: We intentionally never break out of the stream iteration early.
+        # We intentionally never break out of the stream iteration early.
         # Draining the full stream ensures:
         #   (a) full_buf contains the complete LLM response for accurate bot_text DB writes.
-        #   (b) The final chunk carrying usage_metadata (Vertex AI streams it last) is consumed,
-        #       so prompt_tokens_in/out are non-NULL.
+        #   (b) The final usage block is consumed so prompt_tokens_in/out are non-NULL.
         # Barge-in suppression is handled inside tts_callback (brain_service._tts_push),
         # which returns early without pushing audio — the stream keeps running here.
         for attempt in range(2):
@@ -640,61 +625,64 @@ Nach [TOOL:create_order] → SOFORT [TOOL:send_sms].
             sent_buf = ""
             _sent_count = 0
             try:
-                stream = await self.llm_client.aio.models.generate_content_stream(
+                async with self.llm_client.messages.stream(
                     model=active_model,
-                    contents=contents,
-                    config=config,
-                )
-                async for chunk in stream:
-                    # Phase 9 A1 / PR-16c+18: capture usage_metadata from every chunk.
-                    # Vertex AI streaming emits it on the final chunk only.
-                    _um = getattr(chunk, "usage_metadata", None)
-                    if _um is not None:
-                        self._last_stream_usage_metadata = _um
+                    max_tokens=512,
+                    system=system_prompt,
+                    messages=messages,
+                    temperature=self.temperature,
+                    stop_sequences=["\n---\n", "\n\nBEKANNTE DATEN:", "\n\n==="],
+                ) as stream:
+                    async for tok in stream.text_stream:
+                        if not tok:
+                            continue
+                        full_buf += tok
+                        sent_buf += tok
 
-                    tok = getattr(chunk, "text", "") or ""
-                    if not tok:
-                        continue
-                    full_buf += tok
-                    sent_buf += tok
+                        if not _first_chunk_logged:
+                            _first_chunk_logged = True
+                            logger.info(
+                                f"[LAT-STREAM] first_token={(_tm.monotonic()-_start)*1000:.0f}ms"
+                            )
 
-                    if not _first_chunk_logged:
-                        _first_chunk_logged = True
-                        logger.info(
-                            f"[LAT-STREAM] first_token={(_tm.monotonic()-_start)*1000:.0f}ms"
-                        )
+                        # Flush on sentence boundary
+                        if tok[-1] in ".!?\n":
+                            sent_chunk = sent_buf.strip()
+                            # Guard against partial [TOOL: tags split across token boundaries
+                            if sent_chunk and "[TOOL:" not in sent_chunk and "[" not in sent_chunk[-5:] and tts_callback:
+                                # Short exclamatory fragments (<15 chars) such as "Super!" or
+                                # "Prima!" sound robotic when dispatched as isolated TTS clips
+                                # and create a "super, super" looping perception. Merge them
+                                # with the following sentence by keeping them in sent_buf.
+                                _is_short_exclaim = len(sent_chunk) < 15
+                                if _sent_count == 0 and _is_short_exclaim:
+                                    logger.debug(
+                                        f"[STREAM] deferring short exclamation {sent_chunk!r} "
+                                        f"— merging with next sentence"
+                                    )
+                                    # Leave sent_buf intact so the next token appends to it
+                                elif _sent_count == 0 or len(sent_chunk) >= _MIN_SUBSEQUENT_CHARS:
+                                    try:
+                                        await tts_callback(sent_chunk)
+                                    except Exception as _cb_err:
+                                        logger.debug(f"[STREAM] tts_callback error (non-fatal): {_cb_err}")
+                                    sent_buf = ""
+                                    _sent_count += 1
 
-                    # Flush on sentence boundary
-                    if tok[-1] in ".!?\n":
-                        sent_chunk = sent_buf.strip()
-                        # Guard against partial [TOOL: tags split across token boundaries
-                        if sent_chunk and "[TOOL:" not in sent_chunk and "[" not in sent_chunk[-5:] and tts_callback:
-                            # Short exclamatory fragments (<15 chars) such as "Super!" or
-                            # "Prima!" sound robotic when dispatched as isolated TTS clips
-                            # and create a "super, super" looping perception. Merge them
-                            # with the following sentence by keeping them in sent_buf.
-                            _is_short_exclaim = len(sent_chunk) < 15
-                            if _sent_count == 0 and _is_short_exclaim:
-                                logger.debug(
-                                    f"[STREAM] deferring short exclamation {sent_chunk!r} "
-                                    f"— merging with next sentence"
-                                )
-                                # Leave sent_buf intact so the next token appends to it
-                            elif _sent_count == 0 or len(sent_chunk) >= _MIN_SUBSEQUENT_CHARS:
-                                try:
-                                    await tts_callback(sent_chunk)
-                                except Exception as _cb_err:
-                                    logger.debug(f"[STREAM] tts_callback error (non-fatal): {_cb_err}")
-                                sent_buf = ""
-                                _sent_count += 1
+                    # Flush any remaining text (no trailing punctuation, or batched remainder)
+                    if sent_buf.strip() and tts_callback and "[TOOL:" not in sent_buf:
+                        try:
+                            await tts_callback(sent_buf.strip())
+                        except Exception as _cb_err:
+                            logger.debug(f"[STREAM] tts_callback trailing flush error: {_cb_err}")
+                        _sent_count += 1
 
-                # Flush any remaining text (no trailing punctuation, or batched remainder)
-                if sent_buf.strip() and tts_callback and "[TOOL:" not in sent_buf:
-                    try:
-                        await tts_callback(sent_buf.strip())
-                    except Exception as _cb_err:
-                        logger.debug(f"[STREAM] tts_callback trailing flush error: {_cb_err}")
-                    _sent_count += 1
+                    # Capture token usage from the final message
+                    final_msg = await stream.get_final_message()
+                    self._last_stream_usage_metadata = _UsageShim(
+                        prompt_token_count=final_msg.usage.input_tokens,
+                        candidates_token_count=final_msg.usage.output_tokens,
+                    )
 
                 logger.info(
                     f"[LAT-STREAM] stream_done={(_tm.monotonic()-_start)*1000:.0f}ms "
@@ -705,18 +693,18 @@ Nach [TOOL:create_order] → SOFORT [TOOL:send_sms].
             except Exception as inner_e:
                 last_err = inner_e
                 err_str = str(inner_e)
-                if ("429" in err_str or "RESOURCE_EXHAUSTED" in err_str) and attempt == 0:
-                    logger.warning("[STREAM] Gemini 429 attempt 1/2 — backoff 500ms")
+                if ("429" in err_str or "rate_limit" in err_str.lower() or "throttl" in err_str.lower()) and attempt == 0:
+                    logger.warning("[STREAM] Bedrock 429/throttle attempt 1/2 — backoff 500ms")
                     await asyncio.sleep(0.5)
                     continue
-                logger.warning(f"[STREAM] Gemini stream failed attempt {attempt+1}/2: {inner_e}")
+                logger.warning(f"[STREAM] Claude stream failed attempt {attempt+1}/2: {inner_e}")
                 break
 
         if not full_buf:
             if last_err:
                 raise last_err
             # Empty response — fall back to a safe default
-            logger.warning("[STREAM] Empty response from Gemini stream")
+            logger.warning("[STREAM] Empty response from Claude stream")
             return "Wie kann ich Ihnen helfen?"
 
         return full_buf.strip()
@@ -726,7 +714,7 @@ Nach [TOOL:create_order] → SOFORT [TOOL:send_sms].
         user_message: str,
         context: List[Dict],
     ) -> str:
-        """Blocking (non-streaming) Gemini call — kept for validation / training code.
+        """Blocking (non-streaming) Claude call — kept for validation / training code.
 
         Production voice calls use ``call_gemini_stream`` via ADKTurnProcessor.
         """
@@ -734,15 +722,7 @@ Nach [TOOL:create_order] → SOFORT [TOOL:send_sms].
         system_prompt = self._active_prompt_override or self._build_tier2_prompt()
 
         try:
-            from google.genai import types as genai_types
-            contents = self._build_gemini_contents(context, user_message)
-            # 512 tokens for voice-first responses (Phase 4 B1).
-            config = genai_types.GenerateContentConfig(
-                system_instruction=system_prompt,
-                temperature=self.temperature,
-                max_output_tokens=512,
-                stop_sequences=["---", "\n\nBEKANNTE DATEN:", "\n\n==="],
-            )
+            messages = self._build_claude_messages(context, user_message)
 
             last_err = None
             for attempt in range(2):
@@ -750,48 +730,36 @@ Nach [TOOL:create_order] → SOFORT [TOOL:send_sms].
                     import time as _time_mark
                     _llm_start = _time_mark.monotonic()
 
-                    response = await self.llm_client.aio.models.generate_content(
+                    response = await self.llm_client.messages.create(
                         model=self.gemini_model,
-                        contents=contents,
-                        config=config,
+                        max_tokens=512,
+                        system=system_prompt,
+                        messages=messages,
+                        temperature=self.temperature,
+                        stop_sequences=["---", "\n\nBEKANNTE DATEN:", "\n\n==="],
                     )
 
                     _llm_delta = (_time_mark.monotonic() - _llm_start) * 1000
                     logger.info(f"[LAT-2026-04-20] llm_call_start->llm_done={_llm_delta:.0f}ms")
 
                     if self.cost_tracker is not None:
-                        um = getattr(response, "usage_metadata", None)
-                        if um is not None:
-                            pin = getattr(um, "prompt_token_count", None)
-                            if pin is None:
-                                pin = getattr(um, "prompt_tokens", None)
-                            cout = getattr(um, "candidates_token_count", None)
-                            if cout is None:
-                                cout = getattr(um, "candidates_tokens", None)
-                            if cout is None:
-                                tot = getattr(um, "total_token_count", None)
-                                if tot is not None and pin is not None:
-                                    cout = max(0, int(tot) - int(pin))
-                            self.cost_tracker.add_gemini_usage(
-                                prompt_tokens=pin,
-                                candidates_tokens=cout,
-                            )
+                        self.cost_tracker.add_gemini_usage(
+                            prompt_tokens=response.usage.input_tokens,
+                            candidates_tokens=response.usage.output_tokens,
+                        )
 
                     text = ""
-                    if response.candidates:
-                        for part in response.candidates[0].content.parts:
-                            if hasattr(part, "text") and part.text:
-                                text += part.text
-                            if hasattr(part, "function_call") and part.function_call:
-                                text += f"\n[TOOL:{part.function_call.name}]"
+                    for block in response.content:
+                        if hasattr(block, "text") and block.text:
+                            text += block.text
 
                     return text.strip()
 
                 except Exception as inner_e:
                     last_err = inner_e
                     err_str = str(inner_e)
-                    if ("429" in err_str or "RESOURCE_EXHAUSTED" in err_str) and attempt == 0:
-                        logger.warning(f"Gemini 429 attempt 1/2 — backoff 500ms")
+                    if ("429" in err_str or "rate_limit" in err_str.lower() or "throttl" in err_str.lower()) and attempt == 0:
+                        logger.warning(f"Bedrock 429/throttle attempt 1/2 — backoff 500ms")
                         await asyncio.sleep(0.5)
                         continue
                     raise
@@ -799,7 +767,7 @@ Nach [TOOL:create_order] → SOFORT [TOOL:send_sms].
             raise last_err
 
         except Exception as e:
-            logger.warning(f"Gemini API call failed ({e}), using fallback")
+            logger.warning(f"Claude API call failed ({e}), using fallback")
             if "bestellen" in user_message.lower():
                 return "Gerne! Was möchten Sie bestellen?"
             elif "reservieren" in user_message.lower():

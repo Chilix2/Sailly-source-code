@@ -22,10 +22,11 @@ if TYPE_CHECKING:
     from server.brain.conversation_state import ConversationState
 
 # ── Constants ──────────────────────────────────────────────────────────────────
-TURN_CAP_SINGLE = 15   # max turns for single-intent calls
-TURN_CAP_MULTI  = 30   # max turns when ≥2 active intents are in flight
+# Dev mode: all caps are effectively disabled (set high so they never fire).
+TURN_CAP_SINGLE = 999
+TURN_CAP_MULTI  = 999
 
-NO_PROGRESS_TURNS = 8  # trigger after this many turns with no new slot fills
+NO_PROGRESS_TURNS = 999  # disabled in dev mode
 
 JACCARD_THRESHOLD  = 0.8   # similarity above this → stuck loop
 STUCK_LOOP_WINDOW  = 3     # compare last N bot responses

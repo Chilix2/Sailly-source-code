@@ -35,7 +35,7 @@ from server.brain.response_variations import (
 
 logger = logging.getLogger(__name__)
 
-MAX_TURNS   = 28   # Demo Training Loop global cap (was 35)
+MAX_TURNS   = 999  # Dev mode: no cap
 # Soft minimum — effective_min in adk_runner drops to 2 after booking/reservation completes.
 # Min 6 keeps conversations realistic without forcing turns unnecessarily.
 MIN_TURNS_BY_PHASE = {1: 6, 2: 6, 3: 6, 4: 6}

@@ -31,3 +31,7 @@ node_modules/
 *.deploy_bak
 *_backup_*
 .local/backups/
+
+# Local key material (never commit)
+scripts/gsm-aws-bedrock-templates/*.value
+**/BedrockAPIKey*.csv

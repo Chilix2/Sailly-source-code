@@ -12,6 +12,7 @@ Server  -> Browser (text)    JSON event:
 """
 
 import json
+from typing import Callable, Optional
 
 from loguru import logger
 from pipecat.frames.frames import (
@@ -30,6 +31,16 @@ _chunk_count = 0
 
 
 class BrowserFrameSerializer(FrameSerializer):
+    """Serializer with optional audio capture callback.
+
+    on_audio_bytes (optional): called synchronously for every incoming binary
+    WebSocket message (raw PCM16 from browser), before the frame enters the
+    Pipecat pipeline queue.  This is the race-free capture point for caller
+    audio recording.
+    """
+
+    def __init__(self, on_audio_bytes: Optional[Callable[[bytes], None]] = None):
+        self._on_audio_bytes = on_audio_bytes
 
     async def serialize(self, frame: Frame) -> str | bytes | None:
         if isinstance(frame, OutputAudioRawFrame):
@@ -57,7 +68,12 @@ class BrowserFrameSerializer(FrameSerializer):
             _chunk_count += 1
             if _chunk_count % 500 == 1:
                 logger.debug(f"[BROWSER-AUDIO] chunk #{_chunk_count}: {len(audio_data)} bytes raw PCM16")
-
+            # Synchronous capture — before any pipeline queue
+            if self._on_audio_bytes:
+                try:
+                    self._on_audio_bytes(audio_data)
+                except Exception:
+                    pass
             return InputAudioRawFrame(
                 audio=audio_data,
                 sample_rate=BROWSER_INPUT_SAMPLE_RATE,

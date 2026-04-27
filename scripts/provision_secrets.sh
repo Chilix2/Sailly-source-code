@@ -31,6 +31,8 @@ declare -a SECRETS=(
   "slack-alerts-webhook"
   "postgres-password"
   "redis-password"
+  "aws-access-key-id"
+  "aws-secret-access-key"
 )
 
 for name in "${SECRETS[@]}"; do

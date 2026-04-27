@@ -413,20 +413,19 @@ if os.path.exists("frontend"):
 
 
 async def _preflight_model_availability():
-    """Verify every configured Gemini model actually responds before accepting calls.
+    """Verify Claude Haiku on Vertex AI (EU) responds before accepting calls.
 
-    Fails LOUD at boot rather than silently 404-ing on every production call.
-    Prevents gemini-2.0-flash-class regressions where a deprecated model gets
-    deployed without anyone noticing until callers start experiencing failures.
+    Fails LOUD at boot rather than silently erroring on every production call.
+    Uses Vertex AI with europe-west3 (Frankfurt) or "eu" multi-region endpoint.
+    Auth via existing GOOGLE_APPLICATION_CREDENTIALS service account — no AWS keys.
     """
-    import google.auth
-    import google.auth.transport.requests
-    from google import genai as _genai
+    from anthropic import AsyncAnthropicVertex
 
-    _project = os.environ.get("GOOGLE_CLOUD_PROJECT", "")
-    _region = os.environ.get("GEMINI_REGION", "europe-west4")
-    _slot_model = os.environ.get("SLOT_EXTRACTOR_MODEL", "gemini-2.5-flash-lite")
-    _main_model = os.environ.get("MAIN_LLM_MODEL", "gemini-2.5-flash")
+    _vertex_region = os.environ.get("VERTEX_LLM_REGION", "eu")
+    _gcp_project = os.environ.get("GCP_PROJECT_ID") or os.environ.get("GOOGLE_CLOUD_PROJECT", "")
+    _default_model = "claude-haiku-4-5@20251001"
+    _slot_model = os.environ.get("SLOT_EXTRACTOR_MODEL", _default_model)
+    _main_model = os.environ.get("MAIN_LLM_MODEL", _default_model)
 
     models_to_check = [
         ("slot_extractor", _slot_model),
@@ -434,36 +433,36 @@ async def _preflight_model_availability():
     ]
 
     try:
-        _creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
-        _client = _genai.Client(
-            vertexai=True,
-            project=_project,
-            location=_region,
-            credentials=_creds,
+        _client = AsyncAnthropicVertex(
+            project_id=_gcp_project,
+            region=_vertex_region,
         )
     except Exception as e:
-        logger.warning(f"[PREFLIGHT] Could not init Gemini client for preflight: {e} — skipping")
+        logger.warning(f"[PREFLIGHT] Could not init Vertex AI Claude client: {e} — skipping")
         return
 
     failures = []
     for name, model_id in models_to_check:
         try:
-            from google.genai import types as _gt
-            resp = await _client.aio.models.generate_content(
+            resp = await _client.messages.create(
                 model=model_id,
-                contents="ping",
-                config=_gt.GenerateContentConfig(max_output_tokens=1, temperature=0.0),
+                max_tokens=1,
+                messages=[{"role": "user", "content": "ping"}],
+                temperature=0.0,
             )
             _ = resp  # success
-            logger.info(f"[PREFLIGHT] {name} ({model_id}) — OK")
+            logger.info(
+                f"[PREFLIGHT] {name} (vertex:{model_id} region={_vertex_region}) — OK"
+                f"  [LLM=Vertex/Claude TTS=Vertex/Gemini]"
+            )
         except Exception as e:
             failures.append((name, model_id, str(e)))
-            logger.error(f"[PREFLIGHT] {name} ({model_id}) — FAILED: {e}")
+            logger.error(f"[PREFLIGHT] {name} (vertex:{model_id}) — FAILED: {e}")
 
     if failures:
         raise RuntimeError(
             f"[PREFLIGHT] {len(failures)} model(s) unavailable at boot: {failures}. "
-            "Fix model config before deploying."
+            "Fix MAIN_LLM_MODEL / GCP_PROJECT_ID / VERTEX_LLM_REGION before deploying."
         )
 
 
@@ -557,11 +556,27 @@ async def websocket_demo(websocket: WebSocket):
             await websocket.send_json({"error": "Server config error: Deepgram key missing"})
             return
 
+        # Build call_sid early so it can be passed to audio recorder before transport.
+        import uuid as _uuid
+        _early_call_sid = f"demo-{_uuid.uuid4().hex[:12]}"
+
+        # Caller audio recorder — callback is wired into the serializer so every
+        # raw WebSocket binary message is captured synchronously before it enters
+        # the Pipecat pipeline queue (race-free).
+        from server.audio_recorder import CallerAudioRecorder as _CallerRecorderClass
+        _early_caller_recorder = _CallerRecorderClass(
+            call_sid=_early_call_sid,
+            credentials_path=os.environ.get(
+                "GOOGLE_APPLICATION_CREDENTIALS",
+                "/home/charles2/.ssh/sailly-voice-agent-key.json",
+            ),
+        )
+
         # Transport — NO VAD here; VAD lives on the context aggregator per Pipecat 0.0.108 API
         transport = FastAPIWebsocketTransport(
             websocket=websocket,
             params=FastAPIWebsocketParams(
-                serializer=BrowserFrameSerializer(),
+                serializer=BrowserFrameSerializer(on_audio_bytes=_early_caller_recorder.on_audio),
                 audio_in_enabled=True,
                 audio_out_enabled=True,
             ),
@@ -587,7 +602,7 @@ async def websocket_demo(websocket: WebSocket):
         )
         from server.brain.stt.deepgram_client import build_stt_settings, get_stt_endpoint
         _dg_settings_kwargs: dict = build_stt_settings(_tc) if _tc is not None else dict(
-            model="nova-3", language=_stt_lang, endpointing=700,
+            model="nova-3", language=_stt_lang, endpointing=1200,
             interim_results=True, punctuate=True, smart_format=True,
         )
         if _stt_keywords:
@@ -600,6 +615,8 @@ async def websocket_demo(websocket: WebSocket):
         logger.info(f"[DEMO] STT service created (model={_dg_settings_kwargs.get('model')}, endpoint={_stt_endpoint or 'default'})")
 
         brain = BrowserBrainService(tenant_id=tenant_id)
+        # Sync the early caller recorder to use the brain's actual call_sid
+        _early_caller_recorder._call_sid = brain.call_sid
         logger.info("[DEMO] Brain service created")
 
         # Send session init with call_sid to browser (for harness correlation)
@@ -670,6 +687,28 @@ async def websocket_demo(websocket: WebSocket):
             )
         )
 
+        # Audio recording — both sides captured, combined into stereo WAV at call end
+        from server.audio_recorder import AgentAudioCapture
+
+        async def _persist_audio_url(column: str, url: str):
+            try:
+                import asyncpg
+                db_url = os.environ.get("DATABASE_URL")
+                if db_url:
+                    conn = await asyncpg.connect(db_url)
+                    try:
+                        await conn.execute(
+                            f"UPDATE google_calls SET {column}=$1 WHERE call_sid=$2",
+                            url, brain.call_sid,
+                        )
+                    finally:
+                        await conn.close()
+            except Exception as e:
+                logger.warning(f"[AudioRecorder] DB update {column} failed: {e}")
+
+        caller_recorder = _early_caller_recorder   # already collecting audio via serializer
+        agent_audio_recorder = AgentAudioCapture()
+
         pipeline = Pipeline(
             [
                 transport.input(),
@@ -684,6 +723,7 @@ async def websocket_demo(websocket: WebSocket):
                 tts,
                 tts_timing,             # Phase 9 A1: stamp tts_first_byte_at on first audio chunk
                 tts_watchdog,           # alert + ErrorFrame if TTS stream dies mid-sentence
+                agent_audio_recorder,   # buffer agent PCM16 → GCS on end
                 transport.output(),
                 context_aggregator.assistant(),
             ]
@@ -727,12 +767,36 @@ async def websocket_demo(websocket: WebSocket):
             pass
     finally:
         _active_ws_connections.discard(conn_id)
+        # Upload audio files (runs concurrently while brain persists to DB below)
+        _combined_url: str | None = None
+        _agent_url:    str | None = None
+        try:
+            from server.audio_recorder import finalize_all as _finalize_audio
+            _combined_url, _agent_url = await _finalize_audio(
+                call_sid=brain.call_sid if brain else _early_call_sid,
+                credentials_path=os.environ.get(
+                    "GOOGLE_APPLICATION_CREDENTIALS",
+                    "/home/charles2/.ssh/sailly-voice-agent-key.json",
+                ),
+                caller_recorder=_early_caller_recorder,
+                agent_capture=agent_audio_recorder,
+            )
+        except Exception as rec_err:
+            logger.warning(f"[DEMO] Audio finalize error: {rec_err}")
         if brain is not None:
             try:
                 await brain._finalize_session("client_disconnect")
                 logger.info("[DEMO] Session finalized")
             except Exception as fin_err:
                 logger.warning(f"[DEMO] Session finalize error: {fin_err}")
+        # Persist audio URLs after brain has written the call row to DB
+        try:
+            if _combined_url:
+                await _persist_audio_url("caller_audio_url", _combined_url)
+            if _agent_url:
+                await _persist_audio_url("agent_audio_url", _agent_url)
+        except Exception as url_err:
+            logger.warning(f"[DEMO] Audio URL persist error: {url_err}")
             # Capture low-quality calls as production failure scenarios for the validation heal loop
             try:
                 _capture_production_failure_if_needed(brain, conn_id)

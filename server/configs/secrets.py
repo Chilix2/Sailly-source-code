@@ -108,6 +108,8 @@ def get_secret(name: str, default: str | None = None) -> str:
     return value
 
 
+
+
 def clear_cache() -> None:
     """Clear the in-memory secret cache.  Use in tests."""
     _cache.clear()

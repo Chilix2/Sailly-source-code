@@ -629,6 +629,11 @@ class BrowserBrainService(FrameProcessor):
                     except Exception:
                         pass
 
+                    try:
+                        from server.brain.layer1.persist import build_turn_metrics_extra as _build_turn_metrics_extra
+                    except Exception:
+                        _build_turn_metrics_extra = lambda _s: {}  # noqa: E731
+
                     self._turn_metrics.append({
                         "turn_number": self._turn_counter,
                         "user_text": user_text,

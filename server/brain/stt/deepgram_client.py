@@ -12,7 +12,7 @@ from typing import Any, Dict, Optional
 
 _DEFAULTS: Dict[str, Any] = {
     "model": "nova-3",
-    "endpointing": 700,
+    "endpointing": 1200,
     "interim_results": True,
     "punctuate": True,
     "smart_format": False,

@@ -1,5 +1,5 @@
 """
-SlotExtractor — per-utterance entity extraction via Gemini Flash JSON mode.
+SlotExtractor — per-utterance entity extraction via Claude Haiku (Vertex AI, EU).
 
 Runs on EVERY user utterance (turn 1 onwards), regardless of conversation node.
 Results are typed CapturedIntent objects merged into ConversationState.captured_intents.
@@ -162,10 +162,25 @@ Anruferäußerung:
 """
 
 
-class SlotExtractor:
-    """Mini LLM call that extracts slots from one utterance."""
+class _UsageShim:
+    """Maps Anthropic token counts to the field names read by adk_turn_processor."""
+    __slots__ = ("prompt_token_count", "candidates_token_count")
 
-    def __init__(self, gemini_client, model: str = "gemini-2.5-flash-lite"):
+    def __init__(self, input_tokens: int, output_tokens: int) -> None:
+        self.prompt_token_count = input_tokens
+        self.candidates_token_count = output_tokens
+
+
+_EXTRACTOR_SYSTEM = (
+    "Du bist ein präziser JSON-Extraktor. "
+    "Antworte ausschließlich mit validem JSON, ohne Erklärungen oder Markdown-Fences."
+)
+
+
+class SlotExtractor:
+    """Mini LLM call that extracts slots from one utterance via Claude Haiku (Vertex AI, EU)."""
+
+    def __init__(self, gemini_client, model: str = "claude-haiku-4-5@20251001"):
         self._client = gemini_client
         self._model = model
         # Phase 9 A1: last usage_metadata from generate_content call.
@@ -181,26 +196,23 @@ class SlotExtractor:
         if not utterance or not utterance.strip():
             return {}
         try:
-            from google.genai import types as genai_types  # type: ignore
-
             response = await asyncio.wait_for(
-                self._client.aio.models.generate_content(
+                self._client.messages.create(
                     model=self._model,
-                    contents=[_SLOT_EXTRACTION_PROMPT + utterance.strip()],
-                    config=genai_types.GenerateContentConfig(
-                        temperature=0.0,
-                        max_output_tokens=EXTRACTOR_MAX_TOKENS,
-                        response_mime_type="application/json",
-                    ),
+                    max_tokens=EXTRACTOR_MAX_TOKENS,
+                    system=_EXTRACTOR_SYSTEM,
+                    messages=[{"role": "user", "content": _SLOT_EXTRACTION_PROMPT + utterance.strip()}],
+                    temperature=0.0,
                 ),
                 timeout=timeout_s,
             )
             # Phase 9 A1: stash usage_metadata before touching response text
-            _um = getattr(response, "usage_metadata", None)
-            if _um is not None:
-                self._last_usage_metadata = _um
+            self._last_usage_metadata = _UsageShim(
+                input_tokens=response.usage.input_tokens,
+                output_tokens=response.usage.output_tokens,
+            )
 
-            text = (getattr(response, "text", None) or "{}").strip()
+            text = (response.content[0].text if response.content else "{}").strip()
             # Strip any accidental markdown fences the model may emit
             if text.startswith("```"):
                 text = text.split("```")[1].lstrip("json").strip()
@@ -229,26 +241,23 @@ class SlotExtractor:
         if not utterance or not utterance.strip():
             return {}
         try:
-            from google.genai import types as genai_types  # type: ignore
-
             response = await asyncio.wait_for(
-                self._client.aio.models.generate_content(
+                self._client.messages.create(
                     model=self._model,
-                    contents=[_MULTI_INTENT_PROMPT + utterance.strip()],
-                    config=genai_types.GenerateContentConfig(
-                        temperature=0.0,
-                        max_output_tokens=EXTRACTOR_MAX_TOKENS,
-                        response_mime_type="application/json",
-                    ),
+                    max_tokens=EXTRACTOR_MAX_TOKENS,
+                    system=_EXTRACTOR_SYSTEM,
+                    messages=[{"role": "user", "content": _MULTI_INTENT_PROMPT + utterance.strip()}],
+                    temperature=0.0,
                 ),
                 timeout=timeout_s,
             )
             # Phase 9 A1: stash usage_metadata before touching response text
-            _um = getattr(response, "usage_metadata", None)
-            if _um is not None:
-                self._last_usage_metadata = _um
+            self._last_usage_metadata = _UsageShim(
+                input_tokens=response.usage.input_tokens,
+                output_tokens=response.usage.output_tokens,
+            )
 
-            text = (getattr(response, "text", None) or "{}").strip()
+            text = (response.content[0].text if response.content else "{}").strip()
             if text.startswith("```"):
                 text = text.split("```")[1].lstrip("json").strip()
             parsed = json.loads(text)

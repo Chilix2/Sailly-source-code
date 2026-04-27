@@ -345,10 +345,10 @@ class ADKTurnProcessor:
         }
 
     def _get_gemini_runner(self):
-        """Lazy-initialize Tier2AudioRunner for LLM calls only."""
+        """Lazy-initialize Tier2AudioRunner for LLM + TTS calls."""
         if self._gemini_runner is None:
             from server.brain.tier2_runner import Tier2AudioRunner
-            # Match server/main.py: GOOGLE_CLOUD_PROJECT is the canonical Vertex project id.
+            # GOOGLE_CLOUD_PROJECT still needed for Google Cloud TTS.
             project_id = (
                 os.environ.get("GOOGLE_CLOUD_PROJECT")
                 or os.environ.get("GOOGLE_PROJECT_ID")
@@ -365,7 +365,7 @@ class ADKTurnProcessor:
             try:
                 self._gemini_runner._init_clients()
             except Exception as e:
-                logger.warning(f"[ADKTurn] Gemini runner pre-init failed (will retry on first turn): {e}")
+                logger.warning(f"[ADKTurn] Bedrock runner pre-init failed (will retry on first turn): {e}")
         return self._gemini_runner
 
     async def _execute_tool_for_registry(
@@ -964,7 +964,7 @@ class ADKTurnProcessor:
                 runner = self._get_gemini_runner()
                 self._slot_extractor = SlotExtractor(
                     gemini_client=runner.llm_client,
-                    model=os.environ.get("SLOT_EXTRACTOR_MODEL", "gemini-2.5-flash-lite"),
+                    model=os.environ.get("SLOT_EXTRACTOR_MODEL", "claude-haiku-4-5@20251001"),
                 )
             except Exception as _se_init_err:
                 logger.warning(f"[SlotExtractor] init failed (non-fatal): {_se_init_err}")
@@ -1897,7 +1897,7 @@ class ADKTurnProcessor:
                 and not self.state.order_created
                 and not (self.state.address_confirmed and self.state.phone_confirmed)
             )
-            _loop_escape_threshold = 12 if _collecting_critical_slot else 8
+            _loop_escape_threshold = 999  # dev mode: loop escape disabled
             if (
                 self.node_mgr._turns_in_node >= _loop_escape_threshold
                 and not _COMMIT_TOOLS.intersection(set(turn_tools))

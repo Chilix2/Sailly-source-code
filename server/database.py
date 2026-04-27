@@ -674,20 +674,28 @@ async def persist_call_aggregates(call_sid: str) -> None:
                 4,
             )
 
+            turn_count_row = await conn.fetchrow(
+                "SELECT COUNT(*)::int AS n FROM google_turn_metrics WHERE call_sid = $1",
+                call_sid,
+            )
+            total_turns = int((turn_count_row or {}).get("n") or 0)
+
             await conn.execute("""
                 UPDATE google_calls SET
-                    avg_latency_ms = COALESCE($2, avg_latency_ms),
-                    p50_latency_ms = COALESCE($3, p50_latency_ms),
-                    p95_latency_ms = COALESCE($4, p95_latency_ms),
-                    max_latency_ms = COALESCE($5, max_latency_ms),
-                    total_dead_air_ms = COALESCE($6, total_dead_air_ms),
-                    slot_extractor_success_rate = COALESCE($7, slot_extractor_success_rate),
-                    validation_registry_invocations = COALESCE($8, validation_registry_invocations),
-                    loop_incidents = COALESCE($9, loop_incidents),
-                    cost_cents = COALESCE($10, cost_cents)
+                    total_turns = $2,
+                    avg_latency_ms = COALESCE($3, avg_latency_ms),
+                    p50_latency_ms = COALESCE($4, p50_latency_ms),
+                    p95_latency_ms = COALESCE($5, p95_latency_ms),
+                    max_latency_ms = COALESCE($6, max_latency_ms),
+                    total_dead_air_ms = COALESCE($7, total_dead_air_ms),
+                    slot_extractor_success_rate = COALESCE($8, slot_extractor_success_rate),
+                    validation_registry_invocations = COALESCE($9, validation_registry_invocations),
+                    loop_incidents = COALESCE($10, loop_incidents),
+                    cost_cents = COALESCE($11, cost_cents)
                 WHERE call_sid = $1
             """,
                 call_sid,
+                total_turns,
                 aggregates["avg_latency_ms"],
                 aggregates["p50_latency_ms"],
                 aggregates["p95_latency_ms"],
