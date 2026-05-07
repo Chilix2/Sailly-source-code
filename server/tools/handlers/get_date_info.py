@@ -36,10 +36,7 @@ async def handle(args: dict, ctx: ToolContext) -> ToolResult:
         date_result = await _legacy(args, ctx.call_sid, ctx.tenant_id)
     except ImportError:
         from datetime import datetime, date
-        import pytz
-        # Use Berlin timezone (restaurant location) for date resolution
-        tz_berlin = pytz.timezone("Europe/Berlin")
-        today = datetime.now(tz_berlin).date()
+        today = date.today()
         date_result = {
             "date": today.isoformat(),
             "weekday": today.strftime("%A"),
