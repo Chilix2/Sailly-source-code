@@ -715,13 +715,40 @@ async def process_turn_v4(
     scheduled_run = list(tool_results.keys()) if tool_results else []
 
     # ── Menu FAQ direct YAML lookup ───────────────────────────────────────────
-    # If user is asking about the menu, always refresh the ordering-guard flag
-    # (not just on first injection) and track consecutive FAQ turns for escalation.
+    # Always inject menu_data when in business_info mode.  This covers:
+    #  • direct menu FAQ turns (_is_menu_question)
+    #  • ordering-override turns (_menu_faq_override_active)
+    #  • combined Bibimbap+reservation queries that land on business_info via override
+    # Without this, alternating FAQ/ordering/reservation turns leave menu_data absent
+    # from ctx_doc, causing the grounding gate to reject "Speisekarte" mentions.
+    _menu_data_loaded = False
+    if profile == "business_info" and "menu_data" not in ctx_doc.resolved_entities:
+        try:
+            import yaml as _yaml
+            import pathlib as _pathlib
+            _faq_yaml = _pathlib.Path(__file__).parent.parent.parent / "configs" / "tenants" / f"{tenant_id}.yaml"
+            with open(_faq_yaml) as _yf:
+                _raw_cfg = _yaml.safe_load(_yf)
+            _faqs = _raw_cfg.get("faqs", [])
+            _menu_kw_set = {"gerichte", "speisekarte", "menu", "menü", "essen", "angebot", "korean", "koreanisch"}
+            for _faq_entry in _faqs:
+                _entry_kws = {str(k).lower() for k in _faq_entry.get("keywords", [])}
+                if _entry_kws & _menu_kw_set:
+                    _faq_answer = _faq_entry.get("answer", "")
+                    if _faq_answer:
+                        ctx_doc.resolved_entities["menu_data"] = _faq_answer
+                        _menu_data_loaded = True
+                        logger.debug("[v4_pipeline] FAQ menu injected: %s", _faq_answer[:80])
+                        break
+        except Exception as _e:
+            logger.debug("[v4_pipeline] FAQ YAML lookup failed (non-fatal): %s", _e)
+
+    # ── Menu FAQ flag / consecutive counter ───────────────────────────────────
+    # Track ordering-guard flag and escalation streak separately from injection.
     if _is_menu_question or _menu_faq_override_active:
-        # Only re-arm the flag for the NEXT turn when we're actually answering a
-        # genuine menu FAQ.  The override-only case (ordering suppressed this turn)
-        # must NOT re-arm the flag — otherwise the caller can never proceed to order
-        # after a menu inquiry (permanent lock).
+        # Re-arm the flag only on genuine FAQ turns, not on override-only turns,
+        # so the caller can proceed to order after one FAQ redirect without being
+        # permanently stuck in the menu FAQ guard.
         if _is_menu_question:
             state.last_turn_was_menu_faq = True
         _menu_faq_consec = getattr(state, "menu_faq_consecutive", 0) + 1
@@ -744,30 +771,6 @@ async def process_turn_v4(
                 _esc_text, profile, intent_result, t0,
                 tools=["transfer_to_human"], next_action="escalate", should_end=True,
             )
-        # Inject menu_data whenever we're in business_info mode — covers both the
-        # direct FAQ case (_is_menu_question) and the override case where an ordering
-        # turn was suppressed.  Without this, alternating ordering/FAQ turns leave
-        # menu_data absent, causing the grounding gate to reject responses.
-        if profile == "business_info" and "menu_data" not in ctx_doc.resolved_entities:
-            try:
-                import yaml as _yaml
-                import pathlib as _pathlib
-                _faq_yaml = _pathlib.Path(__file__).parent.parent.parent / "configs" / "tenants" / f"{tenant_id}.yaml"
-                with open(_faq_yaml) as _yf:
-                    _raw_cfg = _yaml.safe_load(_yf)
-                _faqs = _raw_cfg.get("faqs", [])
-                # Find the first FAQ entry whose keywords mention menu/food topics
-                _menu_kw_set = {"gerichte", "speisekarte", "menu", "menü", "essen", "angebot", "korean", "koreanisch"}
-                for _faq_entry in _faqs:
-                    _entry_kws = {str(k).lower() for k in _faq_entry.get("keywords", [])}
-                    if _entry_kws & _menu_kw_set:  # intersection
-                        _faq_answer = _faq_entry.get("answer", "")
-                        if _faq_answer:
-                            ctx_doc.resolved_entities["menu_data"] = _faq_answer
-                            logger.debug("[v4_pipeline] FAQ menu injected: %s", _faq_answer[:80])
-                            break
-            except Exception as _e:
-                logger.debug("[v4_pipeline] FAQ YAML lookup failed (non-fatal): %s", _e)
     else:
         state.menu_faq_consecutive = 0  # reset streak when caller moves to a different topic
 
