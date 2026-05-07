@@ -94,8 +94,8 @@ _FAQ_RE = re.compile(
     r"\b(öffnungszeit|geöffnet|geschlossen|adresse|wo (ist|seid|sind|liegt)|"
     r"parken|parkplatz|telefon|nummer|preis|kostet|wetter|"
     r"anfahrt|wie komm|weg|"
-    r"gerichte?|speise(karte)?|menü|menu|empfehl|was (gibt|haben|bieten)|"
-    r"essen\s*(hier|bei|von)|das gericht|was kostet)\b",
+    r"gerichte?|speise(karte)?|menü|menu|empfehl|was (gibt|haben|habt|bieten)|"
+    r"was\s+habt|essen\s*(hier|bei|von)|das gericht|was kostet)\b",
     re.I,
 )
 _ESCALATION_RE = re.compile(
