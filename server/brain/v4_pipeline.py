@@ -744,7 +744,11 @@ async def process_turn_v4(
                 _esc_text, profile, intent_result, t0,
                 tools=["transfer_to_human"], next_action="escalate", should_end=True,
             )
-        if _is_menu_question and "menu_data" not in ctx_doc.resolved_entities:
+        # Inject menu_data whenever we're in business_info mode — covers both the
+        # direct FAQ case (_is_menu_question) and the override case where an ordering
+        # turn was suppressed.  Without this, alternating ordering/FAQ turns leave
+        # menu_data absent, causing the grounding gate to reject responses.
+        if profile == "business_info" and "menu_data" not in ctx_doc.resolved_entities:
             try:
                 import yaml as _yaml
                 import pathlib as _pathlib
