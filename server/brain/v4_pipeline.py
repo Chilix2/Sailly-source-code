@@ -633,8 +633,8 @@ async def process_turn_v4(
     if tool_results is None:
         tool_results = {}
     _text_lo = user_text.lower()
-    if profile == "business_info" and "get_date_info" not in tool_results:
-        if any(w in _text_lo for w in ("öffnungszeit", "geöffnet", "wann", "uhrzeit", "offen")):
+    _is_hours_question = any(w in _text_lo for w in ("öffnungszeit", "geöffnet", "wann", "uhrzeit", "offen", "aufmachen", "zumachen"))
+    if _is_hours_question and "get_date_info" not in tool_results:
             try:
                 from tools.executor import execute_tool as _et
                 _date_res = await _et("get_date_info", {"date": "heute"}, call_sid, tenant_id)
