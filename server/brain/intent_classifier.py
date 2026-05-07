@@ -266,6 +266,12 @@ def classify(text: str, turn_idx: int = 0) -> IntentResult:
         # "Was kostet das Bulgogi?" into order-slot-filling
         intent = IntentKind.FAQ
         confidence = 0.85
+    elif _FAQ_RE.search(lower):
+        # FAQ takes priority over ORDER: "Was habt ihr zum bestellen?" is a menu
+        # inquiry, not an actual order. Pure ordering ("Ich möchte Bibimbap bestellen")
+        # won't match _FAQ_RE so the ORDER branch below handles those correctly.
+        intent = IntentKind.FAQ
+        confidence = 0.80
     elif _ORDER_RE.search(lower):
         intent = IntentKind.TAKEAWAY
         confidence = 0.85
@@ -280,9 +286,6 @@ def classify(text: str, turn_idx: int = 0) -> IntentResult:
         else:
             intent = IntentKind.COMPLAINT
         confidence = 0.82
-    elif _FAQ_RE.search(lower):
-        intent = IntentKind.FAQ
-        confidence = 0.80
     elif _GREETING_RE.match(lower) and turn_idx <= 1:
         intent = IntentKind.GREETING
         confidence = 0.90

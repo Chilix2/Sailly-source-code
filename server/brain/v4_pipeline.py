@@ -343,7 +343,15 @@ async def process_turn_v4(
         intent_result = classify(user_text, turn_idx)
     profile = intent_result.worker_profile
     turn_type = intent_result.turn_type
-    
+
+    # Prevent false ordering transition immediately after a menu FAQ answer.
+    # When last turn was a menu FAQ response, the caller often mentions food
+    # words in their acknowledgement, which the classifier may read as ordering.
+    if getattr(state, "last_turn_was_menu_faq", False) and profile in ("order_start", "ordering"):
+        logger.debug("[v4_pipeline] menu FAQ context: overriding %s → business_info", profile)
+        profile = "business_info"
+    state.last_turn_was_menu_faq = False  # reset each turn, set again if menu FAQ fires
+
     # Fix 7: Track unclear/greeting turns for timeout counter + detect repeated responses.
     # Only count turns where the turn_type is truly UNCLEAR (not just UNKNOWN intent —
     # UNKNOWN with ADD_INFORMATION is a valid slot-filling turn, not unclear).
@@ -634,7 +642,11 @@ async def process_turn_v4(
         tool_results = {}
     _text_lo = user_text.lower()
     _is_hours_question = any(w in _text_lo for w in ("öffnungszeit", "geöffnet", "wann", "uhrzeit", "offen", "aufmachen", "zumachen"))
-    _is_menu_question = any(w in _text_lo for w in ("speisekarte", "menü", "menu", "gericht", "was habt", "was haben", "was gibt", "was bietet", "was bieten", "koreanisch", "angebot"))
+    # Menu FAQ: fire when intent is FAQ/dietary and profile is business_info
+    _is_menu_question = (
+        profile == "business_info"
+        and intent_result.intent in (IntentKind.FAQ, IntentKind.DIETARY_INQUIRY)
+    )
     if _is_hours_question and "get_date_info" not in tool_results:
             try:
                 from tools.executor import execute_tool as _et
@@ -711,12 +723,15 @@ async def process_turn_v4(
             with open(_faq_yaml) as _yf:
                 _raw_cfg = _yaml.safe_load(_yf)
             _faqs = _raw_cfg.get("faqs", [])
+            # Find the first FAQ entry whose keywords mention menu/food topics
+            _menu_kw_set = {"gerichte", "speisekarte", "menu", "menü", "essen", "angebot", "korean", "koreanisch"}
             for _faq_entry in _faqs:
-                _kws = [str(k).lower() for k in _faq_entry.get("keywords", [])]
-                if any(k in _text_lo for k in _kws):
+                _entry_kws = {str(k).lower() for k in _faq_entry.get("keywords", [])}
+                if _entry_kws & _menu_kw_set:  # intersection
                     _faq_answer = _faq_entry.get("answer", "")
                     if _faq_answer:
                         ctx_doc.resolved_entities["menu_data"] = _faq_answer
+                        state.last_turn_was_menu_faq = True
                         logger.debug("[v4_pipeline] FAQ menu injected: %s", _faq_answer[:80])
                         break
         except Exception as _e:
