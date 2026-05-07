@@ -1,0 +1,277 @@
+"""
+server/brain/tiny_generator.py — Stage 6: Tiny Generator (Phase 5.3).
+
+Haiku 4.5, ~280 token cached prompt, inner monologue technique.
+
+The generator outputs a two-step response in one call:
+    1. Silent JSON: key_facts, ask_for, tone (forces the model to commit to
+       facts before writing prose — reduces hallucination)
+    2. <spoken> block: 1–2 German sentences
+
+Only the <spoken> block reaches TTS. The JSON is logged for observability.
+
+must_not_mention is NOT in the prompt — enforced by Stage 7 Sanitiser (code).
+"""
+from __future__ import annotations
+
+import json
+import logging
+import re
+import time
+from typing import Optional
+
+from server.brain.context_doc_builder import ContextDocument
+
+logger = logging.getLogger(__name__)
+
+# ── Sanitiser regex ─────────────────────────────────────────────────────────────
+
+_SPOKEN_RE = re.compile(r"<spoken>(.*?)</spoken>", re.DOTALL)
+_JSON_RE = re.compile(r"```json\s*(.*?)\s*```", re.DOTALL)
+_FALLBACK_RESPONSE = "Was darf ich für Sie tun?"
+
+# Terms that must never appear in spoken output (enforced by code, not prompt)
+_MUST_NOT_MENTION: dict[str, list[str]] = {
+    # SMS removed from all LLM output in Phase 7
+    # For now, guard against legacy slip-through
+    "sms_outside_node": ["per sms", "eine sms", "sms schicken", "sms bestätigung"],
+}
+
+# Topic → required entity key mapping for the fact-grounding gate.
+# If the spoken text mentions a topic word but the matching entity is NOT in
+# resolved_entities, the answer is rejected (the model fabricated a fact that
+# no tool produced). Pattern is a regex tested against the spoken sentence.
+_TOPIC_REQUIRES_ENTITY: dict[str, str] = {
+    r"wetter|temperatur|grad celsius|sonnig|bewölkt|bewoelkt|regnet": "weather_temp",
+    r"speisekarte|menü\b|menue\b|auf der karte":                       "menu_data",
+    r"öffnungszeit|geöffnet|geschlossen":                              "today_date",
+    # Guard against hallucinated reservation confirmations
+    r"reserviert|reservierung\s*(ist\s+)?bestätigt|reservierung\s*(ist\s+)?bestaetigt|tisch\s*(ist\s+)?gebucht|haben\s+reserviert": "reservation_confirmed",
+    # Guard against hallucinated order confirmations
+    r"bestellung.*aufgenommen|bestellung.*notiert|habe.*bestellt|ihre.*bestellung|order.*confirmed|order.*placed": "order_confirmed",
+}
+
+
+def _grounding_gate(spoken: str, ctx: ContextDocument) -> tuple[str, bool]:
+    """Reject spoken text that asserts facts not present in resolved_entities.
+
+    Returns (text, grounded). On grounded=False, the caller should regenerate
+    with an explicit no-data constraint or fall back to a deterministic
+    "I don't have that info" response.
+    """
+    if not spoken:
+        return spoken, True
+    for pattern, entity_key in _TOPIC_REQUIRES_ENTITY.items():
+        if re.search(pattern, spoken, re.IGNORECASE):
+            if entity_key not in ctx.resolved_entities:
+                logger.warning(
+                    f"[TinyGenerator] grounding gate REJECT: spoken mentions "
+                    f"topic '{pattern}' but '{entity_key}' not in resolved_entities"
+                )
+                return spoken, False
+    return spoken, True
+
+
+def _build_prompt(ctx: ContextDocument, last_turns: list[tuple[str, str]]) -> str:
+    """Build the ~280 token cached prompt for Haiku."""
+    history = ""
+    if last_turns:
+        for role, text in last_turns[-2:]:
+            label = "Anrufer" if role == "user" else "Sailly"
+            history += f"{label}: {text}\n"
+
+    must_include_block = ""
+    if ctx.response_constraints.must_include:
+        items = "\n".join(f"  - {x}" for x in ctx.response_constraints.must_include)
+        must_include_block = f"Sage unbedingt:\n{items}"
+    
+    # Phase 1: DEBUG log what facts are being included
+    import logging
+    logger = logging.getLogger(__name__)
+    if ctx.resolved_entities:
+        logger.info(f"[TinyGenerator] LLM prompt includes resolved_entities: {list(ctx.resolved_entities.keys())}")
+    if ctx.missing_slots:
+        logger.info(f"[TinyGenerator] LLM prompted to ask about: {ctx.missing_slots}")
+
+    return f"""Du bist Sailly, die KI-Assistentin von DOBOO Korean Soulfood in Bonn.
+Verwende IMMER "Sie".
+Antworte in maximal {ctx.response_constraints.max_sentences} Sätzen auf Deutsch.
+
+Gespräch bisher:
+{history or "(noch kein Gespräch)"}
+
+Kontext:
+{ctx.to_german_summary()}
+
+{must_include_block}
+
+Antworte EXAKT in diesem Format:
+```json
+{{
+  "key_facts": [],
+  "ask_for": null,
+  "tone": "warmly_efficient"
+}}
+```
+<spoken>
+[1–2 Sätze Deutsch]
+</spoken>"""
+
+
+def _parse_response(raw: str) -> tuple[dict, str]:
+    """Extract inner monologue JSON and spoken text from model output."""
+    # Extract <spoken> block
+    spoken_match = _SPOKEN_RE.search(raw)
+    spoken = spoken_match.group(1).strip() if spoken_match else ""
+
+    # Extract JSON block
+    json_data = {}
+    json_match = _JSON_RE.search(raw)
+    if json_match:
+        try:
+            json_data = json.loads(json_match.group(1))
+        except json.JSONDecodeError:
+            pass
+
+    return json_data, spoken
+
+
+def _sanitise(
+    spoken: str,
+    ctx: ContextDocument,
+    current_node_name: str | None = None,
+) -> tuple[str, bool]:
+    """Check must_not_mention terms. Returns (text, was_clean).
+
+    Node-aware: SMS phrases are allowed only inside the sms_confirmation node.
+    Other groups always apply.
+    """
+    text_lower = spoken.lower()
+    node = (current_node_name or "").lower()
+    for group, terms in _MUST_NOT_MENTION.items():
+        if group == "sms_outside_node" and node == "sms_confirmation":
+            continue  # SMS mentions are legitimate inside this node
+        for term in terms:
+            if term in text_lower:
+                logger.warning(
+                    f"[TinyGenerator] must_not_mention hit: '{term}' "
+                    f"in group={group} node={node!r}"
+                )
+                return spoken, False
+    return spoken, True
+
+
+class TinyGenerator:
+    """Wraps a Haiku LLM client for tiny-generator calls."""
+
+    def __init__(self, llm_client=None):
+        self._client = llm_client
+
+    async def generate(
+        self,
+        ctx: ContextDocument,
+        last_turns: list[tuple[str, str]],
+        model: str | None = None,
+        current_node_name: str | None = None,
+    ) -> tuple[str, dict]:
+        """Generate a spoken response using the inner monologue technique.
+
+        Returns:
+            (spoken_text, inner_monologue_dict)
+            spoken_text: the text to send to TTS
+            inner_monologue_dict: for shadow logging to google_context_documents
+        """
+        # Use environment MAIN_LLM_MODEL if not explicitly provided
+        if model is None:
+            import os
+            model = os.getenv("MAIN_LLM_MODEL", "claude-haiku-4-5")
+
+        if self._client is None:
+            return _FALLBACK_RESPONSE, {}
+
+        prompt = _build_prompt(ctx, last_turns)
+        t0 = time.monotonic()
+
+        try:
+            # Call LLM (streaming not needed for tiny generator — it's short)
+            raw = await self._call_llm(prompt, model)
+            elapsed_ms = int((time.monotonic() - t0) * 1000)
+            logger.info(f"[TinyGenerator] LLM call: {elapsed_ms}ms using model={model}")
+
+            json_data, spoken = _parse_response(raw)
+
+            if not spoken:
+                logger.warning("[TinyGenerator] no <spoken> block in response")
+                return _FALLBACK_RESPONSE, json_data
+
+            # Stage 7 sanitiser — first pass (node-aware)
+            spoken, was_clean = _sanitise(spoken, ctx, current_node_name)
+            if not was_clean:
+                # Regenerate once with tighter constraint
+                ctx.response_constraints.must_include.append("Antwort ohne SMS-Erwähnung")
+                prompt2 = _build_prompt(ctx, last_turns)
+                raw2 = await self._call_llm(prompt2, model)
+                _, spoken2 = _parse_response(raw2)
+                if spoken2:
+                    spoken2, was_clean2 = _sanitise(spoken2, ctx, current_node_name)
+                    if was_clean2:
+                        return spoken2, json_data
+                # Second fail — use fallback
+                return _FALLBACK_RESPONSE, json_data
+
+            # Stage 7b grounding gate — reject spoken text claiming facts that
+            # no tool produced (e.g. weather without get_weather having run).
+            spoken, grounded = _grounding_gate(spoken, ctx)
+            if not grounded:
+                # Regenerate once with explicit no-data constraint
+                ctx.response_constraints.must_include.append(
+                    "WICHTIG: Du hast keine Daten zu diesem Thema. "
+                    "Sage dem Anrufer kurz, dass du diese Information gerade nicht hast."
+                )
+                prompt3 = _build_prompt(ctx, last_turns)
+                raw3 = await self._call_llm(prompt3, model)
+                _, spoken3 = _parse_response(raw3)
+                if spoken3:
+                    spoken3, grounded2 = _grounding_gate(spoken3, ctx)
+                    if grounded2:
+                        spoken3, was_clean3 = _sanitise(spoken3, ctx, current_node_name)
+                        if was_clean3:
+                            return spoken3, json_data
+                # Still not grounded — deterministic apology
+                return (
+                    "Diese Information habe ich gerade leider nicht zur Hand.",
+                    json_data,
+                )
+
+            # Log inner monologue fields to context doc (caller updates ctx)
+            ctx.inner_monologue_key_facts = json_data.get("key_facts", [])
+            ctx.inner_monologue_ask_for = json_data.get("ask_for")
+            ctx.inner_monologue_tone = json_data.get("tone", "warmly_efficient")
+
+            return spoken, json_data
+
+        except Exception as err:
+            logger.error(f"[TinyGenerator] error: {err}")
+            return _FALLBACK_RESPONSE, {}
+
+    async def _call_llm(self, prompt: str, model: str) -> str:
+        """Thin wrapper around the LLM client with explicit timing to catch cache bypass."""
+        _t0 = time.monotonic()
+        
+        if hasattr(self._client, "messages"):
+            # Anthropic-style client — measure actual API call time
+            # NOTE: max_tokens removed to allow Claude Haiku to use full token budget
+            response = await self._client.messages.create(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            _elapsed_ms = int((time.monotonic() - _t0) * 1000)
+            # Phase 5: WARN if latency seems cached (< 15ms typical for API + network)
+            if _elapsed_ms < 15:
+                logger.warning(
+                    f"[Phase5] LLM latency suspiciously low: {_elapsed_ms}ms. "
+                    f"Possible cache hit or template bypass. Verify API is being called."
+                )
+            return response.content[0].text if response.content else ""
+        # Fallback
+        return ""
