@@ -688,10 +688,17 @@ async def process_turn_v4(
             user_text.lower()
         )
         if not _time_correction_m:
+            # Try: "auf 20 Uhr" or "zu 20 Uhr" or "zu 20:00"
             _time_correction_m = _re_corr.search(
-                r'\bauf\s+(\d{1,2})(?:[:.]?(\d{2}))?\s*uhr\b',
+                r'(?:auf|zu)\s+(\d{1,2})(?:[:.]?(\d{2}))?\s*uhr',
                 user_text.lower()
             )
+        if not _time_correction_m:
+            # Try: "Uhr verschieben" or "Uhr ändern" after a time (greedy search for last time)
+            # Find ALL times in text and take the last one
+            all_times = list(_re_corr.finditer(r'\b(\d{1,2})(?:[:.]?(\d{2}))?\s*uhr\b', user_text.lower()))
+            if all_times:
+                _time_correction_m = all_times[-1]  # Take the LAST time mentioned (most likely the correction target)
         if not _time_correction_m:
             # Last-resort: user says just the time e.g. '20 Uhr' as a standalone correction
             _time_correction_m = _re_corr.search(

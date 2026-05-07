@@ -427,11 +427,14 @@ class OpenAICallerBot:
                                   r"donnerstag|freitag|samstag|sonntag|montag)\b", near_text)
                     )
                     if not has_future_date:
-                        if h < now.hour or (h == now.hour and mn <= now.minute):
-                            flags.append(
-                                f"[Achtung Sailly: UHRZEIT_FALSCH — bestätigte Uhrzeit {h:02d}:{mn:02d} "
-                                f"liegt in der Vergangenheit (jetzt {now.hour:02d}:{now.minute:02d})]"
-                            )
+                        # Also accept if bot mentions rejection ("können nicht", "leider", "nicht möglich", "vergangen")
+                        is_rejection = bool(re.search(r"\b(können\s+(?:nicht|keine)|leider|nicht\s+möglich|vergangen)\b", near_text))
+                        if not is_rejection:
+                            if h < now.hour or (h == now.hour and mn <= now.minute):
+                                flags.append(
+                                    f"[Achtung Sailly: UHRZEIT_FALSCH — bestätigte Uhrzeit {h:02d}:{mn:02d} "
+                                    f"liegt in der Vergangenheit (jetzt {now.hour:02d}:{now.minute:02d})]"
+                                )
 
         # ── 3. Order readback check ───────────────────────────────────
         order_confirm_kw = {"bestellung aufgenommen", "bestellt", "bestellung ist"}

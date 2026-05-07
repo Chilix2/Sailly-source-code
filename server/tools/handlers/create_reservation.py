@@ -58,6 +58,32 @@ async def handle(args: dict, ctx: ToolContext) -> ToolResult:
 
     party_size = _safe_int(args.get("party_size"), default=1)
 
+    # Check for past dates (graceful rejection with alternatives)
+    from datetime import datetime as dt_cls
+    from zoneinfo import ZoneInfo
+    BERLIN = ZoneInfo("Europe/Berlin")
+    now = dt_cls.now(BERLIN)
+    if requested <= now:
+        # Past date requested — offer alternatives
+        alternatives = await _find_alternatives(ctx, now, party_size)
+        if alternatives:
+            return ToolResult(
+                ok=False,
+                data={
+                    "requested_past": requested.isoformat(),
+                    "alternatives": alternatives,
+                    "reason": "Reservierungen können nur für zukünftige Zeiten vorgenommen werden.",
+                },
+                error="reservation_date_in_past",
+                error_code=ErrorCode.TOOL_VALIDATION_FAILED,
+            )
+        else:
+            return ToolResult(
+                ok=False,
+                error="Reservierungen können nur für zukünftige Zeiten vorgenommen werden. Es stehen derzeit keine alternativen Zeitfenster zur Verfügung.",
+                error_code=ErrorCode.TOOL_VALIDATION_FAILED,
+            )
+
     # Check availability at requested slot
     available = await _check_capacity(ctx, requested, party_size)
     if available:
