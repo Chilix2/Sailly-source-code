@@ -718,12 +718,18 @@ async def process_turn_v4(
     # If user is asking about the menu, always refresh the ordering-guard flag
     # (not just on first injection) and track consecutive FAQ turns for escalation.
     if _is_menu_question or _menu_faq_override_active:
-        state.last_turn_was_menu_faq = True  # keep ordering-profile block active every FAQ turn
+        # Only re-arm the flag for the NEXT turn when we're actually answering a
+        # genuine menu FAQ.  The override-only case (ordering suppressed this turn)
+        # must NOT re-arm the flag — otherwise the caller can never proceed to order
+        # after a menu inquiry (permanent lock).
+        if _is_menu_question:
+            state.last_turn_was_menu_faq = True
         _menu_faq_consec = getattr(state, "menu_faq_consecutive", 0) + 1
         state.menu_faq_consecutive = _menu_faq_consec
         logger.debug("[v4_pipeline] menu_faq_consecutive=%d", _menu_faq_consec)
-        # After 6 consecutive menu FAQ turns with no resolution, hand off to a human.
-        # Threshold chosen so neutral persona (max ~5 FAQ turns before winding down) is unaffected.
+        # After 6 consecutive menu FAQ / FAQ-override turns with no resolution,
+        # hand off to a human.  Threshold keeps the neutral persona (max ~5 turns)
+        # from being escalated prematurely.
         if _menu_faq_consec >= 6:
             _esc_text = (
                 "Ich verbinde Sie jetzt mit einem Mitarbeiter, "
@@ -738,7 +744,7 @@ async def process_turn_v4(
                 _esc_text, profile, intent_result, t0,
                 tools=["transfer_to_human"], next_action="escalate", should_end=True,
             )
-        if "menu_data" not in ctx_doc.resolved_entities:
+        if _is_menu_question and "menu_data" not in ctx_doc.resolved_entities:
             try:
                 import yaml as _yaml
                 import pathlib as _pathlib

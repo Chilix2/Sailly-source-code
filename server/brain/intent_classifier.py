@@ -95,7 +95,8 @@ _FAQ_RE = re.compile(
     r"parken|parkplatz|telefon|nummer|preis|kostet|wetter|"
     r"anfahrt|wie komm|weg|"
     r"gerichte?|speise(karte)?|menü|menu|empfehl|was (gibt|haben|habt|bieten)|"
-    r"was\s+habt|essen\s*(hier|bei|von)|das gericht|was kostet)\b",
+    r"was\s+habt|essen\s*(hier|bei|von)|das gericht|was kostet|"
+    r"habt\s+ihr\b|haben\s+sie\b|gibt\s+es\b)\b",
     re.I,
 )
 _ESCALATION_RE = re.compile(
