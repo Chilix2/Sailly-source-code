@@ -722,7 +722,17 @@ async def process_turn_v4(
     # Without this, alternating FAQ/ordering/reservation turns leave menu_data absent
     # from ctx_doc, causing the grounding gate to reject "Speisekarte" mentions.
     _menu_data_loaded = False
-    if profile == "business_info" and "menu_data" not in ctx_doc.resolved_entities:
+    _dish_kw_set = {"bibimbap", "bulgogi", "mandu", "ramen", "sushi", "kimchi"}
+    _user_lower = user_text.lower() if user_text else ""
+    _dish_in_text = bool(_dish_kw_set & set(_user_lower.split()))
+    # Inject menu_data for business_info profile (menu FAQ, override turns, combined queries)
+    # AND for ordering profiles when a specific dish name is mentioned — this lets the LLM
+    # confirm "Ja, Bibimbap ist auf unserer Karte" instead of failing the grounding gate.
+    _needs_menu_data = (
+        profile == "business_info"
+        or (profile in ("order_start", "ordering") and _dish_in_text)
+    )
+    if _needs_menu_data and "menu_data" not in ctx_doc.resolved_entities:
         try:
             import yaml as _yaml
             import pathlib as _pathlib
@@ -730,16 +740,25 @@ async def process_turn_v4(
             with open(_faq_yaml) as _yf:
                 _raw_cfg = _yaml.safe_load(_yf)
             _faqs = _raw_cfg.get("faqs", [])
-            _menu_kw_set = {"gerichte", "speisekarte", "menu", "menü", "essen", "angebot", "korean", "koreanisch"}
+            _menu_kw_set = {"bibimbap", "bulgogi", "mandu", "ramen", "gerichte", "speisekarte", "menu", "menü", "essen", "angebot", "korean", "koreanisch"}
+            # First try to find a dish-specific FAQ entry matching what the user said
+            _best_answer = ""
             for _faq_entry in _faqs:
                 _entry_kws = {str(k).lower() for k in _faq_entry.get("keywords", [])}
-                if _entry_kws & _menu_kw_set:
-                    _faq_answer = _faq_entry.get("answer", "")
-                    if _faq_answer:
-                        ctx_doc.resolved_entities["menu_data"] = _faq_answer
-                        _menu_data_loaded = True
-                        logger.debug("[v4_pipeline] FAQ menu injected: %s", _faq_answer[:80])
+                if _entry_kws & _dish_kw_set & set(_user_lower.split()):
+                    _best_answer = _faq_entry.get("answer", "")
+                    break
+            # Fall back to any menu FAQ entry
+            if not _best_answer:
+                for _faq_entry in _faqs:
+                    _entry_kws = {str(k).lower() for k in _faq_entry.get("keywords", [])}
+                    if _entry_kws & _menu_kw_set:
+                        _best_answer = _faq_entry.get("answer", "")
                         break
+            if _best_answer:
+                ctx_doc.resolved_entities["menu_data"] = _best_answer
+                _menu_data_loaded = True
+                logger.debug("[v4_pipeline] FAQ menu injected (profile=%s): %s", profile, _best_answer[:80])
         except Exception as _e:
             logger.debug("[v4_pipeline] FAQ YAML lookup failed (non-fatal): %s", _e)
 
