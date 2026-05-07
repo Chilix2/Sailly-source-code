@@ -46,9 +46,18 @@ _TOPIC_REQUIRES_ENTITY: dict[str, str] = {
     r"speisekarte|menü\b|menue\b|auf der karte":                       "menu_data",
     r"öffnungszeit|geöffnet|geschlossen":                              "today_date",
     # Guard against hallucinated reservation confirmations
-    r"reserviert|reservierung\s*(ist\s+)?bestätigt|reservierung\s*(ist\s+)?bestaetigt|tisch\s*(ist\s+)?gebucht|haben\s+reserviert": "reservation_confirmed",
+    r"reservierung.{0,60}bestätigt|bestätigt.{0,60}reservierung"
+    r"|reservierung.{0,60}bestaetigt|bestaetigt.{0,60}reservierung"
+    r"|tisch.{0,30}(reserviert|gebucht|eingetragen)"
+    r"|haben\s+(einen?\s+)?tisch.{0,30}(reserviert|gebucht)"
+    r"|ihre\s+reservierung\s+ist"
+    r"|reservierung\s+(ist\s+)?(bestätigt|bestaetigt|gesetzt|aufgenommen)": "reservation_confirmed",
     # Guard against hallucinated order confirmations
-    r"bestellung.*aufgenommen|bestellung.*notiert|habe.*bestellt|ihre.*bestellung|order.*confirmed|order.*placed": "order_confirmed",
+    r"bestellung.{0,40}(aufgenommen|notiert|bestätigt|bestaetigt)"
+    r"|aufgenommen.{0,40}bestellung"
+    r"|habe\s+(ihre|die)\s+bestellung"
+    r"|ihre\s+bestellung\s+ist"
+    r"|order\s+(confirmed|placed|noted)": "order_confirmed",
 }
 
 
@@ -260,9 +269,9 @@ class TinyGenerator:
         
         if hasattr(self._client, "messages"):
             # Anthropic-style client — measure actual API call time
-            # NOTE: max_tokens removed to allow Claude Haiku to use full token budget
             response = await self._client.messages.create(
                 model=model,
+                max_tokens=512,
                 messages=[{"role": "user", "content": prompt}],
             )
             _elapsed_ms = int((time.monotonic() - _t0) * 1000)

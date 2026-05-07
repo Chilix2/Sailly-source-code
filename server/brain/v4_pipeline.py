@@ -23,6 +23,7 @@ from typing import Awaitable, Callable, Optional
 
 from server.brain.context_doc_builder import (
     COMMIT_TOOLS_REQUIRED_SLOTS,
+    _persist_resolved_entities_to_state,
     build as build_context_doc,
 )
 from server.brain.intent_classifier import classify
@@ -33,6 +34,24 @@ from server.brain.worker_router import route
 from server.brain.workers import ExecutionResult, WorkerContext
 
 logger = logging.getLogger(__name__)
+
+_GERMAN_MONTHS = [
+    "", "Januar", "Februar", "März", "April", "Mai", "Juni",
+    "Juli", "August", "September", "Oktober", "November", "Dezember",
+]
+_GERMAN_WEEKDAYS = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"]
+
+
+def _iso_to_spoken_german(iso: str) -> str:
+    """Convert an ISO date string (YYYY-MM-DD) to spoken German, e.g. 'Donnerstag, dem 7. Mai'."""
+    import datetime
+    try:
+        d = datetime.date.fromisoformat(iso)
+        weekday = _GERMAN_WEEKDAYS[d.weekday()]
+        month = _GERMAN_MONTHS[d.month]
+        return f"{weekday}, dem {d.day}. {month}"
+    except Exception:
+        return iso or "dem gewünschten Termin"
 
 
 def _state_slot_filled(state, slot: str) -> bool:
@@ -99,8 +118,6 @@ def _build_pre_commit_summary_v4(state) -> str:
     Called BEFORE tool execution so reservation_created is still False.
     Uses subjunctive 'würde' to indicate a proposal, not a done deal.
     """
-    from server.brain.conversation_state import _iso_to_spoken_german
-
     if _state_slot_filled(state, "reservation_date"):
         iso = getattr(state, "reservation_date", "")
         spoken_date = _iso_to_spoken_german(iso) if iso else "dem gewünschten Termin"
@@ -139,8 +156,6 @@ def _build_pre_commit_order_summary_v4(state) -> str:
 
 def _build_readback_v4(state) -> str:
     """Build deterministic verbal readback of the committed reservation."""
-    from server.brain.conversation_state import _iso_to_spoken_german
-
     if getattr(state, "reservation_created", False):
         iso = getattr(state, "reservation_date", None) or ""
         spoken_date = _iso_to_spoken_german(iso) if iso else "dem vereinbarten Termin"
@@ -329,9 +344,11 @@ async def process_turn_v4(
     profile = intent_result.worker_profile
     turn_type = intent_result.turn_type
     
-    # Fix 7: Track unclear/greeting turns for timeout counter + detect repeated responses
+    # Fix 7: Track unclear/greeting turns for timeout counter + detect repeated responses.
+    # Only count turns where the turn_type is truly UNCLEAR (not just UNKNOWN intent —
+    # UNKNOWN with ADD_INFORMATION is a valid slot-filling turn, not unclear).
     _last_response = getattr(state, "_last_bot_response", "")
-    if intent_result.intent == IntentKind.UNKNOWN or turn_type == TurnType.UNCLEAR:
+    if turn_type == TurnType.UNCLEAR:
         state.unclear_turn_count = getattr(state, "unclear_turn_count", 0) + 1
         logger.debug(f"[v4_pipeline] T{turn_idx} unclear intent → unclear_turn_count={state.unclear_turn_count}")
     else:
@@ -616,6 +633,10 @@ async def process_turn_v4(
         execution_result=execution_result,
         current_state=_state_snapshot_for_gate(state),
     )
+    # Persist worker-extracted slots to the real ConversationState immediately.
+    # context_doc_builder only updates its local snapshot dict; calling this here
+    # ensures slots (name, time, date, party_size) survive across turns.
+    _persist_resolved_entities_to_state(ctx_doc.resolved_entities, state)
 
     # Inject pre-executed tool results into ContextDocument resolved_entities
     if tool_results:
@@ -830,8 +851,8 @@ async def process_turn_v4(
             logger.info(f"[v4_pipeline] T{turn_idx} create_order → {order_result}")
 
             state.order_created = True
-            state.end_call_stage = "readback_pending"
-            readback = _build_readback_v4(state) + " Stimmt das so?"
+            state.end_call_stage = "confirmed"
+            readback = _build_readback_v4(state) + " Wir kümmern uns darum. Auf Wiederhören!"
             logger.info(f"[v4_pipeline] T{turn_idx} ORDER COMMITTED → readback: {readback!r}")
 
             if tts_callback:
@@ -844,7 +865,7 @@ async def process_turn_v4(
                 readback, "order_start", intent_result, t0,
                 tools=scheduled_run + commit_tools_run,
                 next_action="commit",
-                should_end=False,
+                should_end=True,
             )
         except Exception as commit_err:
             logger.error(f"[v4_pipeline] T{turn_idx} order commit failed: {commit_err}", exc_info=True)
@@ -868,8 +889,18 @@ async def process_turn_v4(
     # When core slots (party_size, date, time) are present but name/phone missing,
     # check availability early and offer to ask for name in same response.
     # These vars are also used by the commit gate below — defined here so Fix 4 can reference them.
-    _is_reservation_intent = intent_result.intent in (
-        IntentKind.RESERVATION, IntentKind.MODIFY_RESERVATION
+    #
+    # Also treat UNKNOWN-intent slot-filling turns as reservation continuation
+    # when state already has core reservation slots (date/time/party_size present).
+    _reservation_in_progress = (
+        not getattr(state, "reservation_created", False)
+        and _state_slot_filled(state, "reservation_date")
+        and _state_slot_filled(state, "reservation_time")
+        and _state_slot_filled(state, "party_size")
+    )
+    _is_reservation_intent = (
+        intent_result.intent in (IntentKind.RESERVATION, IntentKind.MODIFY_RESERVATION)
+        or (intent_result.intent == IntentKind.UNKNOWN and _reservation_in_progress)
     )
     _not_yet_committed = not getattr(state, "reservation_created", False)
     _all_slots = end_call_stage == "idle" and _all_slots_present(state, "create_reservation")
@@ -1022,10 +1053,11 @@ async def process_turn_v4(
             commit_tools_run.append("create_reservation")
             logger.info(f"[v4_pipeline] T{turn_idx} create_reservation → {res_result}")
 
-            # Success: mark committed and enter readback
+            # Success: mark committed, give final confirmation, end call.
+            # The user already confirmed via pre-commit summary — no second "Stimmt das so?" needed.
             state.reservation_created = True
-            state.end_call_stage = "readback_pending"
-            readback = _build_readback_v4(state) + " Stimmt das so?"
+            state.end_call_stage = "confirmed"
+            readback = _build_readback_v4(state) + " Wir freuen uns auf Sie. Auf Wiederhören!"
             logger.info(f"[v4_pipeline] T{turn_idx} COMMITTED → readback: {readback!r}")
 
             if tts_callback:
@@ -1038,7 +1070,7 @@ async def process_turn_v4(
                 readback, "reservation_start", intent_result, t0,
                 tools=scheduled_run + commit_tools_run,
                 next_action="commit",
-                should_end=False,
+                should_end=True,
             )
 
         except Exception as commit_err:
