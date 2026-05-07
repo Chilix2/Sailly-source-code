@@ -634,7 +634,6 @@ async def process_turn_v4(
         tool_results = {}
     _text_lo = user_text.lower()
     _is_hours_question = any(w in _text_lo for w in ("öffnungszeit", "geöffnet", "wann", "uhrzeit", "offen", "aufmachen", "zumachen"))
-    _is_menu_question = any(w in _text_lo for w in ("speisekarte", "menü", "menu", "gericht", "essen", "habt", "was gibt", "empfehl", "was haben", "was bieten"))
     if _is_hours_question and "get_date_info" not in tool_results:
             try:
                 from tools.executor import execute_tool as _et
@@ -643,14 +642,6 @@ async def process_turn_v4(
                 logger.debug("[v4_pipeline] executed get_date_info inline: %s", tool_results["get_date_info"])
             except Exception as _e:
                 logger.debug("[v4_pipeline] inline get_date_info failed (non-fatal): %s", _e)
-    if _is_menu_question and "get_menu" not in tool_results:
-        try:
-            from tools.executor import execute_tool as _et
-            _menu_res = await _et("get_menu", {}, call_sid, tenant_id)
-            tool_results["get_menu"] = _menu_res if isinstance(_menu_res, dict) else {}
-            logger.debug("[v4_pipeline] executed get_menu inline: %s", str(tool_results["get_menu"])[:200])
-        except Exception as _e:
-            logger.debug("[v4_pipeline] inline get_menu failed (non-fatal): %s", _e)
 
     ctx_doc = build_context_doc(
         intent=intent_result.intent,
