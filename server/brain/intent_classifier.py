@@ -258,7 +258,11 @@ def classify(text: str, turn_idx: int = 0) -> IntentResult:
     confidence = 0.0
     turn_type = TurnType.START_INTENT
 
-    if _RESERVATION_RE.search(lower):
+    # When caller combines a menu availability question ("habt ihr X?") with
+    # reservation intent in the same turn, answer the info question first.
+    # The reservation will naturally surface on the next turn.
+    _has_availability_q = re.search(r"\b(habt\s+ihr|haben\s+sie|gibt\s+es)\b", lower, re.I)
+    if _RESERVATION_RE.search(lower) and not _has_availability_q:
         intent = IntentKind.RESERVATION
         confidence = 0.85
     elif _PRICE_RE.search(lower):
