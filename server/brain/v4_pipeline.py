@@ -634,6 +634,7 @@ async def process_turn_v4(
         tool_results = {}
     _text_lo = user_text.lower()
     _is_hours_question = any(w in _text_lo for w in ("öffnungszeit", "geöffnet", "wann", "uhrzeit", "offen", "aufmachen", "zumachen"))
+    _is_menu_question = any(w in _text_lo for w in ("speisekarte", "menü", "menu", "gericht", "was habt", "was haben", "was gibt", "was bietet", "was bieten", "koreanisch", "angebot"))
     if _is_hours_question and "get_date_info" not in tool_results:
             try:
                 from tools.executor import execute_tool as _et
@@ -698,6 +699,28 @@ async def process_turn_v4(
                     ctx_doc.resolved_entities["seats_remaining"] = result.get("seats_remaining")
 
     scheduled_run = list(tool_results.keys()) if tool_results else []
+
+    # ── Menu FAQ direct YAML lookup ───────────────────────────────────────────
+    # If user is asking about the menu and menu_data is still missing, look up
+    # the FAQ answer directly from the tenant YAML (TenantConfig doesn't expose faqs).
+    if _is_menu_question and "menu_data" not in ctx_doc.resolved_entities:
+        try:
+            import yaml as _yaml
+            import pathlib as _pathlib
+            _faq_yaml = _pathlib.Path(__file__).parent.parent.parent / "configs" / "tenants" / f"{tenant_id}.yaml"
+            with open(_faq_yaml) as _yf:
+                _raw_cfg = _yaml.safe_load(_yf)
+            _faqs = _raw_cfg.get("faqs", [])
+            for _faq_entry in _faqs:
+                _kws = [str(k).lower() for k in _faq_entry.get("keywords", [])]
+                if any(k in _text_lo for k in _kws):
+                    _faq_answer = _faq_entry.get("answer", "")
+                    if _faq_answer:
+                        ctx_doc.resolved_entities["menu_data"] = _faq_answer
+                        logger.debug("[v4_pipeline] FAQ menu injected: %s", _faq_answer[:80])
+                        break
+        except Exception as _e:
+            logger.debug("[v4_pipeline] FAQ YAML lookup failed (non-fatal): %s", _e)
 
     # ── POST-COMMIT READBACK STATE MACHINE ──────────────────────────────────────
     end_call_stage = getattr(state, "end_call_stage", "idle")
