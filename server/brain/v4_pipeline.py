@@ -713,29 +713,51 @@ async def process_turn_v4(
     scheduled_run = list(tool_results.keys()) if tool_results else []
 
     # ── Menu FAQ direct YAML lookup ───────────────────────────────────────────
-    # If user is asking about the menu and menu_data is still missing, look up
-    # the FAQ answer directly from the tenant YAML (TenantConfig doesn't expose faqs).
-    if _is_menu_question and "menu_data" not in ctx_doc.resolved_entities:
-        try:
-            import yaml as _yaml
-            import pathlib as _pathlib
-            _faq_yaml = _pathlib.Path(__file__).parent.parent.parent / "configs" / "tenants" / f"{tenant_id}.yaml"
-            with open(_faq_yaml) as _yf:
-                _raw_cfg = _yaml.safe_load(_yf)
-            _faqs = _raw_cfg.get("faqs", [])
-            # Find the first FAQ entry whose keywords mention menu/food topics
-            _menu_kw_set = {"gerichte", "speisekarte", "menu", "menü", "essen", "angebot", "korean", "koreanisch"}
-            for _faq_entry in _faqs:
-                _entry_kws = {str(k).lower() for k in _faq_entry.get("keywords", [])}
-                if _entry_kws & _menu_kw_set:  # intersection
-                    _faq_answer = _faq_entry.get("answer", "")
-                    if _faq_answer:
-                        ctx_doc.resolved_entities["menu_data"] = _faq_answer
-                        state.last_turn_was_menu_faq = True
-                        logger.debug("[v4_pipeline] FAQ menu injected: %s", _faq_answer[:80])
-                        break
-        except Exception as _e:
-            logger.debug("[v4_pipeline] FAQ YAML lookup failed (non-fatal): %s", _e)
+    # If user is asking about the menu, always refresh the ordering-guard flag
+    # (not just on first injection) and track consecutive FAQ turns for escalation.
+    if _is_menu_question:
+        state.last_turn_was_menu_faq = True  # keep ordering-profile block active every FAQ turn
+        _menu_faq_consec = getattr(state, "menu_faq_consecutive", 0) + 1
+        state.menu_faq_consecutive = _menu_faq_consec
+        logger.debug("[v4_pipeline] menu_faq_consecutive=%d", _menu_faq_consec)
+        # After 6 consecutive menu FAQ turns with no resolution, hand off to a human.
+        # Threshold chosen so neutral persona (max ~5 FAQ turns before winding down) is unaffected.
+        if _menu_faq_consec >= 6:
+            _esc_text = (
+                "Ich verbinde Sie jetzt mit einem Mitarbeiter, "
+                "der Ihnen bei unserer Speisekarte direkt weiterhelfen kann."
+            )
+            if tts_callback:
+                try:
+                    await tts_callback(_esc_text)
+                except Exception as _cb_err:
+                    logger.warning("[v4_pipeline] tts_callback raised: %s", _cb_err)
+            return _quick_return(
+                _esc_text, profile, intent_result, t0,
+                tools=["transfer_to_human"], next_action="escalate", should_end=True,
+            )
+        if "menu_data" not in ctx_doc.resolved_entities:
+            try:
+                import yaml as _yaml
+                import pathlib as _pathlib
+                _faq_yaml = _pathlib.Path(__file__).parent.parent.parent / "configs" / "tenants" / f"{tenant_id}.yaml"
+                with open(_faq_yaml) as _yf:
+                    _raw_cfg = _yaml.safe_load(_yf)
+                _faqs = _raw_cfg.get("faqs", [])
+                # Find the first FAQ entry whose keywords mention menu/food topics
+                _menu_kw_set = {"gerichte", "speisekarte", "menu", "menü", "essen", "angebot", "korean", "koreanisch"}
+                for _faq_entry in _faqs:
+                    _entry_kws = {str(k).lower() for k in _faq_entry.get("keywords", [])}
+                    if _entry_kws & _menu_kw_set:  # intersection
+                        _faq_answer = _faq_entry.get("answer", "")
+                        if _faq_answer:
+                            ctx_doc.resolved_entities["menu_data"] = _faq_answer
+                            logger.debug("[v4_pipeline] FAQ menu injected: %s", _faq_answer[:80])
+                            break
+            except Exception as _e:
+                logger.debug("[v4_pipeline] FAQ YAML lookup failed (non-fatal): %s", _e)
+    else:
+        state.menu_faq_consecutive = 0  # reset streak when caller moves to a different topic
 
     # ── POST-COMMIT READBACK STATE MACHINE ──────────────────────────────────────
     end_call_stage = getattr(state, "end_call_stage", "idle")
