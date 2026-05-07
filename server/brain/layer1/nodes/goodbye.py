@@ -17,7 +17,7 @@ GOODBYE = Node(
         + WORD_CAP_RULE
     ),
     tools=frozenset([
-        "end_call", "send_sms", "create_order", "create_reservation",
+        "end_call", "create_order", "create_reservation",
         "ai_greeting", "get_menu", "verify_address", "faq", "get_date_info",
         "check_availability", "get_weather", "transfer_to_tier2",
         "technical_issues_callback", "request_callback", "transfer_to_human",

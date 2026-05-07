@@ -301,6 +301,13 @@ _GOODBYE_KW = [
     "tschüss", "tschüs", "auf wiedersehen", "auf wiederhören", "bye",
     "danke das war", "bis bald", "ciao", "mach's gut",
     "danke tschüss", "danke auf wiedersehen",
+    # Fix 1.2: Additional goodbye phrases
+    "gespräch ist vorbei", "das war's", "das wars", "mache schluss", "machen wir schluss",
+    "wir sind fertig", "alles erledigt", "das reicht",
+    # Fix D1: Additional goodbye phrases for "zu Ende" variants
+    "gespräch ist zu ende", "das gespräch ist beendet",
+    # Fix H2: Additional goodbye keywords for STT mishearing and variants
+    "choose", "gespräch ist vorbei", "gespräch vorbei",
 ]
 _NEGATE_KW = [
     "nicht bestellen", "doch nicht", "stornieren", "abbrechen",
@@ -335,12 +342,15 @@ _AVAILABILITY_KW = [
     "platz für", "können wir kommen", "geht es", "passt es",
     "haben sie platz", "haben sie zeit", "ist was frei",
 ]
-_LOCATION_KW = [
+_PARKING_KW = [  # Fix 2.3: Dedicated parking keywords
     "parken", "parkplatz", "parkplätze", "parkplaetze", "parking",
     "parking space", "park", "wo kann ich parken", "gibt es parkplätze",
-    "parkhaus", "tiefgarage", "parkzone", "anfahrt", "wie komme ich",
-    "wegbeschreibung",
+    "parkhaus", "tiefgarage", "parkzone",
 ]
+_DIRECTIONS_KW = [  # Fix 2.3: Dedicated directions/routing keywords
+    "anfahrt", "wie komme ich", "wegbeschreibung", "route", "vom hauptbahnhof", "von der autobahn",
+]
+_LOCATION_KW = _PARKING_KW + _DIRECTIONS_KW  # Keep for backward compatibility
 _PAYMENT_FRUSTRATION_KW = [
     "paypal", "kreditkarte akzeptiert nicht", "zahlung abgelehnt",
     "kann nicht zahlen", "zahlung funktioniert nicht",
@@ -398,16 +408,22 @@ _CALLBACK_KW = [
 # No mixed LLM+forced output for state-transition tools.
 # Variant lists prevent identical phrasing on every call — _template_for() picks randomly.
 _TRANSITION_TEMPLATES = {
+    # P7.1: SMS removed from all templates — system handles SMS silently.
+    # LLM must never promise or mention SMS.
     "create_order": [
-        "Super, hab ich für Sie notiert! Der Zahlungslink kommt gleich per SMS.",
-        "Prima, die Bestellung steht. Sie bekommen gleich eine SMS mit dem Zahlungslink.",
-        "Alles klar, ist aufgegeben! Gleich kommt der Zahlungslink per SMS.",
-        "Fertig, alles notiert. Zahlungslink kommt per SMS. Guten Appetit!",
+        "Super, hab ich für Sie notiert! Guten Appetit!",
+        "Prima, die Bestellung steht.",
+        "Alles klar, ist aufgegeben!",
+        "Fertig, alles notiert.",
+        "Notiert! Wir kümmern uns darum.",
+        "Alles klar, ist raus.",
     ],
     "create_reservation": [
-        "Perfekt, ist reserviert! Eine Bestätigung bekommen Sie gleich per SMS.",
-        "Super, den Tisch hab ich für Sie. SMS-Bestätigung ist unterwegs.",
-        "Alles klar, Reservierung ist raus. Sie bekommen gleich eine SMS.",
+        "Perfekt, Tisch ist reserviert!",
+        "Super, den Tisch hab ich für Sie eingetragen.",
+        "Alles klar, die Reservierung ist durch.",
+        "Tisch ist für Sie reserviert.",
+        "Alles notiert, Platz ist für Sie.",
     ],
     "verify_address": [
         "Passt, Adresse hab ich.",
@@ -705,6 +721,19 @@ class NodeManager(_SlimNodeManager):
         
         lower = customer_utterance.lower() if customer_utterance else ""
 
+        # ── 0. Direct goodbye safety net (user side) ────────────────────────
+        # Injects end_call regardless of current node, catching cases where
+        # node routing didn't reach the goodbye node.
+        if (
+            self._match(lower, _GOODBYE_KW)
+            and "end_call" not in bot_response
+            and not state.reservation_intent   # don't cut mid-reservation
+            and not (state.order_intent and not state.order_created)  # don't cut mid-order
+        ):
+            bot_response = bot_response.rstrip() + "\n[TOOL:end_call]"
+            logger.info(f"  T{turn_idx}: FORCED end_call (goodbye keyword direct safety net)")
+            return bot_response
+
         # ─────────────────────────────────────────────────────────────────────
         # ALLERGEN / DIETARY SAFETY NET (Sprint 0 — BLOCKING)
         # When the caller's utterance mentions an allergen/diet concern we MUST
@@ -831,7 +860,7 @@ class NodeManager(_SlimNodeManager):
             _preserved = _extract_already_injected(bot_response)
             bot_response = (
                 f"{_preserved}[TOOL:transfer_to_tier2]\n"
-                + _TRANSITION_TEMPLATES.get("transfer_to_tier2", "")
+                + _template_for("transfer_to_tier2")
             )
             logger.info(f"  T{turn_idx}: HARD TRANSFER (explicit agent request)")
             return bot_response
@@ -1311,17 +1340,15 @@ class NodeManager(_SlimNodeManager):
             and "create_reservation" not in all_tools
             and state.reservation_intent
             and "get_date_info" in all_tools  # date known
-            and turn_idx >= 4  # allow confirmation attempts
+            and turn_idx >= 2  # allow confirmation attempts (was >= 4, reduced for short scenarios)
             and not state.reservation_created
+            and state.ready_for_reservation_commit()  # Fix 2.1b: gate on slot completeness
         ):
             _preserved = _extract_already_injected(bot_response)
-            size = state.party_size or ""
-            date = state.reservation_date or "einem anderen Termin"
-            time = state.reservation_time or "der gewünschten Zeit"
             bot_response = (
                 f"{_preserved}[TOOL:create_reservation]\n[TOOL:send_sms]\n"
-                f"Ihre Reservierung für {size} {'Person' if size == 1 else 'Personen'} "
-                f"am {date} um {time} Uhr ist bestätigt. "
+                f"Ihre Reservierung für {state.party_size} {'Person' if state.party_size == 1 else 'Personen'} "
+                f"am {state.reservation_date} um {state.reservation_time} Uhr ist bestätigt. "
                 f"Sie erhalten eine Bestätigung per SMS."
             )
             state.reservation_created = True
@@ -1330,6 +1357,31 @@ class NodeManager(_SlimNodeManager):
                 bot_response = bot_response.rstrip() + "\n[TOOL:technical_issues_callback]"
                 logger.info(f"  T{turn_idx}: APPENDED technical_issues_callback (complaint + reservation, step7)")
             logger.info(f"  T{turn_idx}: FORCED create_reservation (auto-pair after check_availability)")
+            return bot_response  # Atomic
+        # Fix 2.1b: inject slot-clarification if slots are missing
+        if (
+            "check_availability" in all_tools
+            and "create_reservation" not in all_tools
+            and state.reservation_intent
+            and "get_date_info" in all_tools  # date known
+            and turn_idx >= 2  # allow confirmation attempts (was >= 4, reduced for short scenarios)
+            and not state.reservation_created
+            and not state.ready_for_reservation_commit()  # slots missing
+        ):
+            _preserved = _extract_already_injected(bot_response)
+            missing_items = []
+            if state.party_size is None:
+                missing_items.append("Personenzahl")
+            if state.reservation_date is None:
+                missing_items.append("Datum")
+            if state.reservation_time is None:
+                missing_items.append("Uhrzeit")
+            missing_list = ", ".join(missing_items) if missing_items else "Reservierungsdetails"
+            bot_response = (
+                f"{_preserved}"
+                f"Bevor ich die Reservierung anlege — mir fehlen noch: {missing_list}. Können Sie mir das mitteilen?"
+            )
+            logger.info(f"  T{turn_idx}: FORCED slot-clarification (missing: {missing_list})")
             return bot_response  # Atomic
 
         # ── Fix C: Cap check_availability repeats at 2 ──────────────────────────────
@@ -1383,9 +1435,7 @@ class NodeManager(_SlimNodeManager):
         # ── 8. Timeout-based reservation commit — any node, ≥2 turns ──────────
         # F3: Removed node restriction (was only firing in "reservation" node)
         if (
-            state.reservation_intent
-            and state.party_size is not None
-            and not state.reservation_created
+            state.ready_for_reservation_commit()  # Fix 2.1b: gate on slot completeness
             and "create_reservation" not in bot_response
             and self._turns_in_node >= 1
         ):
@@ -1396,8 +1446,8 @@ class NodeManager(_SlimNodeManager):
                 state.check_availability_called = True
                 logger.info(f"  T{turn_idx}: PREREQUISITE check_availability (timeout reservation)")
             size = state.party_size or ""
-            date = state.reservation_date or "einem anderen Termin"
-            time = state.reservation_time or "der gewünschten Zeit"
+            date = state.reservation_date or ""
+            time = state.reservation_time or ""
             greeting_prefix = (
                 (self._tenant.greeting_prefix if self._tenant else "Hallo, hier ist Sailly, die KI-Assistentin vom Restaurant. ")
                 if turn_idx == 0 else ""
@@ -1414,6 +1464,36 @@ class NodeManager(_SlimNodeManager):
             if state.escalation_requested and "technical_issues_callback" not in (all_tools or []):
                 bot_response = bot_response.rstrip() + "\n[TOOL:technical_issues_callback]"
                 logger.info(f"  T{turn_idx}: APPENDED technical_issues_callback (complaint + reservation, step8)")
+            logger.info(
+                f"  T{turn_idx}: FORCED create_reservation (timeout) "
+                f"size={state.party_size}, date={state.reservation_date}, "
+                f"time={state.reservation_time}"
+            )
+            return bot_response  # Atomic
+        # Fix 2.1b: inject slot-clarification if slots are missing (timeout context)
+        if (
+            state.reservation_intent
+            and state.party_size is not None
+            and not state.reservation_created
+            and "create_reservation" not in bot_response
+            and self._turns_in_node >= 1
+            and not state.ready_for_reservation_commit()  # slots missing
+        ):
+            _preserved = _extract_already_injected(bot_response)
+            missing_items = []
+            if state.party_size is None:
+                missing_items.append("Personenzahl")
+            if state.reservation_date is None:
+                missing_items.append("Datum")
+            if state.reservation_time is None:
+                missing_items.append("Uhrzeit")
+            missing_list = ", ".join(missing_items) if missing_items else "Reservierungsdetails"
+            bot_response = (
+                f"{_preserved}"
+                f"Bevor ich die Reservierung anlege — mir fehlen noch: {missing_list}. Können Sie mir das mitteilen?"
+            )
+            logger.info(f"  T{turn_idx}: FORCED slot-clarification (timeout context, missing: {missing_list})")
+            return bot_response  # Atomic
             logger.info(
                 f"  T{turn_idx}: TIMEOUT forced create_reservation "
                 f"after {self._turns_in_node} turns (any node)"
@@ -1506,14 +1586,33 @@ class NodeManager(_SlimNodeManager):
             bot_response = bot_response.rstrip() + "\n[TOOL:end_call]"
             logger.info(f"  T{turn_idx}: FORCED end_call (weather-only, {self._turns_in_node} turns)")
 
-        # ── 12b. get_restaurant_info — parking / location queries ────────────
+        # ── 12b. Prioritized location/routing tools — parking/directions/generic (Fix 2.3) ────────────
+        # Priority 1: parking keywords → get_nearby_parking
         if (
-            self._match(lower, _LOCATION_KW)
+            self._match(lower, _PARKING_KW)
+            and "get_nearby_parking" not in all_tools
+            and "get_nearby_parking" not in bot_response
+        ):
+            bot_response = "[TOOL:get_nearby_parking] " + bot_response
+            logger.info(f"  T{turn_idx}: FORCED get_nearby_parking (parking query)")
+        
+        # Priority 2: directions keywords → get_directions
+        elif (
+            self._match(lower, _DIRECTIONS_KW)
+            and "get_directions" not in all_tools
+            and "get_directions" not in bot_response
+        ):
+            bot_response = "[TOOL:get_directions] " + bot_response
+            logger.info(f"  T{turn_idx}: FORCED get_directions (directions query)")
+        
+        # Priority 3: generic location keywords → get_restaurant_info
+        elif (
+            self._match(lower, ["wo seid ihr", "adresse", "wo seid", "eure adresse", "ort", "stadt"])
             and "get_restaurant_info" not in all_tools
             and "get_restaurant_info" not in bot_response
         ):
             bot_response = "[TOOL:get_restaurant_info] " + bot_response
-            logger.info(f"  T{turn_idx}: FORCED get_restaurant_info (parking/location query)")
+            logger.info(f"  T{turn_idx}: FORCED get_restaurant_info (generic location query)")
 
         # ── 14. Forced technical_issues_callback — any node (Fix B) + post-reservation (Fix N) ──
         # Fix B: audio-quality complaints from any node (p4-technical-issues-02)

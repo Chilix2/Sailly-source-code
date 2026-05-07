@@ -23,7 +23,10 @@ from typing import AsyncIterator, Dict, Optional, Tuple
 logger = logging.getLogger(__name__)
 
 # ── Sentence-boundary regex ────────────────────────────────────────────────────
-_SENTENCE_END = re.compile(r'(?<=[.?!…])\s+')
+# P1.1 M1: also split on em-dash " — " which Claude Haiku 4.5 uses heavily in
+# German ("Gerne schaue ich das für Sie — wie viele Personen?"). Without this,
+# the entire string is one TTS chunk causing audio cut-offs at speed 2.25×.
+_SENTENCE_END = re.compile(r'(?<=[.?!…])\s+|(?<= ) — ')
 
 # ── Gemini context-cache registry (in-process, per worker) ────────────────────
 _cache_registry: Dict[str, Tuple[object, float]] = {}  # key → (cache_obj, expiry_ts)

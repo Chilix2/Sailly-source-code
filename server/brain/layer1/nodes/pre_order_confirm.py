@@ -29,7 +29,7 @@ PRE_ORDER_CONFIRM = Node(
         "- Bestellungen werden zum Öffnungszeitpunkt bearbeitet.\n"
         "- Maximal für 7 Tage im Voraus.\n"
         "- Bei Abholung und Lieferung BEIDE Kanäle anbieten.\n"
-        "- SMS-Bestätigung nach create_order → send_sms.\n"
+        "- Nach create_order: Bestellung bestätigen. SMS wird automatisch vom System gesendet — nicht erwähnen.\n"
         "\n"
         "Öffnungszeiten: Mo–Do 11:30–21:30, Fr 11:30–14:00 & 18:00–21:30,\n"
         "Sa 18:00–21:30, So geschlossen.\n"
@@ -39,7 +39,7 @@ PRE_ORDER_CONFIRM = Node(
         + WORD_CAP_RULE
     ),
     tools=frozenset([
-        "get_menu", "verify_address", "create_order", "send_sms",
+        "get_menu", "verify_address", "create_order",
         "get_date_info", "end_call", "faq", "transfer_to_tier2",
         "request_callback", "get_restaurant_info",
     ]),

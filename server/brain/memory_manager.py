@@ -124,37 +124,11 @@ class MemoryManager:
     def render_l3_extractor_status(state: ConversationState) -> str:
         """
         L3 — Extractor status (per layer-3-extractor-status: l3-explicit-degraded).
-        Emits actionable warning only when extractor lagged or failed.
-        Also surfaces validation-registry failures per Sprint 2.4 Rule 2.
+        P9.1: Slot extractor removed — always returns empty string.
+        
+        Formerly emitted actionable warning when extractor lagged or failed.
         """
-        parts = []
-
-        _status = getattr(state, "_slot_extractor_status", None)
-        _timed_out = getattr(state, "last_extraction_timed_out", False)
-        if _status in ("timeout", "429", "error") or _timed_out:
-            _reason = "timed_out" if _timed_out else _status
-            parts.append(
-                "EXTRAKTOR HINWEIS: Die automatische Slot-Erkennung ist im "
-                f"vorherigen Turn ausgefallen ({_reason}). Frage bei Unsicherheit "
-                "nochmal nach — spekuliere nicht. Arbeite direkt mit der LETZTEN "
-                "AUSSAGE und dem gecachten Menü."
-            )
-
-        registry_ref = getattr(state, "validation_registry_ref", None)
-        if registry_ref is not None:
-            try:
-                if hasattr(registry_ref, "failed_slot_names"):
-                    _failed = registry_ref.failed_slot_names()
-                    if _failed:
-                        parts.append(
-                            f"EXTRAKTOR HINWEIS: Hintergrund-Validierung für "
-                            f"{', '.join(_failed)} fehlgeschlagen. Erfrage "
-                            "diese Werte explizit vom Anrufer zur Bestätigung."
-                        )
-            except Exception:
-                pass
-
-        return "\n\n".join(parts)
+        return ""
 
     # Phase 5.5 — German display labels for slot names (per status-labels decision)
     _SLOT_LABEL_DE: dict = {

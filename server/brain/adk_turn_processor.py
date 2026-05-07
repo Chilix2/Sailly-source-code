@@ -83,29 +83,11 @@ _COMMIT_TOOLS = frozenset({
 })
 
 
-def _validate_tool_call(tool: str, state: ConversationState, all_tools: list) -> bool:
-    """
-    Policy gate — blocks structurally invalid tool calls.
-    Same logic as _validate_tool_call in adk_runner.py.
-    """
-    if tool == "create_order" and not state.selected_dish:
-        if state.order_created:
-            return True
-        logger.warning("  POLICY BLOCKED create_order (no dish, not forced commit)")
-        return False
-    if tool == "end_call":
-        if state.order_intent and not state.order_created:
-            return False
-        if state.reservation_intent and not state.reservation_created:
-            return False
-    if tool == "create_reservation" and "check_availability" not in all_tools:
-        # Allow if check_availability_called flag is set — means it fired in the same turn
-        # (node_manager step 7b pairs them atomically; all_tools only reflects previous turns).
-        if hasattr(state, "check_availability_called") and state.check_availability_called:
-            return True
-        logger.warning("  POLICY BLOCKED create_reservation (check_availability not in all_tools and not called this turn)")
-        return False
-    return True
+
+
+
+
+
 
 
 
@@ -163,6 +145,25 @@ class ADKTurnProcessor:
         # Initialize known items for state extraction
         if self._tenant:
             set_known_items(self._tenant.items)
+
+        # ── MAIN LLM CLIENT (Claude Haiku 4.5 via direct Anthropic API) ─────────
+        # Only Gemini allowed anywhere in the system is the TTS service (gemini-2.5-flash-tts).
+        # All reasoning / generation uses Claude via AsyncAnthropic.
+        self._llm_client = None
+        try:
+            import os
+            from anthropic import AsyncAnthropic
+
+            main_model = os.getenv("MAIN_LLM_MODEL", "claude-haiku-4-5-20251001")
+            api_key = os.getenv("ANTHROPIC_API_KEY", "")
+
+            if main_model.startswith("claude-") and api_key:
+                self._llm_client = AsyncAnthropic(api_key=api_key)
+                logger.info(f"[ADKTurnProcessor] Using direct Anthropic client for model={main_model}")
+            else:
+                logger.warning("[ADKTurnProcessor] MAIN_LLM_MODEL is not a claude-* model or ANTHROPIC_API_KEY missing; LLM calls will fail.")
+        except Exception as _client_err:
+            logger.error(f"[ADKTurnProcessor] Failed to init Anthropic client: {_client_err}")
 
         # All state is instance-level — no shared module-level state
         self.state = ConversationState()
@@ -961,11 +962,16 @@ class ADKTurnProcessor:
         # concurrently, then collect new extraction after LLM completes.
         if self._slot_extractor is None:
             try:
-                runner = self._get_gemini_runner()
-                self._slot_extractor = SlotExtractor(
-                    gemini_client=runner.llm_client,
-                    model=os.environ.get("SLOT_EXTRACTOR_MODEL", "claude-haiku-4-5@20251001"),
-                )
+                # Use the same Anthropic client we created for the main LLM
+                slot_model = os.environ.get("SLOT_EXTRACTOR_MODEL", "claude-haiku-4-5-20251001")
+                if self._llm_client is not None and hasattr(self._llm_client, "messages"):
+                    self._slot_extractor = SlotExtractor(
+                        gemini_client=None,  # not used when we pass anthropic_client
+                        anthropic_client=self._llm_client,
+                        model=slot_model,
+                    )
+                else:
+                    logger.warning("[SlotExtractor] No Anthropic client available — slot extraction disabled.")
             except Exception as _se_init_err:
                 logger.warning(f"[SlotExtractor] init failed (non-fatal): {_se_init_err}")
 
@@ -1400,18 +1406,8 @@ class ADKTurnProcessor:
                     ).strip()
                     logger.warning(f"  T{self.turn_idx}: POST-PARSE dedup send_sms")
 
-            # ── A2: Validation layer — policy guard ───────────── [validated ~430]
-            # Final gate: blocks structurally invalid calls even if
-            # forced commits or LLM erroneously included them.
-            validated_tools = [t for t in turn_tools if _validate_tool_call(t, self.state, self.all_tools)]
-            blocked_tools = set(turn_tools) - set(validated_tools)
-            if blocked_tools:
-                for _bt in blocked_tools:
-                    bot_response = re.sub(
-                        rf"\[TOOL:{re.escape(_bt)}\]", "", bot_response, flags=re.IGNORECASE
-                    ).strip()
-                    logger.warning(f"  T{self.turn_idx}: POLICY BLOCKED {_bt}")
-                turn_tools = validated_tools
+            # ── A2: Policy gate removed — v4_pipeline enforces commit gates ──
+            validated_tools = turn_tools
 
             # ── Layer 3 policy filter chain (Phase 8 — FINDING-003 fix) ──────────
             # Runs after all structural tool validation, before tool execution.

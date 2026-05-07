@@ -25,7 +25,7 @@ MENU_BROWSE = Node(
     tools=frozenset([
         "ai_greeting", "get_menu", "faq", "get_date_info", "end_call",
         "check_availability", "verify_address", "create_order", "create_reservation",
-        "send_sms", "get_weather", "get_directions", "get_nearby_parking",
+        "get_weather", "get_directions", "get_nearby_parking",
         "transfer_to_tier2", "technical_issues_callback",
         "request_callback", "transfer_to_human", "get_restaurant_info",
     ]),

@@ -22,7 +22,7 @@ FAQ = Node(
     tools=frozenset([
         "ai_greeting", "faq", "end_call", "get_weather", "get_menu",
         "get_date_info", "get_directions", "get_nearby_parking", "check_availability",
-        "create_order", "send_sms", "request_callback", "create_reservation",
+        "create_order", "request_callback", "create_reservation",
         "transfer_to_tier2", "technical_issues_callback", "transfer_to_human",
         "get_restaurant_info",
     ]),

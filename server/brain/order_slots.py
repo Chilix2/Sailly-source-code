@@ -248,6 +248,8 @@ class OrderSlots:
     @_deprecated_orderslots
     def merge_extraction(self, extraction: dict, turn_idx: int) -> List[str]:
         """
+        P9.1: merge_extraction deprecated — slot extractor removed.
+        
         Merge a SlotExtractor result into current slots.
         Returns list of slot names that were newly filled/updated.
 

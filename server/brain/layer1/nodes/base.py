@@ -39,6 +39,7 @@ class NodeId(str, Enum):
     LOST_AND_FOUND_NODE = "lost_and_found"
     GROUP_CATERING_NODE = "group_catering"
     ESCALATION = "escalation"
+    SMS_CONFIRMATION = "sms_confirmation"  # Phase 7.2 — post-commit verbal readback + optional SMS
 
 
 @dataclass(frozen=True)

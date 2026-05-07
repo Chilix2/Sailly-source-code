@@ -133,8 +133,14 @@ class NodeManager:
         ci = getattr(state, "captured_intents", None) or []
         idx = getattr(state, "current_intent_idx", None)
 
-        # No intents captured → stay at greeting
+        # No intents captured via the v4 path → check legacy intent flags before
+        # falling back to greeting, so the legacy reservation/order path transitions
+        # out of greeting correctly.
         if not ci or idx is None:
+            if getattr(state, "reservation_intent", False) and not getattr(state, "reservation_created", False):
+                return NodeId.RESERVATION
+            if getattr(state, "order_intent", False) and not getattr(state, "order_created", False):
+                return NodeId.ORDERING
             return NodeId.GREETING
 
         try:

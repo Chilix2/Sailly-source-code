@@ -70,8 +70,8 @@ ORDERING = Node(
         "\n"
         "=== NACH SAMMLUNG ALLER FELDER ===\n"
         "Kurze Zusammenfassung (nur Gerichte + Gesamtpreis + Adresse + Telefon), dann:\n"
-        "Bestätigung einholen → create_order → send_sms (Zahlungslink).\n"
-        "Sag 'Ich sende Ihnen einen Zahlungslink per SMS' — nicht 'Bestellbestätigung'.\n"
+        "Bestätigung einholen → create_order.\n"
+        "Nach erfolgreicher Bestellung: kurze Bestätigung aussprechen. Die SMS-Bestätigung wird automatisch vom System gesendet — erwähne SMS nicht.\n"
         "Lieferzeit ca. 30 bis 60 Minuten (Abholung ca. 15 bis 20 Minuten).\n"
         "\n"
         "=== KRITISCH: KEIN ALLERGEN-GEREDE OHNE GRUND ===\n"
@@ -91,7 +91,7 @@ ORDERING = Node(
         + WORD_CAP_RULE
     ),
     tools=frozenset([
-        "ai_greeting", "create_order", "send_sms", "get_menu", "verify_address",
+        "ai_greeting", "create_order", "get_menu", "verify_address",
         "get_date_info", "check_availability", "end_call",
         "create_reservation", "faq", "get_weather", "get_directions", "get_nearby_parking",
         "transfer_to_tier2", "technical_issues_callback",

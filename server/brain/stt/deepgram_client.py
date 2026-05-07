@@ -8,6 +8,8 @@ configuration in one place rather than scattered through main.py.
 from __future__ import annotations
 
 from typing import Any, Dict, Optional
+from pipecat.transcriptions.language import Language
+from pipecat.services.deepgram.flux.stt import DeepgramFluxSTTSettings
 
 
 _DEFAULTS: Dict[str, Any] = {
@@ -79,3 +81,47 @@ def get_stt_endpoint(tenant_cfg) -> Optional[str]:
         if not isinstance(audio_cfg, dict):
             audio_cfg = {}
     return audio_cfg.get("stt_endpoint") or None
+
+
+_FLUX_EU_ENDPOINT = "wss://api.eu.deepgram.com/v2/listen"
+
+
+def build_flux_stt_settings(tenant_cfg) -> Dict[str, Any]:
+    """Return a kwargs dict suitable for ``DeepgramFluxSTTService``.
+
+    Builds Deepgram Flux STT settings with:
+    - EU endpoint for GDPR compliance
+    - mip_opt_out=True to disable Model Improvement Program
+    - flux-general-multi model for multilingual German support
+
+    P2.1/P2.2 tuning:
+    - eot_threshold 0.7 → 0.6: more aggressive semantic EOT (-50–100ms latency).
+      A/B 3 days: revert to 0.65 if utterance-fragmentation rate rises above 5%.
+    - eot_timeout_ms 1200 → 3000: the old 1.2s hard cut was the real latency bug.
+      The semantic model now decides; timeout is a last resort for genuinely silent
+      callers only.
+
+    Args:
+        tenant_cfg: A ``TenantConfig`` instance (or dict).
+
+    Returns:
+        Dict ready to be unpacked into ``DeepgramFluxSTTService(**kwargs)``.
+    """
+    base_kwargs: Dict[str, Any] = {
+        "model": "flux-general-multi",
+        "language": Language.DE,
+        "eot_threshold": 0.6,        # P2.1: was 0.7 — more aggressive semantic EOT
+        "eot_timeout_ms": 3000,      # P2.2: was 1200 — last-resort fallback only
+    }
+    # P8.4: enable EagerEndOfTurn events when the SDK supports the field.
+    # Speculative workers fire on EagerEndOfTurn (~200-400ms head-start).
+    try:
+        settings = DeepgramFluxSTTSettings(**base_kwargs, eager_eot_threshold=0.5)
+    except TypeError:
+        # SDK without eager_eot support — speculative path stays dormant.
+        settings = DeepgramFluxSTTSettings(**base_kwargs)
+    return {
+        "url": _FLUX_EU_ENDPOINT,
+        "mip_opt_out": True,
+        "settings": settings,
+    }

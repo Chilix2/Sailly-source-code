@@ -180,8 +180,9 @@ _EXTRACTOR_SYSTEM = (
 class SlotExtractor:
     """Mini LLM call that extracts slots from one utterance via Claude Haiku (Vertex AI, EU)."""
 
-    def __init__(self, gemini_client, model: str = "claude-haiku-4-5@20251001"):
-        self._client = gemini_client
+    def __init__(self, gemini_client=None, anthropic_client=None, model: str = "claude-haiku-4-5-20251001"):
+        # Prefer Anthropic client (direct API) when provided; fall back to legacy Gemini client param name.
+        self._client = anthropic_client or gemini_client
         self._model = model
         # Phase 9 A1: last usage_metadata from generate_content call.
         # Read by adk_turn_processor after the extraction task completes

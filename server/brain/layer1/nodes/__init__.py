@@ -34,6 +34,7 @@ from server.brain.layer1.nodes.payment_issue import PAYMENT_ISSUE
 from server.brain.layer1.nodes.lost_and_found import LOST_AND_FOUND
 from server.brain.layer1.nodes.group_catering import GROUP_CATERING
 from server.brain.layer1.nodes.escalation import ESCALATION
+from server.brain.layer1.nodes.sms_confirmation import SMS_CONFIRMATION
 
 REGISTRY: Dict[NodeId, Node] = {
     NodeId.GREETING: GREETING,
@@ -57,6 +58,7 @@ REGISTRY: Dict[NodeId, Node] = {
     NodeId.LOST_AND_FOUND_NODE: LOST_AND_FOUND,
     NodeId.GROUP_CATERING_NODE: GROUP_CATERING,
     NodeId.ESCALATION: ESCALATION,
+    NodeId.SMS_CONFIRMATION: SMS_CONFIRMATION,
 }
 
 # --- import-time validation ---
@@ -68,8 +70,8 @@ for _node_id, _node in REGISTRY.items():
     _seen_values.add(_node_id.value)
     _node.validate()
 
-assert len(REGISTRY) == 21, (
-    f"REGISTRY must have exactly 21 nodes, got {len(REGISTRY)}"
+assert len(REGISTRY) == 22, (
+    f"REGISTRY must have exactly 22 nodes, got {len(REGISTRY)}"
 )
 
 del _seen_values, _node_id, _node

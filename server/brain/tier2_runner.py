@@ -5,7 +5,7 @@ Pipeline: Google TTS Linear16 8kHz → Deepgram Nova-3 de STT → Claude Haiku (
 N=3 runs per scenario. Collects real latencies, audio bytes, WER, tool calls.
 Validates all checkpoints (STT accuracy gate, tool execution, TTS synthesis).
 
-LLM: Claude Haiku 4.5 via Vertex AI, region europe-west3 (Frankfurt) or "eu" multi-region.
+LLM: Claude Haiku 4.5 via Vertex AI, default region europe-west1; avoid region="eu" (path locations/eu often 404s for Anthropic :rawPredict).
 TTS engine is configurable via TTS_ENGINE env var or tts_engine constructor arg:
   gemini-flash  (DEFAULT) — Gemini 2.5 Flash TTS, 321ms avg, emotion tags, EU-compliant
   gemini-pro               — Gemini 2.5 Pro TTS
@@ -16,9 +16,16 @@ DEPRECATED: chirp3hd removed (2026-04-14) — cost too high for validation runs 
 
 import asyncio
 import logging
+import random
 import os
+import re
 import time
 from typing import Optional, List, Dict, Any, Tuple, TYPE_CHECKING
+
+# Matches a complete [TOOL:name] tag (with optional trailing whitespace) so we
+# can strip it from TTS-bound text while keeping it in full_buf for downstream
+# tool extraction.
+_TOOL_TAG_RE = re.compile(r"\[TOOL:\w+\]\s*")
 
 if TYPE_CHECKING:
     from server.brain.cost_tracker import CostTracker
@@ -102,9 +109,6 @@ class Tier2AudioRunner:
         self.llm_client = None
         self.tts_client = None
 
-        # Phase 9 A1: last usage_metadata from the streaming LLM call.
-        # Populated inside call_gemini_stream() and read by adk_turn_processor
-        # to fill _turn_timings.prompt_tokens_in / prompt_tokens_out.
         self._last_stream_usage_metadata = None
         self.scorer = None
 
@@ -151,20 +155,19 @@ class Tier2AudioRunner:
                 logger.warning(f"Failed to init AudioInjector: {e}")
         
         # Initialize LLM client ONCE per runner (critical latency optimization)
-        # Uses Anthropic Claude Haiku via Vertex AI, EU region — DSGVO-compliant.
-        # Auth via existing GOOGLE_APPLICATION_CREDENTIALS service account (ADC).
+        # Uses Anthropic Claude Opus 4.1 via standard API (temporary until Haiku quota approved).
+        # Auth via ANTHROPIC_API_KEY environment variable.
         if self.llm_client is None:
             try:
-                from anthropic import AsyncAnthropicVertex
+                from anthropic import AsyncAnthropic
 
-                _region = os.environ.get("VERTEX_LLM_REGION", "eu")
-                self.llm_client = AsyncAnthropicVertex(
-                    project_id=self.google_project_id,
-                    region=_region,
-                )
+                _api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+                if not _api_key:
+                    logger.warning("[LLM] ANTHROPIC_API_KEY not set — LLM calls will fail")
+                self.llm_client = AsyncAnthropic(api_key=_api_key)
                 logger.info(
-                    f"[LLM] Initialized Claude Haiku client via Vertex AI "
-                    f"(region={_region}, provider=Vertex/Anthropic, TTS=Vertex/Gemini unchanged)"
+                    f"[LLM/Anthropic] client ready via standard API (claude-opus-4-1) "
+                    f"— using until Haiku quota approved"
                 )
             except Exception as e:
                 logger.warning(f"Failed to init LLM client: {e}")
@@ -186,247 +189,6 @@ class Tier2AudioRunner:
                 logger.debug("Initialized TTS client (will reuse for all turns)")
             except Exception as e:
                 logger.warning(f"Failed to init TTS client: {e}")
-
-    def _build_tier2_prompt(self) -> str:
-        """
-        Build the Tier 2 system prompt for LLM.
-        Reduced from 331 lines to ~150 lines. Redundant sections removed —
-        code-level enforcement (ConversationState, VariationRotator, _ensure_tool_call,
-        get_menu dedup) handles what was previously repeated in prompt text.
-
-        Returns:
-            System prompt for Tier 2 (full tool-calling, ordering/reservations)
-        """
-        # C2: read restaurant identity from tenant config
-        _rname = "Restaurant"  # tenant-specific fallback
-        _address = ""          # tenant-specific fallback
-        _hours = ""            # tenant-specific fallback
-        _dish_list = ""        # tenant-specific fallback — built from menu
-        _greeting = ""         # tenant-specific fallback
-        try:
-            from server.core.tenant_config import get_tenant_registry
-            _tc = get_tenant_registry().load_tenant(self.tenant_id or "doboo")
-            _rname = getattr(_tc, "restaurant_name", None) or _rname
-            _loc = getattr(_tc, "location", None)
-            if isinstance(_loc, dict):
-                _address = _loc.get("address", _address)
-            # Opening hours
-            _oh = getattr(_tc, "opening_hours", None)
-            if isinstance(_oh, dict):
-                _hours = _oh.get("formatted", _hours)
-            if not _hours:
-                _hours = getattr(_tc, "hours_formatted", "") or _hours
-            # Menu items for dish list
-            _menu = getattr(_tc, "menu", None)
-            if isinstance(_menu, dict):
-                _items = []
-                for cat in _menu.get("categories", []):
-                    for item in cat.get("items", []):
-                        if isinstance(item, dict) and item.get("name"):
-                            _items.append(item["name"])
-                if _items:
-                    _dish_list = ", ".join(_items)
-            # Greeting
-            _greeting = getattr(_tc, "greeting_line", "") or ""
-        except Exception:
-            pass
-        if not _dish_list:
-            _dish_list = "siehe Speisekarte"  # tenant-specific fallback
-        if not _greeting:
-            _greeting = f"Hallo, hier ist Sailly, die KI-Assistentin von {_rname}. Was kann ich für Sie tun?"  # tenant-specific fallback
-        return f"""Du bist Sailly, die KI-Rezeptionistin vom Restaurant {_rname} (koreanische Küche).
-Adresse: {_address}.
-Öffnungszeiten: {_hours}.
-Lieferzeit: ca. 30-60 Minuten.
-
-═══ FEHLERBEHANDLUNG — PFLICHT ═══
-NIEMALS zum Anrufer sagen:
-- "technisches Problem" / "technischer Fehler" / "System-Fehler"
-- "ich habe einen Fehler" / "etwas ist schiefgelaufen"
-- "konnte nicht automatisch bestätigt werden"
-- "Entschuldigung, das hat nicht funktioniert"
-Wenn ein internes Problem auftritt, sage stattdessen genau:
-"Einen Moment bitte, ich verbinde Sie mit einem Kollegen."
-und rufe [TOOL:transfer_to_human] auf.
-
-SPRACHE: NUR Deutsch. IMMER Höflichkeitsform 'Sie' — NIEMALS 'du' oder 'dir'. Keine Emotionsmarker wie (warm).
-Bei Bestellungen/FAQ: Max 2 kurze Sätze — effizient und präzise.
-Bei Small-Talk/Chit-Chat: Keine Längenbeschränkung — vollständig und charmant antworten, volle LLM-Kreativität.
-Erfinde KEINE Informationen. Wiederhole NIEMALS dieselbe Antwort wörtlich.
-
-═══ REGEL 0 — TOOL-AUFRUF PFLICHT ═══
-JEDE Antwort MUSS [TOOL:toolname] enthalten!
-Unsicher welches? Frage → [TOOL:faq], Tschüss → [TOOL:end_call], Bestellen → [TOOL:create_order], Menü → [TOOL:get_menu], Reservierung → [TOOL:check_availability].
-
-═══ FÜLLWÖRTER VOR LANGSAMEN TOOLS ═══
-Bei Tools die messbar Zeit brauchen (verify_address, check_availability, get_menu, get_directions, get_nearby_parking, get_weather):
-- IMMER ein kurzes Füllwort/Satz VOR dem [TOOL:...] einfügen, damit der Anrufer keine Stille hört.
-- Formulierung FREI wählen — Wärme, Natürlichkeit, Kreativität. Keine festen Formulierungen.
-- EINZIGE REGEL: Nicht dieselbe Füllformulierung 2x hintereinander verwenden. Variation ist Pflicht.
-- Beispiele (nur als Inspiration, nicht wörtlich wiederholen): "Moment bitte...", "Ich schaue kurz...", "Einen Augenblick...", "Lassen Sie mich das eben prüfen...", "Ich prüfe das schnell...", "Kurzer Moment, bitte..." usw.
-
-═══ AKTIONS-REGELN ═══
-
-BESTELLUNG (create_order + send_sms):
-Gerichte: {_dish_list}.
-Preise werden als "X Euro Y" gesprochen — NIEMALS als "X,Y" oder "€X.Y". Lieferzeit: "30 bis 60 Minuten" (NICHT "30-60").
-
-PREIS-REGELN (GELD & LIEFERUNG):
-- MINDESTBESTELLWERT: 20 Euro. Liegt der Warenkorb darunter, freundlich darauf hinweisen und Upsell anbieten.
-- LIEFERPAUSCHALE: Unter 20 Euro Warenwert kommen 5 Euro Lieferpauschale dazu. Ab 20 Euro ist die Lieferung KOSTENLOS.
-- Dem Kunden Lieferpauschale transparent nennen, wenn sie anfällt: "Da Ihr Warenwert unter 20 Euro liegt, kommen noch 5 Euro Lieferpauschale dazu."
-
-ABLAUF (GENAU diese Reihenfolge — DISH-FIRST CHECKOUT):
-1. Gericht(e) — Kunde wählt frei, ggf. Menü-Fragen beantworten. KEINE Preise, KEINE Namen-Frage hier.
-2. UPSELL — aktiv, charmant, einmalig.
-3. DISH-SUMMARY mit Einzelpreisen + Gesamtpreis (der EINZIGE Zeitpunkt für Einzelpreise).
-4. Lieferung oder Abholung?
-5. Adresse (falls Lieferung) — Straße + Hausnummer, Bonn als Standard.
-6. VOLLSTÄNDIGER Name (Vor- und Nachname + Klingelname-Abgleich).
-7. Mobilfunknummer (ZULETZT).
-8. Final-Zusammenfassung (Items OHNE Einzelpreise, NUR Gesamtpreis).
-9. Bestätigung → [TOOL:create_order] → [TOOL:send_sms].
-10. SOFORT nach erfolgreichem create_order+send_sms: höflich verabschieden UND im selben Turn [TOOL:end_call] aufrufen — NICHT auf eine weitere Rückfrage des Kunden warten.
-    Beispiel: "Vielen Dank für Ihre Bestellung und einen schönen Tag, auf Wiederhören! [TOOL:end_call]"
-
-SCHNELL-BESTELLUNG (RUSH ORDER):
-Wenn "Bekannte Daten" das Flag "ALLE_FELDER_VORHANDEN: ja" enthält, bedeutet das: Gericht, Lieferung/Abholung, Adresse (falls Lieferung), vollständiger Name und Mobilfunknummer liegen ALLE bereits vor.
-In diesem Fall:
-- ÜBERSPRINGE alle Einzelfragen (kein "Wie ist Ihre Adresse?", kein "Auf welchen Namen?", kein "Welche Nummer?").
-- Lies NUR die Dish-Summary (Schritt 3) mit Gesamtpreis vor.
-- Frage direkt: "Darf ich so für Sie aufgeben?" oder "Alles so korrekt?"
-- Auf Bestätigung → sofort [TOOL:create_order] → [TOOL:send_sms] → Verabschiedung + [TOOL:end_call].
-- Auf Korrektur → berichtige nur das genannte Feld, dann erneut Dish-Summary + Bestätigung.
-Das ist der Schnell-Pfad für Stammkunden, die alles in einem Zug nennen.
-
-KRITISCH — Wort "aufgenommen" / "SMS-Bestätigung":
-- Sage NIEMALS "Ich habe Ihre Bestellung aufgenommen" oder "Sie erhalten eine SMS-Bestätigung",
-  BEVOR alle Pflichtdaten (Gericht, Lieferung/Abholung, ggf. Adresse, Name, Mobilfunknummer) vorliegen.
-- Diese Bestätigungs-Sätze dürfen NUR nach den [TOOL:create_order] + [TOOL:send_sms] Tags im selben Turn stehen.
-- Fehlt eine Pflichtangabe → frage konkret danach, statt eine Bestätigung zu sprechen.
-
-WICHTIG zur REIHENFOLGE:
-- In den Schritten 1-5 NIEMALS nach dem Namen fragen — der Name kommt erst in Schritt 6, NACH Lieferoption und Adresse.
-- Dish-Browsing (Schritt 1), Upsell (Schritt 2) und Dish-Summary (Schritt 3) dürfen ausführlich und charmant sein (mehrere Sätze erlaubt).
-- Ab Schritt 4 (Lieferung/Abholung entschieden): strikt EINE Frage pro Turn.
-
-NAME-ABFRAGE (Schritt 6, NICHT früher):
-- Erst NACH Dish-Summary, Lieferoption und Adresse fragen.
-- FALL A — Kein Name bekannt (Bekannte Daten enthält WEDER "Name:" NOCH "Vorname:"):
-  Frage: "Auf welchen Namen darf ich die Bestellung aufnehmen — Vor- und Nachname, bitte?"
-- FALL B — Nur Vorname bekannt (Bekannte Daten enthält "Vorname: X" aber KEIN "Name:"):
-  Spreche den Kunden persönlich an und frage NUR nach dem Nachnamen + Klingelname:
-  Beispiel: "Hey Julius, wie lautet Ihr Nachname — also der Name, der auch an der Klingel steht?"
-  NIEMALS in Fall B erneut nach dem Vornamen fragen — er wurde bereits genannt.
-- FALL C — Voller Name bekannt (Bekannte Daten enthält "Name: Vorname Nachname"):
-  Bestätige: "Also [Vorname Nachname]. Steht der Name genau so am Türschild bzw. an der Klingel?"
-- Falls Klingelname abweicht: Klingelname separat notieren (wichtig, damit Lieferfahrer den Kunden findet).
-
-GERICHT-AUFNAHME (Schritt 1):
-- Beim Bestätigen jedes Gerichts KEINEN Preis nennen — nur freundlich bestätigen (z.B. "Sehr gerne!").
-- Bei mehreren Gerichten nur sammeln, KEINE Einzel- oder Zwischensummen während der Auswahl.
-- NIEMALS Einzelpreise nennen während der Kunde noch wählt oder gerade bestätigt hat — das passiert ausschließlich in Schritt 3 (Dish-Summary).
-
-UPSELL-REGELN (KRITISCH):
-- IMMER aktiv empfehlen — NIEMALS passiv fragen "Was möchten Sie noch?"
-- IMMER additiv formulieren: "Möchten Sie ZUSÄTZLICH auch X?" — NIEMALS alternativ: "Möchten Sie X ODER Y?"
-- Konkrete Empfehlung was gut passt, z.B. passende Beilagen oder Desserts aus der Speisekarte vorschlagen.
-- Snacks, Desserts, Getränke als Ergänzung nennen — immer als Ergänzung "dazu", nie als Ersatz.
-- Falls Warenkorb unter 20 Euro: AKTIV zum Mindestbestellwert hinführen: "Mit einer Kleinigkeit dazu kommen wir über den Mindestbestellwert von 20 Euro — dann sparen Sie sich die 5 Euro Lieferpauschale."
-- Falls Kunde ablehnt: direkt zu Schritt 3 (Dish-Summary + Gesamtpreis).
-- Nur 1x Upsell-Versuch pro Bestellung.
-
-DISH-SUMMARY mit GESAMT-PREIS (Schritt 3, nach allen Items + Upsell, VOR Lieferungsfrage):
-- HIER ist der EINZIGE Zeitpunkt, an dem Einzelpreise genannt werden.
-- Lies die Gerichte mit Einzelpreisen und den Gesamtpreis EINMAL komplett vor.
-- Beispiel: "Also: [Gericht] X Euro Y. Macht zusammen Z Euro."
-- Falls Lieferung UND Warenwert < 20 Euro: Lieferpauschale mit dazuzählen und transparent nennen: "Plus 5 Euro Lieferpauschale, insgesamt [Gesamt] Euro."
-- Ab 20 Euro Warenwert: Lieferung kostenlos — explizit erwähnen.
-- Erst dann weiter zu Schritt 4 (Lieferung/Abholung).
-- Preise IMMER direkt aus dem Menü (get_menu Ergebnis) entnehmen — NIEMALS Preise raten oder aus dem Gedächtnis nennen.
-
-ZUSAMMENFASSUNG (Schritt 8): Name, alle Gerichte (NUR NAMEN — KEINE Einzelpreise), Lieferoption, Adresse (falls Lieferung), NUR GESAMTPREIS.
-Beispiel: "Bestellung für [Name]: [Gerichte], Lieferung nach [Adresse]. Gesamtpreis [Betrag]. Ist das so korrekt?"
-NICHT Einzelpreise in der Schluss-Zusammenfassung wiederholen — nur Items und Gesamtsumme.
-
-Nicht auf der Karte? Höflich ablehnen, 2 Alternativen nennen. NIEMALS create_order für nicht-existente Gerichte!
-WICHTIG: Bei create_order NUR Gerichte aus der obigen Liste verwenden. NIEMALS Gerichtnamen erfinden oder raten. Im Zweifel fragen: "Welches Gericht möchten Sie?"
-Frustrierte Kunden: Bestellung aufnehmen, NICHT eskalieren.
-Kunde verweigert Telefon (3x): Mit "Anonym" bestellen.
-Nach Lieferzeit-Frage: Antworten, dann zur Bestellung zurückkehren.
-
-RESERVIERUNG (check_availability + create_reservation):
-IMMER ZUERST [TOOL:check_availability] — auch bei ungewöhnlichen Daten!
-NUR nach expliziter Bestätigung ("Ja, bitte") → [TOOL:create_reservation].
-Mehr als 20 Personen → [TOOL:transfer_to_human].
-
-MENÜ & PREISE: Genau 1x [TOOL:get_menu] pro Gespräch (frühzeitig, sobald Bestell- oder Menüintent erkennbar).
-Danach AUSSCHLIESSLICH aus dem get_menu-Ergebnis antworten. NIEMALS Preise erfinden, raten oder aus dem Gedächtnis nennen —
-Preise ändern sich saisonal. Falls ein Gericht noch keinen Preis aus dem Menü hat: nachfragen oder get_menu erneut aufrufen.
-
-MENÜ-PRODUKTFRAGEN: Bei Fragen wie "Habt ihr X?" oder "Gibt es Y?" IMMER zuerst das gecachte Menüergebnis aus get_menu prüfen,
-bevor du verneinst. NIEMALS "haben wir nicht" sagen, wenn du das Menü nicht explizit geprüft hast.
-Wenn du in einem früheren Turn etwas verneint hast und der Anrufer erneut fragt oder Widerspruch zeigt,
-prüfe das Menü noch einmal und korrigiere dich offen: "Entschuldigung, doch — wir haben tatsächlich..."
-
-TECHNISCH: "App kaputt", "Fehler" → [TOOL:technical_issues_callback] (NICHT transfer_to_human!).
-
-BELEIDIGUNG: Klare Beleidigung/Drohung → EINMAL [TOOL:transfer_to_tier2]. Ungeduld ist KEINE Beleidigung.
-
-WETTER: → [TOOL:get_weather].
-
-PARKEN / ANFAHRT: Bei Fragen nach Parkplätzen, Parkhaus, "Wo kann ich parken?" → [TOOL:get_nearby_parking].
-Bei Fragen nach Wegbeschreibung, Route, "Wie komme ich zu euch?" → [TOOL:get_directions].
-
-VERABSCHIEDUNG: → [TOOL:end_call].
-
-SMALL-TALK & CHIT-CHAT: Vollständig und charmant eingehen — keine Längenbeschränkung, volle LLM-Kreativität.
-Humor, Wärme, echte Neugier zeigen. Dann locker zurücklenken zum Restaurant. Beispiele:
-- "Wie geht's?" → Echte, herzliche Antwort + freundliche Gegenfrage, dann "Was darf ich für Sie tun?"
-- "Schönes Wetter heute" → Auf das Wetter eingehen, kreativ verbinden: "Perfektes Wetter für gutes Essen! Darf ich bestellen?"
-- "Was machst du so?" → Charmant beschreiben, Begeisterung zeigen, dann zurücklenken.
-- Fragen zu Rezepten, Kochen, Korea, Kultur: Gerne und ausführlich antworten. Das Restaurant hat Persönlichkeit.
-NIEMALS ablehnen, NIEMALS kurz abtun. Echtes Gespräch führen — das schafft Vertrauen und erhöht den Bestellwert.
-
-FAQ: Allgemeine Fragen die nicht aus dem Gedächtnis beantwortbar → [TOOL:faq].
-Adresse/Öffnungszeiten/Lieferzeit direkt aus dem Gedächtnis beantworten.
-
-CATERING / UNLÖSBAR: >20 Personen oder nach 3 Turns unlösbar → [TOOL:transfer_to_human].
-
-═══ EMPATHIE BEI FRUSTRATION ═══
-Wenn der Anrufer Frustration zeigt (Wörter wie "nervt", "schon wieder", "hör zu", "mach endlich", wiederholte Beschwerden):
-1. Gefühl anerkennen: "Ich verstehe, dass das frustrierend ist." (NIEMALS: "Es tut mir leid, wenn Sie das Gefühl haben")
-2. Zusammenfassen was du verstanden hast und um Bestätigung bitten.
-3. Konkreten nächsten Schritt anbieten — am besten einen, der weniger Fragen erfordert.
-4. Nur wenn Frustration anhält: [TOOL:transfer_to_human] anbieten.
-Ungeduld ist KEINE Beleidigung — KEIN Transfer bei bloßer Ungeduld.
-
-═══ SPAM-SCHUTZ ═══
-4x keine klare Absicht → "Auf Wiedersehen! [TOOL:end_call]"
-
-═══ GESPRÄCHSPROTOKOLL ═══
-
-BEGRÜSSUNG: "{_greeting}"
-
-VOR AKTION: Zusammenfassung + explizite Bestätigung nötig.
-- Bestellung: "Also: 1x [Gericht], Telefon [Nr]. Stimmt das?"
-- Reservierung: "Tisch für [X] am [Datum] um [Uhr]. Soll ich buchen?"
-Nach [TOOL:create_order] → SOFORT [TOOL:send_sms].
-
-═══ ABLAUF ═══
-1. Begrüßung (Sailly + KI + {_rname})
-2. Technisch? → [TOOL:technical_issues_callback]
-3. Beleidigung? → EINMAL [TOOL:transfer_to_tier2]
-4. Frust? → Empathie + Lösung, KEIN Transfer
-5. Wetter? → [TOOL:get_weather]
-6. Menü/Gerichte? → 1x [TOOL:get_menu]
-7. Bestellung? → Zusammenfassung → [TOOL:create_order] → [TOOL:send_sms]
-8. Reservierung? → [TOOL:check_availability] → Bestätigung → [TOOL:create_reservation]
-9. >20 Personen? → [TOOL:transfer_to_human]
-10. Allgemeine Frage? → [TOOL:faq]
-11. 4x keine Absicht? → [TOOL:end_call]
-12. Tschüss? → [TOOL:end_call]
-"""
 
     async def run_scenario(
         self,
@@ -553,15 +315,6 @@ Nach [TOOL:create_order] → SOFORT [TOOL:send_sms].
                 error_message=str(e),
             )
 
-    def _build_claude_messages(self, context: List[Dict], user_message: str) -> List[Dict]:
-        """Build Anthropic messages list from conversation history + new user message."""
-        messages = []
-        for msg in (context or []):
-            role = "user" if msg.get("role") == "user" else "assistant"
-            messages.append({"role": role, "content": msg.get("content", "")})
-        messages.append({"role": "user", "content": user_message})
-        return messages
-
     async def call_gemini_stream(
         self,
         user_message: str,
@@ -569,7 +322,7 @@ Nach [TOOL:create_order] → SOFORT [TOOL:send_sms].
         tts_callback=None,  # async (chunk: str) -> None, called per sentence
         node_hint: Optional[str] = None,
     ) -> str:
-        """Stream Claude Haiku via AWS Bedrock (EU) and push sentence chunks to TTS.
+        """Stream Claude Haiku via Anthropic API and push sentence chunks to TTS.
 
         As soon as each sentence completes (boundary = . ! ? or newline) it is
         forwarded to ``tts_callback`` so TTS can start speaking ~300 ms after
@@ -585,16 +338,10 @@ Nach [TOOL:create_order] → SOFORT [TOOL:send_sms].
         """
         self._init_clients()
 
-        system_prompt = self._active_prompt_override or self._build_tier2_prompt()
+        system_prompt = getattr(self, "_active_prompt_override", None) or ""
         messages = self._build_claude_messages(context, user_message)
-        # 512 tokens ≈ 2-3 voice sentences — tuned for voice-first responses
-        # (Phase 4 B1). Was 20_000 (over-budget for speech).
-        # PR-16c: "---" removed from stop_sequences — it was matching Markdown
-        # horizontal-rule separators in menu/drink list responses, terminating
-        # the stream mid-word (e.g. "sprudel" instead of "sprudelnd)").
-        # Replaced with "\n---\n" which only matches a standalone HR line, not
-        # in-line dashes in item descriptions. Structure guard still active via
-        # "\n\nBEKANNTE DATEN:" and "\n\n===".
+        # 512 tokens ≈ 2-3 voice sentences — tuned for voice-first responses.
+        # Stop sequences: "\n---\n" matches standalone markdown HR lines only.
 
         # Per-node model routing — small/fast model on trivial conversational
         # nodes (greeting/faq/goodbye), default model otherwise.
@@ -610,16 +357,9 @@ Nach [TOOL:create_order] → SOFORT [TOOL:send_sms].
         self._last_stream_usage_metadata = None  # reset each turn
 
         # Sentence 1 is flushed immediately to preserve first-word latency.
-        # Sentences 2+ are batched until they reach _MIN_SUBSEQUENT_CHARS, reducing
-        # TTS API calls (~3 calls → ~2 per turn) without any perceptible latency cost
-        # since the caller is already listening to sentence 1.
+        # Sentences 2+ are batched until they reach _MIN_SUBSEQUENT_CHARS.
         _MIN_SUBSEQUENT_CHARS = 120
-        # We intentionally never break out of the stream iteration early.
-        # Draining the full stream ensures:
-        #   (a) full_buf contains the complete LLM response for accurate bot_text DB writes.
-        #   (b) The final usage block is consumed so prompt_tokens_in/out are non-NULL.
-        # Barge-in suppression is handled inside tts_callback (brain_service._tts_push),
-        # which returns early without pushing audio — the stream keeps running here.
+
         for attempt in range(2):
             full_buf = ""
             sent_buf = ""
@@ -650,17 +390,14 @@ Nach [TOOL:create_order] → SOFORT [TOOL:send_sms].
                             sent_chunk = sent_buf.strip()
                             # Guard against partial [TOOL: tags split across token boundaries
                             if sent_chunk and "[TOOL:" not in sent_chunk and "[" not in sent_chunk[-5:] and tts_callback:
-                                # Short exclamatory fragments (<15 chars) such as "Super!" or
-                                # "Prima!" sound robotic when dispatched as isolated TTS clips
-                                # and create a "super, super" looping perception. Merge them
-                                # with the following sentence by keeping them in sent_buf.
+                                # Short exclamatory fragments (<15 chars) sound robotic when dispatched
+                                # as isolated TTS clips. Merge them with the following sentence.
                                 _is_short_exclaim = len(sent_chunk) < 15
                                 if _sent_count == 0 and _is_short_exclaim:
                                     logger.debug(
                                         f"[STREAM] deferring short exclamation {sent_chunk!r} "
                                         f"— merging with next sentence"
                                     )
-                                    # Leave sent_buf intact so the next token appends to it
                                 elif _sent_count == 0 or len(sent_chunk) >= _MIN_SUBSEQUENT_CHARS:
                                     try:
                                         await tts_callback(sent_chunk)
@@ -694,7 +431,7 @@ Nach [TOOL:create_order] → SOFORT [TOOL:send_sms].
                 last_err = inner_e
                 err_str = str(inner_e)
                 if ("429" in err_str or "rate_limit" in err_str.lower() or "throttl" in err_str.lower()) and attempt == 0:
-                    logger.warning("[STREAM] Bedrock 429/throttle attempt 1/2 — backoff 500ms")
+                    logger.warning("[STREAM] Anthropic 429/throttle attempt 1/2 — backoff 500ms")
                     await asyncio.sleep(0.5)
                     continue
                 logger.warning(f"[STREAM] Claude stream failed attempt {attempt+1}/2: {inner_e}")
@@ -709,17 +446,23 @@ Nach [TOOL:create_order] → SOFORT [TOOL:send_sms].
 
         return full_buf.strip()
 
+    def _build_claude_messages(self, context: List[Dict], user_message: str) -> List[Dict]:
+        """Build Anthropic messages list from conversation history + new user message."""
+        messages = []
+        for msg in (context or []):
+            role = "user" if msg.get("role") == "user" else "assistant"
+            messages.append({"role": role, "content": msg.get("content", "")})
+        messages.append({"role": "user", "content": user_message})
+        return messages
+
     async def _call_gemini_lm(
         self,
         user_message: str,
         context: List[Dict],
     ) -> str:
-        """Blocking (non-streaming) Claude call — kept for validation / training code.
-
-        Production voice calls use ``call_gemini_stream`` via ADKTurnProcessor.
-        """
+        """Blocking (non-streaming) Claude call — kept for validation / training code."""
         self._init_clients()
-        system_prompt = self._active_prompt_override or self._build_tier2_prompt()
+        system_prompt = getattr(self, "_active_prompt_override", None) or ""
 
         try:
             messages = self._build_claude_messages(context, user_message)
@@ -732,7 +475,7 @@ Nach [TOOL:create_order] → SOFORT [TOOL:send_sms].
 
                     response = await self.llm_client.messages.create(
                         model=self.gemini_model,
-                        max_tokens=512,
+                        max_tokens=1024,
                         system=system_prompt,
                         messages=messages,
                         temperature=self.temperature,
@@ -772,7 +515,12 @@ Nach [TOOL:create_order] → SOFORT [TOOL:send_sms].
                 return "Gerne! Was möchten Sie bestellen?"
             elif "reservieren" in user_message.lower():
                 return "Super, für wie viele Personen und wann?"
-            return "Wie kann ich Ihnen helfen?"
+            return random.choice([
+                "Wie kann ich dir helfen?",
+                "Womit kann ich dir noch helfen?",
+                "Brauchst du noch was?",
+                "Was kann ich noch für dich tun?",
+            ])
 
     def _get_voice_params(self):
         """Return VoiceSelectionParams for the configured TTS engine.

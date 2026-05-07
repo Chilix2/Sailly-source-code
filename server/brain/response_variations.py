@@ -46,6 +46,30 @@ VARIATION_POOLS: dict[str, dict[str, list[str]]] = {
             "Darf es noch etwas sein?",
             "Moechten Sie noch etwas hinzufuegen?",
             "Kann ich noch etwas fuer Sie tun?",
+            # Fix J3: More natural conversation alternatives
+            "Sonst noch was?",
+            "Brauchst du noch was?",
+            "Noch was anderes?",
+            "Womit kann ich dir sonst noch helfen?",
+        ],
+        # Fix L4: New variation topics for improved naturalness
+        "apology": [
+            "Entschuldigung, das war von mir nicht gut.",
+            "Sorry, das hätte besser laufen können.",
+            "Mein Fehler — lass mich es besser machen.",
+            "Entschuldige, das habe ich verbockt.",
+        ],
+        "off_topic_redirect": [
+            "Dazu kann ich dir nicht helfen, aber beim Essen oder einer Reservierung bin ich deine Frau!",
+            "Das ist nicht meine Stärke, aber gerne helfe ich beim Restaurant weiter.",
+            "Das kann ich nicht — aber lass mich dir beim DOBOO helfen!",
+            "Dafür bin ich nicht zuständig, aber Essen bestellen oder reservieren — da bin ich die Richtige!",
+        ],
+        "connection_issue": [
+            "Moment bitte, die Leitung ist kurz gestört.",
+            "Entschuldigung, kurz Störung — ich bin gleich wieder da.",
+            "Einen Augenblick, ich höre dich gleich besser.",
+            "Kurz Probleme hier — ein Moment bitte.",
         ],
     },
     # Empty scaffolding — Phase 10 (multi-tenant) populates as needed
@@ -54,12 +78,18 @@ VARIATION_POOLS: dict[str, dict[str, list[str]]] = {
         "opening_hours": [],
         "ask_for_order": [],
         "anything_else": [],
+        "apology": [],
+        "off_topic_redirect": [],
+        "connection_issue": [],
     },
     "fr": {
         "delivery_time": [],
         "opening_hours": [],
         "ask_for_order": [],
         "anything_else": [],
+        "apology": [],
+        "off_topic_redirect": [],
+        "connection_issue": [],
     },
 }
 
@@ -72,6 +102,10 @@ TOPIC_KEYWORDS: dict[str, list[str]] = {
     "opening_hours": ["oeffnungszeiten", "geoeffnet", "ruhetag", "zeiten"],
     "ask_for_order": ["bestellen", "gericht", "bestellung", "notieren"],
     "anything_else": ["sonst noch", "noch etwas", "andere frage"],
+    # Fix L4: New keywords for new variation topics
+    "apology": ["entschuldigung", "sorry", "fehler", "verzeihen", "pardon"],
+    "off_topic_redirect": ["dazu kann ich", "nicht meine staerke", "essen oder reservierung"],
+    "connection_issue": ["leitung", "stoerung", "problem", "hoere dich besser", "verbindung"],
 }
 
 

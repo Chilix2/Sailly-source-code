@@ -28,7 +28,7 @@ ESCALATION = Node(
         "transfer_to_human", "request_callback", "end_call",
         "create_order", "create_reservation",
         "get_menu", "get_date_info", "check_availability",
-        "get_weather", "faq", "send_sms", "ai_greeting", "get_restaurant_info",
+        "get_weather", "faq", "ai_greeting", "get_restaurant_info",
     ]),
     prerequisites=(MENU_FETCHED_PREREQ,),
 )

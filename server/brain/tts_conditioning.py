@@ -64,6 +64,8 @@ class SituationStyle:
 # Sprint 2.1: situation rates reverted to their original adaptive values.
 # The 2.0x multiplier we applied earlier is replaced by GLOBAL_SPEED_MULTIPLIER
 # below, so per-situation distinctions (fast vs. slow) are preserved.
+# Base situation multipliers; +0.25 vs prior (2026-04): slightly faster delivery while
+# keeping relative differences (readback/apology slower than neutral).
 SITUATION_STYLES: dict[Situation, SituationStyle] = {
     Situation.GREETING_FIRST: SituationStyle(
         tag="[warm]",
@@ -71,7 +73,7 @@ SITUATION_STYLES: dict[Situation, SituationStyle] = {
             "Begrüße einladend, mit hörbarem Lächeln, mittleres Tempo. "
             "Der Anrufer hört dich zum ersten Mal."
         ),
-        rate=2.00,
+        rate=2.25,
     ),
     Situation.GREETING_RETURNING: SituationStyle(
         tag="[warm]",
@@ -79,12 +81,12 @@ SITUATION_STYLES: dict[Situation, SituationStyle] = {
             "Begrüße wiedererkennend und etwas vertrauter, leicht persönlicher Ton. "
             "Der Anrufer hat schon einmal angerufen."
         ),
-        rate=1.00,
+        rate=1.25,
     ),
     Situation.INFO_NEUTRAL: SituationStyle(
         tag="[friendly]",
         prompt="Sachlich freundlich, klar, gleichmäßiges Tempo.",
-        rate=1.00,
+        rate=2.0,
     ),
     Situation.INFO_READBACK: SituationStyle(
         tag="[attentive]",
@@ -92,7 +94,7 @@ SITUATION_STYLES: dict[Situation, SituationStyle] = {
             "Bewusst langsamer und deutlich artikuliert — der Anrufer muss "
             "Ziffern, Adressen und Bestelldetails klar verstehen können."
         ),
-        rate=0.88,
+        rate=1.13,
     ),
     Situation.CLARIFY_PATIENT: SituationStyle(
         tag="[patient]",
@@ -100,7 +102,7 @@ SITUATION_STYLES: dict[Situation, SituationStyle] = {
             "Geduldig und freundlich, nicht herablassend, leicht langsamer — "
             "als würdest du freundlich nachfragen, weil du es nicht verstanden hast."
         ),
-        rate=0.93,
+        rate=1.18,
     ),
     Situation.CONFIRM_SUCCESS: SituationStyle(
         tag="[cheerful]",
@@ -108,12 +110,12 @@ SITUATION_STYLES: dict[Situation, SituationStyle] = {
             "Aufrichtig, zurückhaltend fröhlich — als hättest du gerade erfolgreich "
             "geholfen. Nicht euphorisch, nicht übertrieben."
         ),
-        rate=1.00,
+        rate=1.25,
     ),
     Situation.UPSELL_CURIOUS: SituationStyle(
         tag="[inviting]",
         prompt="Neugierig-einladend, offen, ohne Druck, leicht spielerisch.",
-        rate=1.02,
+        rate=1.27,
     ),
     Situation.APOLOGY_SOFT: SituationStyle(
         tag="[empathetic]",
@@ -121,7 +123,7 @@ SITUATION_STYLES: dict[Situation, SituationStyle] = {
             "Echtes Bedauern, sanfter Ton, leicht gesenkte Stimme, "
             "gemächliches Tempo — eine kleine Unannehmlichkeit wird anerkannt."
         ),
-        rate=0.92,
+        rate=1.17,
     ),
     Situation.APOLOGY_SERIOUS: SituationStyle(
         tag="[sympathetic]",
@@ -129,7 +131,7 @@ SITUATION_STYLES: dict[Situation, SituationStyle] = {
             "Ernst und verantwortungsvoll, keine Fröhlichkeit, bewusst langsamer. "
             "Der Anrufer soll spüren, dass du das wirklich ernst nimmst."
         ),
-        rate=0.88,
+        rate=1.13,
     ),
     Situation.HANDOFF_CALM: SituationStyle(
         tag="[calm]",
@@ -137,7 +139,7 @@ SITUATION_STYLES: dict[Situation, SituationStyle] = {
             "Ruhig, sachlich, kompetent — wie eine erfahrene Fachkraft, "
             "die die Situation im Griff hat und jetzt weiterleitet."
         ),
-        rate=0.95,
+        rate=1.20,
     ),
     Situation.ESCALATION_REASSURING: SituationStyle(
         tag="[reassuring]",
@@ -145,12 +147,12 @@ SITUATION_STYLES: dict[Situation, SituationStyle] = {
             "Beruhigend und kompetent. Signalisiere, dass du dich jetzt kümmerst. "
             "Warm, aber nicht süßlich — der Anrufer ist aufgebracht."
         ),
-        rate=0.92,
+        rate=1.17,
     ),
     Situation.URGENT_CLEAR: SituationStyle(
         tag="[urgent]",
         prompt="Leicht drängend aber nicht panisch, klar und direkt.",
-        rate=1.05,
+        rate=1.30,
     ),
     Situation.WAITING_FILLER: SituationStyle(
         tag="[thoughtful]",
@@ -158,7 +160,7 @@ SITUATION_STYLES: dict[Situation, SituationStyle] = {
             "Kurze, ruhige Überbrückungsphrase während ein Hintergrundprozess läuft. "
             "Nicht zu lebhaft, nicht zu lang."
         ),
-        rate=1.00,
+        rate=1.25,
     ),
     Situation.REPROMPT_UNDERSTOOD_NONE: SituationStyle(
         tag="[understanding]",
@@ -166,18 +168,18 @@ SITUATION_STYLES: dict[Situation, SituationStyle] = {
             "Geduldig-verständnisvoll, leicht langsamer, keine Frustration im Ton — "
             "der Anrufer wurde mehrfach nicht verstanden oder hat mehrfach nicht geantwortet."
         ),
-        rate=0.90,
+        rate=1.15,
     ),
     Situation.FAREWELL_WARM: SituationStyle(
         tag="[warm]",
         prompt="Freundlich abschließend, entspannt, nicht gehetzt.",
-        rate=0.98,
+        rate=1.23,
     ),
 }
 
 # Sprint 2.1: global speed multiplier applied AFTER situation × mood, so
 # the adaptive per-situation distinctions survive.
-GLOBAL_SPEED_MULTIPLIER = float(os.environ.get("GLOBAL_SPEED_MULTIPLIER", "2.0"))
+GLOBAL_SPEED_MULTIPLIER = float(os.environ.get("GLOBAL_SPEED_MULTIPLIER", "2.25"))
 
 
 # ── Layer 3: Caller mirror ─────────────────────────────────────────────────────
