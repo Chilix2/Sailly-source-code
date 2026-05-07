@@ -626,6 +626,23 @@ async def process_turn_v4(
     ctx = _build_worker_ctx(user_text, turn_idx, state, call_sid, tenant_id)
     execution_result = await worker_execute(plan, ctx)
 
+    # ── Execute business-info tools inline so results land in ctx_doc ────────
+    # get_date_info is telemetry-labelled but never truly called when
+    # tool_results is None (the common path via v4_turn_processor).
+    # For FAQ/opening-hours questions we need the actual result.
+    if tool_results is None:
+        tool_results = {}
+    _text_lo = user_text.lower()
+    if profile == "business_info" and "get_date_info" not in tool_results:
+        if any(w in _text_lo for w in ("öffnungszeit", "geöffnet", "wann", "uhrzeit", "offen")):
+            try:
+                from tools.executor import execute_tool as _et
+                _date_res = await _et("get_date_info", {"date": "heute"}, call_sid, tenant_id)
+                tool_results["get_date_info"] = _date_res if isinstance(_date_res, dict) else {}
+                logger.debug("[v4_pipeline] executed get_date_info inline: %s", tool_results["get_date_info"])
+            except Exception as _e:
+                logger.debug("[v4_pipeline] inline get_date_info failed (non-fatal): %s", _e)
+
     ctx_doc = build_context_doc(
         intent=intent_result.intent,
         turn_type=turn_type,
@@ -653,6 +670,23 @@ async def process_turn_v4(
                 elif tool_name == "get_date_info":
                     ctx_doc.resolved_entities["today_date"] = result.get("date", "")
                     ctx_doc.resolved_entities["today_weekday"] = result.get("weekday", "")
+                    # Also inject today's actual opening hours from tenant config so the
+                    # LLM can answer "Wann habt ihr geöffnet?" without hallucinating.
+                    try:
+                        from server.core.tenant_config import load_tenant_config as _ltc
+                        import datetime as _dt
+                        _tcfg = _ltc(tenant_id)
+                        _oh = _tcfg.opening_hours or {}
+                        # today's weekday key in lowercase English (e.g. "thursday")
+                        _day_key = _dt.datetime.now().strftime("%A").lower()
+                        _hours_today = _oh.get(_day_key)
+                        if not _hours_today:
+                            # fallback: try hours_formatted from tenant root
+                            _hours_today = getattr(_tcfg, "hours_formatted", None)
+                        if _hours_today:
+                            ctx_doc.resolved_entities["opening_hours_today"] = str(_hours_today)
+                    except Exception as _e:
+                        logger.debug("[v4_pipeline] opening_hours lookup failed (non-fatal): %s", _e)
                 elif tool_name == "get_menu":
                     menu = result.get("menu") or result.get("items")
                     if menu:

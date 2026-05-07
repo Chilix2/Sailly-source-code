@@ -44,7 +44,7 @@ _MUST_NOT_MENTION: dict[str, list[str]] = {
 _TOPIC_REQUIRES_ENTITY: dict[str, str] = {
     r"wetter|temperatur|grad celsius|sonnig|bewölkt|bewoelkt|regnet": "weather_temp",
     r"speisekarte|menü\b|menue\b|auf der karte":                       "menu_data",
-    r"öffnungszeit|geöffnet|geschlossen":                              "today_date",
+    r"öffnungszeit|geöffnet|geschlossen":                              "opening_hours_today",
     # Guard against hallucinated reservation confirmations
     r"reservierung.{0,60}bestätigt|bestätigt.{0,60}reservierung"
     r"|reservierung.{0,60}bestaetigt|bestaetigt.{0,60}reservierung"

@@ -94,7 +94,7 @@ class ContextDocument:
         _TOPIC_ENTITY_PAIRS = (
             ("Wetter", "weather_temp"),
             ("Speisekarte", "menu_data"),
-            ("Öffnungszeiten", "today_date"),
+            ("Öffnungszeiten", "opening_hours_today"),
         )
 
         validated_lines: list[str] = []
