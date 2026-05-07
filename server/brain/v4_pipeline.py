@@ -690,10 +690,12 @@ async def process_turn_v4(
                     try:
                         from server.core.tenant_config import load_tenant_config as _ltc
                         import datetime as _dt
+                        import pytz as _pytz
                         _tcfg = _ltc(tenant_id)
                         _oh = _tcfg.opening_hours or {}
-                        # today's weekday key in lowercase English (e.g. "thursday")
-                        _day_key = _dt.datetime.now().strftime("%A").lower()
+                        # Use Berlin timezone (restaurant location) for weekday lookup
+                        _tz_berlin = _pytz.timezone("Europe/Berlin")
+                        _day_key = _dt.datetime.now(_tz_berlin).strftime("%A").lower()
                         _hours_today = _oh.get(_day_key)
                         if not _hours_today:
                             # fallback: try hours_formatted from tenant root
