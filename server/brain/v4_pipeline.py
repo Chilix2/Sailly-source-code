@@ -1053,6 +1053,42 @@ async def process_turn_v4(
             commit_tools_run.append("create_reservation")
             logger.info(f"[v4_pipeline] T{turn_idx} create_reservation → {res_result}")
 
+            # Guard: only mark as created when the tool actually succeeded.
+            # A success=False result (e.g. invalid date, capacity unavailable)
+            # must NOT produce a "Ich habe reserviert" readback.
+            _res_ok = res_result.get("success", True) and not res_result.get("error")
+            if not _res_ok:
+                _tool_error = res_result.get("error", "unbekannter Fehler")
+                _alternatives = res_result.get("alternatives") or []
+                if _alternatives:
+                    _alt_times = ", ".join(
+                        a.get("time", a.get("time_bucket", "?")) for a in _alternatives[:3]
+                    )
+                    error_text = (
+                        f"Leider ist der Tisch um {getattr(state, 'reservation_time', 'dieser Zeit')} Uhr "
+                        f"nicht verfügbar. Ich hätte noch folgende Zeiten: {_alt_times} Uhr. "
+                        f"Wäre eine davon passend?"
+                    )
+                else:
+                    error_text = (
+                        "Es tut mir leid, aber bei der Buchung ist ein Fehler aufgetreten. "
+                        "Bitte rufen Sie uns direkt an oder versuchen Sie es gleich nochmals."
+                    )
+                logger.warning(f"[v4_pipeline] T{turn_idx} create_reservation failed: {_tool_error}")
+                state.end_call_stage = "idle"
+                state.reservation_created = False
+                state.pre_commit_shown = False
+                if tts_callback:
+                    try:
+                        await tts_callback(error_text)
+                    except Exception:
+                        pass
+                return _quick_return(
+                    error_text, "reservation_start", intent_result, t0,
+                    tools=scheduled_run + commit_tools_run,
+                    next_action="clarify", should_end=False,
+                )
+
             # Success: mark committed, give final confirmation, end call.
             # The user already confirmed via pre-commit summary — no second "Stimmt das so?" needed.
             state.reservation_created = True

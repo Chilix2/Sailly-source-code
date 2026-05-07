@@ -1799,32 +1799,49 @@ def update_state_from_utterance(state: ConversationState, utterance: str) -> Non
         "monday", "tuesday", "wednesday", "thursday",
         "friday", "saturday", "sunday",
     ]
+    # Always store reservation_date as ISO date (YYYY-MM-DD) so commit tools can parse it.
+    # Display-time conversion ("Heute" → "Donnerstag, dem 7. Mai") happens in v4_pipeline
+    # via _iso_to_spoken_german(), NOT at storage time.
     if not state.reservation_date:
+        import datetime as _dt
+        _today = _dt.date.today()
         if "übermorgen" in lower or "uebermorgen" in lower:
-            state.reservation_date = "Übermorgen"
+            state.reservation_date = (_today + _dt.timedelta(days=2)).isoformat()
         elif "wochenende" in lower:
-            state.reservation_date = "Wochenende"
+            # Next Saturday
+            _days_to_sat = (5 - _today.weekday()) % 7 or 7
+            state.reservation_date = (_today + _dt.timedelta(days=_days_to_sat)).isoformat()
         elif "nächste woche" in lower or "naechste woche" in lower:
-            state.reservation_date = "Nächste Woche"
+            state.reservation_date = (_today + _dt.timedelta(days=7)).isoformat()
         elif "übernächsten" in lower or "uebernächsten" in lower:
-            state.reservation_date = "Übernächste Woche"
+            state.reservation_date = (_today + _dt.timedelta(days=14)).isoformat()
         elif any(d in lower for d in _DAY_NAMES):
-            _EN_TO_DE = {
-                "monday": "Montag", "tuesday": "Dienstag", "wednesday": "Mittwoch",
-                "thursday": "Donnerstag", "friday": "Freitag", "saturday": "Samstag",
-                "sunday": "Sonntag",
+            _DE_TO_DOW = {
+                "montag": 0, "monday": 0,
+                "dienstag": 1, "tuesday": 1,
+                "mittwoch": 2, "wednesday": 2,
+                "donnerstag": 3, "thursday": 3,
+                "freitag": 4, "friday": 4,
+                "samstag": 5, "saturday": 5,
+                "sonntag": 6, "sunday": 6,
             }
             for d in _DAY_NAMES:
                 if d in lower:
-                    state.reservation_date = _EN_TO_DE.get(d, d.capitalize())
+                    _target_dow = _DE_TO_DOW.get(d)
+                    if _target_dow is not None:
+                        _days_ahead = (_target_dow - _today.weekday()) % 7 or 7
+                        state.reservation_date = (_today + _dt.timedelta(days=_days_ahead)).isoformat()
                     break
         elif "morgen" in lower:
-            state.reservation_date = "Morgen"
+            state.reservation_date = (_today + _dt.timedelta(days=1)).isoformat()
         elif "heute" in lower:
-            state.reservation_date = "Heute"
+            state.reservation_date = _today.isoformat()
     dm = re.search(r"am\s+(\d{1,2})\.?\s*(\w+)?", lower)
     if dm:
-        state.reservation_date = dm.group(0).strip()
+        # Keep raw text match only if we don't already have an ISO date.
+        # The date_parser worker will convert it to ISO on the next turn.
+        if not state.reservation_date:
+            state.reservation_date = dm.group(0).strip()
 
     # Reservation time: "um 19 uhr", "19:30", "halb acht", "um acht"
     tm = re.search(r"(?:um\s+)?(\d{1,2})[:.:]?(\d{2})?\s*(?:uhr)", lower)
@@ -1952,17 +1969,13 @@ def update_state_from_utterance(state: ConversationState, utterance: str) -> Non
         phone_digits = _extract_phone_digits(utterance)
         
         if phone_digits:
-            mobile_prefixes = ("015", "016", "017", "014", "018", "019")
-            if any(phone_digits.startswith(p) for p in mobile_prefixes):
-                state.phone_number = phone_digits
-                state.phone_is_landline = False
-                state.phone_confirmed = True
-                state.field_attempts["phone"] = 0
-                state.phone_digits_buffer = ""  # clear buffer on success
-                logger.info(f"[PHONE_EXTRACT] single-turn: {phone_digits}")
-            else:
-                state.phone_is_landline = True
-                logger.info(f"[PHONE_EXTRACT] landline rejected: {phone_digits}")
+            # Accept any German phone number with 8-13 digits (landlines and mobiles)
+            state.phone_number = phone_digits
+            state.phone_is_landline = not phone_digits.startswith(("015", "016", "017", "014", "018", "019"))
+            state.phone_confirmed = True
+            state.field_attempts["phone"] = 0
+            state.phone_digits_buffer = ""
+            logger.info(f"[PHONE_EXTRACT] single-turn: {phone_digits} (landline={state.phone_is_landline})")
         else:
             # No complete number in this utterance. Try cross-turn buffer.
             # Expand German shorthand ("viermal die vier" → "4 4 4 4") first.
@@ -1992,10 +2005,8 @@ def update_state_from_utterance(state: ConversationState, utterance: str) -> Non
                     _in_phone_region = True
 
             # If this utterance starts a fresh full number (caller repeating),
-            # RESET the buffer instead of appending. Heuristic: ≥6 digits in one
-            # utterance and starts with a known German mobile/area prefix.
-            _mobile_prefixes = ("015", "016", "017", "014", "018", "019")
-            if len(this_turn_digits) >= 6 and this_turn_digits.startswith(_mobile_prefixes):
+            # RESET the buffer instead of appending. Heuristic: ≥6 digits in one utterance.
+            if len(this_turn_digits) >= 6:
                 if state.phone_digits_buffer and state.phone_digits_buffer != this_turn_digits:
                     logger.info(
                         f"[PHONE_EXTRACT] buffer reset — caller repeated number "
@@ -2014,21 +2025,13 @@ def update_state_from_utterance(state: ConversationState, utterance: str) -> Non
             )
             if 10 <= len(state.phone_digits_buffer) <= 13:
                 buffered = state.phone_digits_buffer
-                mobile_prefixes = ("015", "016", "017", "014", "018", "019")
-                if any(buffered.startswith(p) for p in mobile_prefixes):
-                    state.phone_number = buffered
-                    state.phone_is_landline = False
-                    state.phone_confirmed = True
-                    state.field_attempts["phone"] = 0
-                    state.phone_digits_buffer = ""
-                    logger.info(f"[PHONE_EXTRACT] cross-turn buffer completed: {buffered}")
-                else:
-                    state.phone_is_landline = True
-                    logger.info(
-                        f"[PHONE_EXTRACT] buffer rejected (no mobile prefix): "
-                        f"assembled={buffered!r} checked_prefixes={mobile_prefixes}"
-                    )
-                    state.phone_digits_buffer = ""
+                # Accept any German number regardless of mobile/landline prefix
+                state.phone_number = buffered
+                state.phone_is_landline = not buffered.startswith(("015", "016", "017", "014", "018", "019"))
+                state.phone_confirmed = True
+                state.field_attempts["phone"] = 0
+                state.phone_digits_buffer = ""
+                logger.info(f"[PHONE_EXTRACT] cross-turn buffer completed: {buffered} (landline={state.phone_is_landline})")
             elif len(state.phone_digits_buffer) > 13:
                 # Buffer overflow — save the current fragment in case it's a fresh start
                 logger.warning(

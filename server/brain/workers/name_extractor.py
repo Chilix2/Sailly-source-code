@@ -35,15 +35,20 @@ _NAME_PATTERNS = [
         r"\bhier (spricht|ist)\s+([A-ZÄÖÜ][a-zäöüß]+(?:\s+[A-ZÄÖÜ][a-zäöüß]+)?)",
         re.I,
     ),
-    # "für Müller bitte" / "für Familie Müller"
+    # "für Familie Müller" or "für Müller bitte" — _clean_name rejects lowercase captures
     re.compile(
-        r"\bfür\s+(?:familie\s+)?([A-ZÄÖÜ][a-zäöüß]+(?:\s+[A-ZÄÖÜ][a-zäöüß]+)?)\s*(bitte|danke|,|$)",
-        re.I,
+        r"\bfür\s+(?:familie\s+)?([A-Za-zÄÖÜäöüß][a-zäöüß]{1,})\s*(?:bitte|danke|,|$)",
+        re.IGNORECASE | re.UNICODE,
     ),
-    # "Name: Müller" / "Name ist Müller"
+    # "Name: Wagner" — colon-separated name declaration
     re.compile(
-        r"\bname[:\s]+(?:ist\s+)?([A-ZÄÖÜ][a-zäöüß]+(?:\s+[A-ZÄÖÜ][a-zäöüß]+)?)",
-        re.I,
+        r"\bname\s*:\s*([A-ZÄÖÜ][a-zäöüß]+(?:\s+[A-ZÄÖÜ][a-zäöüß]+)?)",
+        re.IGNORECASE | re.UNICODE,
+    ),
+    # "Name ist Müller" / "der Name für X ist Müller"
+    re.compile(
+        r"\bname\b.{0,40}?ist\s+([A-ZÄÖÜ][a-zäöüß]+(?:\s+[A-ZÄÖÜ][a-zäöüß]+)?)",
+        re.IGNORECASE | re.UNICODE,
     ),
 ]
 
@@ -55,13 +60,32 @@ _COMMON_PREFIXES = {
 
 
 def _clean_name(raw: str) -> Optional[str]:
-    """Basic sanity check on extracted name."""
+    """Validate and normalize an extracted name candidate.
+    
+    Rejects: common words, short fragments, anything that doesn't start with
+    an uppercase letter (filters out German articles / prepositions captured
+    by the 'für' pattern, e.g. 'für die Reservierung' → 'Die' is rejected).
+    """
     parts = raw.strip().split()
     if not parts:
         return None
-    # Reject single-word extractions that are common words
-    if len(parts) == 1 and parts[0].lower() in _COMMON_PREFIXES:
+    # The first word must start with an uppercase letter — proper noun rule.
+    # This is the primary guard against false positives like "Die" from "für die"
+    if parts[0] and parts[0][0] not in 'ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÜabcdefghijklmnopqrstuvwxyz':
         return None
+    # First word must actually start uppercase (not a common article)
+    if parts[0][0].islower():
+        return None
+    # Reject common German articles, prepositions, filler words
+    reject = {
+        "die", "der", "das", "den", "dem", "ein", "eine", "einen", "einem",
+        "für", "auf", "an", "bei", "von", "vom", "zur", "zum", "ich", "mein",
+        "meine", "herr", "frau", "dr", "prof", "heute", "bitte", "danke",
+        "reservierung", "reservieren", "tisch", "personen", "uhr",
+    }
+    if len(parts) == 1 and parts[0].lower() in reject:
+        return None
+    # Reject multi-word where all words are lowercase-initial (after normalization)
     return " ".join(p.capitalize() for p in parts)
 
 

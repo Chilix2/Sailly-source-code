@@ -378,11 +378,20 @@ def _persist_resolved_entities_to_state(resolved_entities: dict, state) -> None:
         "phone_number": "phone_number",
     }
     
+    # ISO date pattern: workers always return YYYY-MM-DD, conversation_state may store
+    # a display string (e.g. "Morgen") before workers run.  Worker-extracted ISO dates
+    # are authoritative and must overwrite any pre-existing display string.
+    import re as _re_iso
+    _ISO_DATE_RE = _re_iso.compile(r"^\d{4}-\d{2}-\d{2}$")
+
     for entity_key, slot_key in entity_to_slot.items():
         if entity_key in resolved_entities and resolved_entities[entity_key]:
             val = resolved_entities[entity_key]
-            # Only persist if slot is currently empty (don't overwrite caller's explicit correction)
-            if not getattr(state, slot_key, None):
+            existing = getattr(state, slot_key, None)
+            # Always overwrite with a worker-extracted ISO date (definitive value).
+            # For other slot types: only persist if currently empty (preserve corrections).
+            is_iso = bool(_ISO_DATE_RE.match(str(val)))
+            if is_iso or not existing:
                 try:
                     setattr(state, slot_key, val)
                     logger.debug(f"[Fix 7] Persisted {entity_key}={val} → state.{slot_key}")
