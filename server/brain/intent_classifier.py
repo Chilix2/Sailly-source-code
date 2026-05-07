@@ -86,8 +86,7 @@ _RESERVATION_RE = re.compile(
 )
 _ORDER_RE = re.compile(
     r"\b(bestell|bestellung|ich (hätte|möchte|will|nehme)\s+(gerne|bitte)?|"
-    r"liefern|lieferung|abhole?n?|zum mitnehmen|take.?away|"
-    r"bibimbap|bulgogi|ramen|sushi|kimchi|mandu)\b",
+    r"liefern|lieferung|abhole?n?|zum mitnehmen|take.?away)\b",
     re.I,
 )
 _FAQ_RE = re.compile(
