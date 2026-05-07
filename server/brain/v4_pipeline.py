@@ -347,9 +347,11 @@ async def process_turn_v4(
     # Prevent false ordering transition immediately after a menu FAQ answer.
     # When last turn was a menu FAQ response, the caller often mentions food
     # words in their acknowledgement, which the classifier may read as ordering.
+    _menu_faq_override_active = False
     if getattr(state, "last_turn_was_menu_faq", False) and profile in ("order_start", "ordering"):
         logger.debug("[v4_pipeline] menu FAQ context: overriding %s → business_info", profile)
         profile = "business_info"
+        _menu_faq_override_active = True  # suppress ordering deterministic clarify this turn
     state.last_turn_was_menu_faq = False  # reset each turn, set again if menu FAQ fires
 
     # Fix 7: Track unclear/greeting turns for timeout counter + detect repeated responses.
@@ -715,7 +717,7 @@ async def process_turn_v4(
     # ── Menu FAQ direct YAML lookup ───────────────────────────────────────────
     # If user is asking about the menu, always refresh the ordering-guard flag
     # (not just on first injection) and track consecutive FAQ turns for escalation.
-    if _is_menu_question:
+    if _is_menu_question or _menu_faq_override_active:
         state.last_turn_was_menu_faq = True  # keep ordering-profile block active every FAQ turn
         _menu_faq_consec = getattr(state, "menu_faq_consecutive", 0) + 1
         state.menu_faq_consecutive = _menu_faq_consec
@@ -1252,7 +1254,12 @@ async def process_turn_v4(
         "customer_name": "Auf welchen Namen soll ich die Bestellung aufnehmen?",
         "phone_number":  "Welche Telefonnummer darf ich notieren?",
     }
-    _is_order_intent = intent_result.intent in (IntentKind.TAKEAWAY, IntentKind.DELIVERY)
+    # Suppress ordering slot-asking when we're in menu FAQ override context (caller
+    # mentioned ordering words but we're still in a menu FAQ conversation).
+    _is_order_intent = (
+        intent_result.intent in (IntentKind.TAKEAWAY, IntentKind.DELIVERY)
+        and not _menu_faq_override_active
+    )
     _SLOT_QUESTIONS_DE = _SLOT_QUESTIONS_ORDER if _is_order_intent else _SLOT_QUESTIONS_RESERVATION
     if (
         ctx_doc.next_action == "clarify"
