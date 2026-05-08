@@ -85,6 +85,9 @@ _NAME_BLOCKLIST = {
     "weiter", "los", "super", "prima", "genau", "stimmt", "richtig",
     "passt", "korrekt", "perfekt", "alles", "fertig", "bereit", "bitte",
     "stop", "stopp", "nochmal", "wieder", "zurück", "zurueck",
+    # German verb infinitives that can follow "auf den Namen" in a sentence
+    "reservieren", "buchen", "bestellen", "stornieren", "notieren",
+    "anrufen", "anfragen", "machen", "sagen", "gehen", "kommen", "legen",
     # articles / determiners that can start false-positive 2-word phrases like "Ein Getränk"
     "ein", "eine", "einen", "einem", "einer", "eines",
     "kein", "keine", "keinen", "keinem", "keiner", "keines",
@@ -144,8 +147,15 @@ def _extract_name_from_utterance(utterance: str) -> Optional[str]:
         )
         m = re.search(pattern, utterance, re.IGNORECASE)
         if m:
-            first = m.group(1).capitalize()
-            last = m.group(2).capitalize()
+            first_raw = m.group(1)
+            last_raw = m.group(2)
+            # Both tokens must start with an uppercase letter in the original utterance.
+            # re.IGNORECASE makes [A-ZÄÖÜ] match lowercase too, so "Anna reservieren"
+            # would otherwise yield ("Anna", "reservieren") → "Anna Reservieren".
+            if not (first_raw[0].isupper() and last_raw[0].isupper()):
+                continue
+            first = first_raw.capitalize()
+            last = last_raw.capitalize()
             candidate = f"{first} {last}"
             if _is_valid_name_candidate(candidate):
                 return candidate
@@ -514,7 +524,7 @@ def _extract_phone_digits(utterance: str) -> Optional[str]:
     m = re.search(r"(\+?\d[\d\s\-/\.]{8,}\d)", expanded)
     if m:
         digits = re.sub(r"\D", "", m.group(1))
-        if 10 <= len(digits) <= 13:
+        if 9 <= len(digits) <= 13:
             return digits
     # Spoken-digit assembly: scan tokens, pick both numeric and spoken
     # Sprint B: extended connector/separator set to keep scanning through grouping words
@@ -523,6 +533,7 @@ def _extract_phone_digits(utterance: str) -> Optional[str]:
     _PHONE_CONNECTORS = {
         "und", "komma", "pause", "dann", "strich", "bindestrich",
         "schrägstrich", "schraegstrich", "vorwahl", "durchwahl", "also", "so",
+        "unter",  # German verbal separator in phone numbers ("026 unter 3457978")
     }
     _PHONE_BREAK_WORDS = {
         "straße", "strasse", "str", "gasse", "platz", "weg", "allee", "ring",
@@ -551,7 +562,7 @@ def _extract_phone_digits(utterance: str) -> Optional[str]:
                     continue
                 break
     s = "".join(out_digits)
-    if 10 <= len(s) <= 13:
+    if 9 <= len(s) <= 13:
         return s
     return None
 
@@ -2032,7 +2043,7 @@ def update_state_from_utterance(state: ConversationState, utterance: str) -> Non
                 f"this_turn_digits={this_turn_digits!r} "
                 f"buffer_now={state.phone_digits_buffer!r} ({len(state.phone_digits_buffer)} digits)"
             )
-            if 10 <= len(state.phone_digits_buffer) <= 13:
+            if 9 <= len(state.phone_digits_buffer) <= 13:
                 buffered = state.phone_digits_buffer
                 # Accept any German number regardless of mobile/landline prefix
                 state.phone_number = buffered

@@ -1229,11 +1229,19 @@ async def process_turn_v4(
             )
             state.check_availability_called = True
             if avail_result.get("available", True):
+                _has_name = bool(getattr(state, "customer_name", None) or getattr(state, "first_name", None))
+                _has_phone = bool(getattr(state, "phone_number", None))
+                if not _has_name:
+                    _next_q = "Auf welchen Namen darf ich reservieren?"
+                elif not _has_phone:
+                    _next_q = "Welche Telefonnummer darf ich notieren, falls wir Sie zurückrufen müssen?"
+                else:
+                    _next_q = ""
                 avail_text = (
                     f"Ja, wir haben noch einen Tisch für {state.party_size} "
                     f"{'Person' if state.party_size == 1 else 'Personen'} um "
-                    f"{state.reservation_time} Uhr verfügbar. "
-                    f"Auf welchen Namen darf ich reservieren?"
+                    f"{state.reservation_time} Uhr verfügbar."
+                    + (f" {_next_q}" if _next_q else "")
                 )
             else:
                 avail_text = "Leider haben wir zu diesem Zeitpunkt keinen Tisch mehr frei."
@@ -1463,12 +1471,37 @@ async def process_turn_v4(
         and end_call_stage == "idle"
     ):
         first_missing = ctx_doc.missing_slots[0]
+
+        # Phone give-up safety net: if phone is the missing slot and the bot already
+        # asked at least once, check if the cross-turn buffer has ≥7 digits.
+        # Accept the buffer rather than asking a 3rd+ time — better to have a partial
+        # phone than to loop forever and cause a frustrated disconnect + call split.
+        if first_missing == "phone_number" and not state.phone_number:
+            _phone_buffer = getattr(state, "phone_digits_buffer", "")
+            _phone_asked_already = any(
+                "telefonnummer" in r.lower()
+                for r in (getattr(state, "recent_responses", None) or [])
+            )
+            if _phone_asked_already and len(_phone_buffer) >= 7:
+                state.phone_number = _phone_buffer
+                state.phone_confirmed = True
+                state.phone_digits_buffer = ""
+                logger.info(
+                    f"[v4_pipeline] T{turn_idx} phone give-up: "
+                    f"accepting buffer {_phone_buffer!r} after repeated failed extraction"
+                )
+                # Remove phone_number from missing_slots so the pipeline can proceed
+                ctx_doc.missing_slots = [s for s in ctx_doc.missing_slots if s != "phone_number"]
+                if not ctx_doc.missing_slots:
+                    ctx_doc.next_action = "commit"
+
+        first_missing = ctx_doc.missing_slots[0] if ctx_doc.missing_slots else None
         # Don't fire deterministic "order_items" ask when user already stated a specific
         # item (even off-menu) — let TinyGenerator provide an informed response instead.
         _skip_deterministic = (
             first_missing == "order_items" and _user_has_specific_request
         )
-        clarify_text = None if _skip_deterministic else _SLOT_QUESTIONS_DE.get(first_missing)
+        clarify_text = None if (first_missing is None or _skip_deterministic) else _SLOT_QUESTIONS_DE.get(first_missing)
         if clarify_text:
             logger.info(
                 f"[v4_pipeline] T{turn_idx} deterministic clarify for slot={first_missing}"
