@@ -724,8 +724,13 @@ async def process_turn_v4(
                         import datetime as _dt
                         _tcfg = _ltc(tenant_id)
                         _oh = _tcfg.opening_hours or {}
-                        # today's weekday key in lowercase English (e.g. "thursday")
-                        _day_key = _dt.datetime.now().strftime("%A").lower()
+                        # Use Berlin timezone (restaurant location) for weekday lookup
+                        try:
+                            import pytz as _pytz
+                            _tz_berlin = _pytz.timezone("Europe/Berlin")
+                            _day_key = _dt.datetime.now(_tz_berlin).strftime("%A").lower()
+                        except Exception:
+                            _day_key = _dt.datetime.now().strftime("%A").lower()
                         _hours_today = _oh.get(_day_key)
                         if not _hours_today:
                             # fallback: try hours_formatted from tenant root
@@ -843,15 +848,24 @@ async def process_turn_v4(
 
     # Handle correction pending: reset to idle, let workers update slots, re-evaluate
     if end_call_stage == "correction_pending":
-        state.end_call_stage = "idle"
-        end_call_stage = "idle"
-        # Also reset check_availability_called so a new check fires for corrected date/time
-        state.check_availability_called = False
-        # Clear unavailable flag so corrected slots get a fresh availability check
-        state.availability_unavailable_at_commit = False
-        # Reset pre-commit shown flags so updated summary is re-shown after correction
-        state.pre_commit_shown = False
-        state.order_pre_commit_shown = False
+        # If user says "ja" / confirms during correction_pending, they meant "nothing to change"
+        # — treat as a re-confirmation rather than a correction input.
+        if _is_confirmation_v4(user_text):
+            logger.info(f"[v4_pipeline] T{turn_idx} correction_pending but user confirmed → re-enter pre_commit_readback")
+            state.end_call_stage = "pre_commit_readback"
+            end_call_stage = "pre_commit_readback"
+            # pre_commit_shown stays True so we don't re-show the summary — fall through
+            # directly to the pre_commit_readback confirmation gate below.
+        else:
+            state.end_call_stage = "idle"
+            end_call_stage = "idle"
+            # Also reset check_availability_called so a new check fires for corrected date/time
+            state.check_availability_called = False
+            # Clear unavailable flag so corrected slots get a fresh availability check
+            state.availability_unavailable_at_commit = False
+            # Reset pre-commit shown flags so updated summary is re-shown after correction
+            state.pre_commit_shown = False
+            state.order_pre_commit_shown = False
         # Extract any time correction from the current user utterance before workers run.
         # This prevents reverting to the old time when the LLM re-reads stale state.
         import re as _re_corr

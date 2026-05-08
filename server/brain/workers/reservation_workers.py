@@ -52,12 +52,33 @@ def _parse_date(text: str) -> Optional[str]:
         return (today + timedelta(days=2)).isoformat()
     if _TOMORROW_RE.search(text):
         return (today + timedelta(days=1)).isoformat()
-    m = _DAY_NAME_RE.search(text)
-    if m:
-        target_dow = _DAY_NAMES_DE[m.group(1).lower()]
+
+    # When text contains multiple dates (e.g. "Bestellung für Samstag ... Tisch für nächsten Freitag"),
+    # prefer the date that immediately follows a table-reservation keyword.
+    # This prevents catering-order dates from overwriting table-reservation dates.
+    _TABLE_KW_RE = re.compile(
+        r"\b(?:tisch\s+für|tisch\s+am|reservier\w*\s+für|platz\s+für)\s+"
+        r"(?:nächsten?\s+)?(montag|dienstag|mittwoch|donnerstag|freitag|samstag|sonntag)\b",
+        re.I,
+    )
+    m_table = _TABLE_KW_RE.search(text)
+    if m_table:
+        target_dow = _DAY_NAMES_DE[m_table.group(1).lower()]
         days_ahead = (target_dow - today.weekday()) % 7
         if days_ahead == 0:
-            days_ahead = 7  # next week if same day
+            days_ahead = 7
+        return (today + timedelta(days=days_ahead)).isoformat()
+
+    # Fall back: collect ALL day-name matches and use the LAST one.
+    # "Last wins" handles multi-date utterances and correction phrases like
+    # "eigentlich Samstag, nicht Freitag" correctly.
+    all_matches = _DAY_NAME_RE.findall(text)
+    if all_matches:
+        m_day = all_matches[-1].lower()
+        target_dow = _DAY_NAMES_DE[m_day]
+        days_ahead = (target_dow - today.weekday()) % 7
+        if days_ahead == 0:
+            days_ahead = 7  # next week if same weekday
         return (today + timedelta(days=days_ahead)).isoformat()
     m = _MONTH_NAME_RE.search(text)
     if m:
