@@ -728,6 +728,21 @@ async def process_turn_v4(
             except Exception as _e:
                 logger.debug("[v4_pipeline] inline get_date_info failed (non-fatal): %s", _e)
 
+    # Execute get_weather inline when weather keyword is present, regardless of profile.
+    # This ensures weather isn't silently dropped in multi-intent turns (e.g. weather + reservation).
+    _is_weather_question = "wetter" in _text_lo
+    if _is_weather_question and "get_weather" not in tool_results:
+        try:
+            from tools.executor import execute_tool as _et_w
+            _w_lat = ((_tcfg_top.location or {}).get("lat") if _tcfg_top else None) or 50.7323
+            _w_lng = ((_tcfg_top.location or {}).get("lng") if _tcfg_top else None) or 7.0954
+            _weather_res = await _et_w("get_weather", {"lat": _w_lat, "lon": _w_lng}, call_sid, tenant_id)
+            if isinstance(_weather_res, dict):
+                tool_results["get_weather"] = _weather_res
+                logger.info("[v4_pipeline] executed get_weather inline: temp=%s", _weather_res.get("temperature"))
+        except Exception as _e_w:
+            logger.debug("[v4_pipeline] inline get_weather failed (non-fatal): %s", _e_w)
+
     ctx_doc = build_context_doc(
         intent=intent_result.intent,
         turn_type=turn_type,
@@ -1547,6 +1562,16 @@ async def process_turn_v4(
             logger.info(
                 f"[v4_pipeline] T{turn_idx} deterministic clarify for slot={first_missing}"
             )
+            # If weather data was fetched this turn, prepend it before the slot question
+            # so it isn't silently dropped in multi-intent (weather + reservation) turns.
+            _weather_temp = ctx_doc.resolved_entities.get("weather_temp")
+            if _weather_temp:
+                _weather_desc = ctx_doc.resolved_entities.get("weather_desc", "")
+                _weather_prefix = (
+                    f"Das Wetter heute: {_weather_desc + ', ' if _weather_desc else ''}{_weather_temp}. "
+                )
+                clarify_text = _weather_prefix + clarify_text
+                logger.info(f"[v4_pipeline] T{turn_idx} weather prepended to deterministic clarify")
             if tts_callback:
                 try:
                     await tts_callback(clarify_text)
