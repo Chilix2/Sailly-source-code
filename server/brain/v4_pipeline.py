@@ -100,13 +100,40 @@ def _all_slots_present(state, commit_tool: str) -> bool:
 def _is_confirmation_v4(text: str) -> bool:
     """True if the utterance is a positive confirmation of the readback."""
     lower = text.lower()
+
+    # Phrases that unambiguously mean "proceed / nothing to change" — checked
+    # BEFORE the negative-word filter so e.g. "ich will nichts ändern" (= I
+    # don't want to change anything) is not mis-classified as a denial.
+    _OVERRIDE_CONFIRMS = (
+        # "nothing to change" variants
+        "nichts ändern", "nichts zu ändern", "will nichts ändern",
+        "möchte nichts ändern", "ändere nichts", "nix ändern",
+        "will ich nicht ändern", "muss nichts ändern",
+        # "please take / book it now" variants
+        "jetzt aufnehmen", "einfach aufnehmen", "aufnehmen bitte",
+        "bitte aufnehmen", "nehmen sie das auf", "nehmen sie es auf",
+        "nehmen sie einfach auf", "so aufnehmen", "einfach mal aufnehmen",
+        "jetzt nehmen sie", "nehmen sie das",
+        # "can we just do it" variants
+        "können wir das", "können wir jetzt", "können wir es",
+        "machen wir das", "machen wir es", "so machen wir",
+        # other confirmation-by-action phrases
+        "buchen sie das", "reservieren sie das", "bestellen sie das",
+        "so ist das richtig", "so stimmt das", "genau so ist es",
+    )
+    if any(p in lower for p in _OVERRIDE_CONFIRMS):
+        return True
+
     negative = ("nein", "nicht", "falsch", "anders", "ändern", "aendern",
-                "korrigieren", "nochmal", "andere", "stimmt nicht", "falsch")
+                "korrigieren", "nochmal", "andere", "stimmt nicht")
     if any(w in lower for w in negative):
         return False
+
     positive = ("ja", "genau", "richtig", "korrekt", "stimmt", "passt",
                 "super", "perfekt", "ok", "okay", "gut", "gerne", "gern",
-                "bestätige", "alles klar", "ja bitte", "ja genau", "in ordnung")
+                "bestätige", "alles klar", "ja bitte", "ja genau", "in ordnung",
+                "aufnehmen", "nehmen sie", "so bitte", "bitte so",
+                "das geht", "passt so", "ist so richtig")
     return any(w in lower.split() or w in lower for w in positive)
 
 
