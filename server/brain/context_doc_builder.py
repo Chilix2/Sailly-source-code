@@ -231,13 +231,21 @@ def build(
     ):
         # Required worker failed — clarify
         ctx.next_action = "clarify"
-    elif turn_type == TurnType.FINALIZE and not ctx.missing_slots:
-        # All slots present and user finalizing — commit (with verbal readback first)
+    elif turn_type in (TurnType.FINALIZE, TurnType.CONFIRM) and not ctx.missing_slots:
+        # All slots present and user finalizing/confirming — commit
         ctx.next_action = "commit"
         if intent in (IntentKind.RESERVATION, IntentKind.MODIFY_RESERVATION):
             ctx.commit_tool = "create_reservation"
         elif intent in (IntentKind.TAKEAWAY, IntentKind.DELIVERY):
             ctx.commit_tool = "create_order"
+        elif intent == IntentKind.UNKNOWN:
+            # Infer from state when intent is ambiguous (continuation turns)
+            if (_slot_filled(state, "reservation_date") and
+                    _slot_filled(state, "reservation_time") and
+                    _slot_filled(state, "party_size")):
+                ctx.commit_tool = "create_reservation"
+            elif _slot_filled(state, "order_items"):
+                ctx.commit_tool = "create_order"
     elif ctx.missing_slots:
         ctx.next_action = "clarify"
         ctx.response_constraints.must_include.append(

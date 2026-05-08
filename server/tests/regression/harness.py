@@ -662,6 +662,8 @@ UNIVERSAL_FORBIDDEN = [
     "{name}",
     "{{",
     "}}",
+    "(keine details erfasst)",
+    "keine details erfasst",
 ]
 
 

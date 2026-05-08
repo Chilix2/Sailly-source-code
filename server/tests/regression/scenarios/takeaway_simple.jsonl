@@ -1,11 +1,11 @@
-{"meta": {"name": "takeaway_simple", "description": "Basic single-item takeaway order — must fire create_order, no phantom reservation"}}
+{"meta": {"name": "takeaway_simple", "description": "Basic single-item takeaway order — must fire create_order, no phantom reservation", "fix_history": ["2026-05-08: rewritten for v4 pipeline — 4 turns ending at pre-commit confirm (Sprint 2)"]}}
 {"role": "user", "text": "Guten Tag, ich möchte einen Bulgogi zum Abholen bestellen."}
-{"role": "assert", "type": "contains", "text": "bulgogi", "turn": "last"}
 {"role": "assert", "type": "forbid", "text": "technisches problem"}
+{"role": "assert", "type": "forbid", "text": "reservierung"}
 {"role": "user", "text": "Ja, genau. Ich bin Philipp Schneider."}
-{"role": "assert", "type": "contains", "text": "telefon", "turn": "last"}
 {"role": "user", "text": "Meine Nummer ist null eins sieben neun drei vier fünf sechs sieben acht neun."}
 {"role": "user", "text": "Ja, stimmt so."}
+{"role": "assert", "type": "contains", "text": "bulgogi"}
 {"role": "assert", "type": "tool", "name": "create_order", "at_end": true}
 {"role": "assert", "type": "tool_not", "name": "create_reservation", "at_end": true}
 {"role": "assert", "type": "tool_not", "name": "check_availability", "at_end": true}

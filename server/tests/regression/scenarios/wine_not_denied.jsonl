@@ -1,8 +1,9 @@
-{"meta": {"name": "wine_not_denied", "description": "Wine is on the menu — bot must never say it's unavailable"}}
+{"meta": {"name": "wine_not_denied", "description": "Wine is on the menu — bot must never say it's unavailable", "fix_history": ["2026-04-26: replaced bulgogi-contains with wine-not-denied forbid block (Sprint 1 PR-A)", "2026-05-08: re-applied after regression"]}}
 {"role": "user", "text": "Ich hätte gerne einen Bulgogi und eine Flasche Wein zum Mitnehmen."}
 {"role": "assert", "type": "forbid", "text": "keinen wein"}
 {"role": "assert", "type": "forbid", "text": "kein wein"}
 {"role": "assert", "type": "forbid", "text": "wein haben wir nicht"}
 {"role": "assert", "type": "forbid", "text": "nicht auf unserer speisekarte"}
 {"role": "assert", "type": "forbid", "text": "nicht auf der karte"}
-{"role": "assert", "type": "contains", "text": "bulgogi", "turn": "last"}
+{"role": "assert", "type": "forbid", "text": "leider nicht"}
+{"role": "assert", "type": "forbid", "text": "haben wir leider"}

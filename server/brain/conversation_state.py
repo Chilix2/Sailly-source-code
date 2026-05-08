@@ -132,6 +132,7 @@ def _extract_name_from_utterance(utterance: str) -> Optional[str]:
         r"ich\s+heisse",
         r"ich\s+bin",
         r"hier\s+(?:ist|spricht)",
+        r"(?:hallo[,.]?\s+)?hier",  # "Hallo, hier Philipp Schneider" (no ist/spricht)
         r"auf\s+den\s+namen",
         r"name\s+ist",
     ]
@@ -347,7 +348,8 @@ _SPOKEN_DIGIT_PLURALS = {
     "vieren": "4",
     "fünfen": "5", "fuenfen": "5",
     "sechsen": "6",
-    "sieben": "7",   # plural = singular in German (Sieben)
+    # "sieben" intentionally omitted — identical to the digit word "sieben" (7),
+    # causes "sechs sieben" (digits 6,7) to be mis-expanded to six 7s.
     "achten": "8",
     "neunen": "9",
     "nullen": "0",
@@ -490,10 +492,10 @@ def _expand_spoken_shorthand(utterance: str) -> str:
         for compound, (d1, d2) in _COMPOUND_TENS_TO_PAIRS.items():
             text = re.sub(rf"\b{re.escape(compound)}\b", f"{d1} {d2}", text)
 
-    # Step 5: Expand teens to two single digits so they can join the number stream
-    # (phone numbers are almost always spoken digit-by-digit; "elf" at tail means "1 1")
-    for word, two in _SPOKEN_TEENS.items():
-        text = re.sub(rf"\b{re.escape(word)}\b", f"{two[0]} {two[1]}", text)
+    # Step 5: Teens → two phone digits (phone context ONLY — "neunzehn Uhr" must not leak "1 9")
+    if _HAS_PHONE_SIGNAL:
+        for word, two in _SPOKEN_TEENS.items():
+            text = re.sub(rf"\b{re.escape(word)}\b", f"{two[0]} {two[1]}", text)
 
     return text.strip()
 
@@ -1856,6 +1858,13 @@ def update_state_from_utterance(state: ConversationState, utterance: str) -> Non
         h = _HOUR_WORDS.get(word)
         if h and 10 <= h <= 23:
             state.reservation_time = f"{h:02d}:00"
+    # Also match spoken time without "um": "neunzehn Uhr", "acht Uhr"
+    if not state.reservation_time:
+        tw2 = re.search(r"\b(\w+)\s+uhr\b", lower)
+        if tw2:
+            h = _HOUR_WORDS.get(tw2.group(1))
+            if h and 10 <= h <= 23:
+                state.reservation_time = f"{h:02d}:00"
     if "halb acht" in lower:
         state.reservation_time = "19:30"
     elif "halb sieben" in lower:

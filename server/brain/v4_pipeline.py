@@ -147,9 +147,18 @@ def _build_pre_commit_order_summary_v4(state) -> str:
     if isinstance(items, list) and items:
         items_str = ", ".join(items)
     else:
-        items_str = str(items) if items else "Ihre Bestellung"
+        # Fall back to selected_dish (single-item orders)
+        sd = getattr(state, "selected_dish", None)
+        items_str = str(sd) if sd else "Ihre Bestellung"
 
-    return f"Ich würde also {items_str} auf den Namen {name} aufnehmen."
+    order_type = getattr(state, "delivery_type", None) or getattr(state, "order_type", None)
+    delivery_clause = ""
+    if order_type == "takeaway" or getattr(state, "delivery_confirmed", False) is False:
+        delivery_clause = " zum Abholen"
+    elif order_type == "delivery":
+        delivery_clause = " zur Lieferung"
+
+    return f"Ich würde also {items_str}{delivery_clause} auf den Namen {name} aufnehmen."
 
 
 # ── Helper: deterministic readback ──────────────────────────────────────────────
@@ -547,19 +556,42 @@ async def process_turn_v4(
         "mitnehmen",
     ]
     _user_lower_kw = user_text.lower()
-    if intent_result.intent == IntentKind.UNKNOWN:
+    if intent_result.intent in (IntentKind.UNKNOWN, IntentKind.FAQ):
         if any(kw in _user_lower_kw for kw in _reservation_keywords):
             logger.info(
-                f"[v4_pipeline] T{turn_idx} UNKNOWN intent but reservation keywords detected "
+                f"[v4_pipeline] T{turn_idx} {intent_result.intent} intent but reservation keywords detected "
                 f"→ overriding profile to reservation_start"
             )
             profile = "reservation_start"
         elif any(kw in _user_lower_kw for kw in _order_keywords):
             logger.info(
-                f"[v4_pipeline] T{turn_idx} UNKNOWN intent but order keywords detected "
+                f"[v4_pipeline] T{turn_idx} {intent_result.intent} intent but order keywords detected "
                 f"→ overriding profile to order_start"
             )
             profile = "order_start"
+        elif profile in ("greeting", "business_info"):
+            # Slot-filling continuation turn (e.g. giving phone number, name, etc.)
+            # Infer the active flow from state and re-route to the right profile.
+            _res_in_progress = (
+                _state_slot_filled(state, "reservation_date") or
+                _state_slot_filled(state, "party_size") or
+                getattr(state, "reservation_intent", False)
+            )
+            _order_in_progress = (
+                _state_slot_filled(state, "selected_dish") or
+                bool(getattr(state, "selected_items", None)) or
+                getattr(state, "order_intent", False)
+            )
+            if _res_in_progress and not _order_in_progress:
+                logger.debug(
+                    f"[v4_pipeline] T{turn_idx} slot-fill continuation → reservation_start"
+                )
+                profile = "reservation_start"
+            elif _order_in_progress:
+                logger.debug(
+                    f"[v4_pipeline] T{turn_idx} slot-fill continuation → order_start"
+                )
+                profile = "order_start"
 
     # Pre-routing slot hydration: scan recent turns for any slots the user
     # already provided but that weren't persisted (e.g. party_size from turn 2
@@ -733,6 +765,8 @@ async def process_turn_v4(
     _needs_menu_data = (
         profile == "business_info"
         or (profile in ("order_start", "ordering") and _dish_in_text)
+        or (profile in ("order_start", "ordering") and len((_user_lower).split()) > 3
+            and any(kw in _user_lower for kw in ("bestellen", "möchte", "hätte gerne", "bitte")))
     )
     if _needs_menu_data and "menu_data" not in ctx_doc.resolved_entities:
         try:
@@ -852,13 +886,15 @@ async def process_turn_v4(
             logger.info(f"[v4_pipeline] T{turn_idx} correction_pending: extracted corrected time={_corrected_time} from user utterance")
         logger.info(f"[v4_pipeline] T{turn_idx} correction received → reset to idle + clear check_availability_called + pre_commit_shown + order_pre_commit_shown")
 
-    # Fix 3: Handle pre-commit readback: show summary before confirming reservation
-    if end_call_stage == "pre_commit_readback":
+    # Fix 3: Handle pre-commit readback: show summary before confirming reservation/order
+    if end_call_stage in ("pre_commit_readback", "order_pre_commit_readback"):
         if _is_confirmation_v4(user_text):
             # User confirmed — now run commit tools
             state.end_call_stage = "idle"
             end_call_stage = "idle"
             logger.info(f"[v4_pipeline] T{turn_idx} pre-commit summary confirmed → proceeding to commit")
+            # Recompute _order_slots_ok with updated end_call_stage so order commit can fire
+            _order_slots_ok = _all_slots_present(state, "create_order")
             # Fall through to commit gate below
         else:
             state.end_call_stage = "correction_pending"
@@ -880,7 +916,18 @@ async def process_turn_v4(
     _reservation_done = getattr(state, "reservation_created", False)
     _order_done = getattr(state, "order_created", False)
     _already_committed = _reservation_done or _order_done
-    _post_commit_stage = end_call_stage in ("confirmed", "idle") and _already_committed
+    # Don't fire early farewell if a reservation is still pending after an order commit
+    _reservation_still_pending = (
+        _order_done
+        and not _reservation_done
+        and getattr(state, "reservation_intent", False)
+        and _state_slot_filled(state, "reservation_date")
+    )
+    _post_commit_stage = (
+        end_call_stage in ("confirmed", "idle")
+        and _already_committed
+        and not _reservation_still_pending
+    )
     if _post_commit_stage:
         _post_confirm_farewells = [
             "Bis bald bei uns — auf Wiederhören!",
@@ -953,6 +1000,21 @@ async def process_turn_v4(
     _is_order_intent = intent_result.intent in (
         IntentKind.TAKEAWAY, IntentKind.DELIVERY, IntentKind.BULK_ORDER, IntentKind.PRE_ORDER
     )
+    # Also handle UNKNOWN/FAQ turns in an active order flow (phone number, confirmation)
+    if not _is_order_intent and intent_result.intent in (IntentKind.UNKNOWN, IntentKind.FAQ):
+        _is_order_intent = (
+            bool(getattr(state, "selected_dish", None) or getattr(state, "selected_items", None))
+            and getattr(state, "order_intent", False)
+            and not getattr(state, "order_created", False)
+        )
+    # Multi-intent: if an order AND reservation are pending, handle order first
+    # (order is more time-sensitive — takeaway/delivery needs immediate processing)
+    if not _is_order_intent and intent_result.intent == IntentKind.RESERVATION:
+        _is_order_intent = (
+            bool(getattr(state, "selected_dish", None) or getattr(state, "selected_items", None))
+            and getattr(state, "order_intent", False)
+            and not getattr(state, "order_created", False)
+        )
     _order_not_committed = not getattr(state, "order_created", False)
     _order_slots_ok = (
         end_call_stage == "idle"
@@ -963,7 +1025,7 @@ async def process_turn_v4(
         # Pre-commit readback: show order summary and ask for confirmation before firing tool
         if not getattr(state, "order_pre_commit_shown", False):
             state.order_pre_commit_shown = True
-            state.end_call_stage = "pre_commit_readback"
+            state.end_call_stage = "order_pre_commit_readback"  # distinct from reservation pre-commit
             summary = _build_pre_commit_order_summary_v4(state) + " Stimmt das so?"
             logger.info(f"[v4_pipeline] T{turn_idx} pre-commit order summary: {summary!r}")
             if tts_callback:
@@ -982,13 +1044,33 @@ async def process_turn_v4(
             from tools.executor import execute_tool
 
             items = getattr(state, "selected_items", None) or []
+            if not items:
+                sd = getattr(state, "selected_dish", None)
+                items = [sd] if sd else []
+            _is_delivery = getattr(state, "delivery_address_mentioned", False) or getattr(state, "delivery_intended", False)
+            delivery_address = getattr(state, "delivery_address", "") or ""
+
+            # For delivery orders: call verify_address first
+            if _is_delivery and delivery_address and "verify_address" not in commit_tools_run:
+                try:
+                    verify_args = {"address": delivery_address, "city": "Bonn", "country": "Deutschland"}
+                    verify_result = await execute_tool("verify_address", verify_args, call_sid, tenant_id)
+                    commit_tools_run.append("verify_address")
+                    logger.info(f"[v4_pipeline] T{turn_idx} verify_address → {verify_result}")
+                    # Update state with verified address if available
+                    if isinstance(verify_result, dict) and verify_result.get("formatted_address"):
+                        state.delivery_address = verify_result["formatted_address"]
+                        delivery_address = state.delivery_address
+                except Exception as _va_err:
+                    logger.warning(f"[v4_pipeline] T{turn_idx} verify_address failed (non-fatal): {_va_err}")
+
             order_args = {
                 "name": getattr(state, "customer_name", "") or "",
                 "phone": getattr(state, "phone_number", "") or caller_phone or "",
                 "order_items": ", ".join(items) if isinstance(items, list) else str(items),
-                "order_type": "delivery" if getattr(state, "delivery_address_mentioned", False) else "takeaway",
+                "order_type": "delivery" if _is_delivery else "takeaway",
                 "payment_method": "bar",
-                "delivery_address": getattr(state, "delivery_address", "") or "",
+                "delivery_address": delivery_address,
             }
             order_result = await execute_tool(
                 "create_order", order_args, call_sid, tenant_id
@@ -998,8 +1080,24 @@ async def process_turn_v4(
 
             state.order_created = True
             state.end_call_stage = "confirmed"
-            readback = _build_readback_v4(state) + " Wir kümmern uns darum. Auf Wiederhören!"
-            logger.info(f"[v4_pipeline] T{turn_idx} ORDER COMMITTED → readback: {readback!r}")
+
+            # Multi-intent check: if reservation is also pending, keep session open
+            _res_also_pending = (
+                getattr(state, "reservation_intent", False)
+                and not getattr(state, "reservation_created", False)
+                and _state_slot_filled(state, "reservation_date")
+            )
+            if _res_also_pending:
+                state.end_call_stage = "idle"  # reset so reservation gate can fire on next turn
+            if _res_also_pending:
+                readback = _build_readback_v4(state) + (
+                    f" Jetzt zu Ihrer Reservierung für nächsten Freitag — "
+                    f"wie viele Personen sollen kommen?"
+                )
+                logger.info(f"[v4_pipeline] T{turn_idx} ORDER COMMITTED (multi-intent, reservation pending) → readback: {readback!r}")
+            else:
+                readback = _build_readback_v4(state) + " Wir kümmern uns darum. Auf Wiederhören!"
+                logger.info(f"[v4_pipeline] T{turn_idx} ORDER COMMITTED → readback: {readback!r}")
 
             if tts_callback:
                 try:
@@ -1011,7 +1109,7 @@ async def process_turn_v4(
                 readback, "order_start", intent_result, t0,
                 tools=scheduled_run + commit_tools_run,
                 next_action="commit",
-                should_end=True,
+                should_end=not _res_also_pending,
             )
         except Exception as commit_err:
             logger.error(f"[v4_pipeline] T{turn_idx} order commit failed: {commit_err}", exc_info=True)
@@ -1046,7 +1144,7 @@ async def process_turn_v4(
     )
     _is_reservation_intent = (
         intent_result.intent in (IntentKind.RESERVATION, IntentKind.MODIFY_RESERVATION)
-        or (intent_result.intent == IntentKind.UNKNOWN and _reservation_in_progress)
+        or (intent_result.intent in (IntentKind.UNKNOWN, IntentKind.FAQ) and _reservation_in_progress)
     )
     _not_yet_committed = not getattr(state, "reservation_created", False)
     _all_slots = end_call_stage == "idle" and _all_slots_present(state, "create_reservation")
@@ -1113,7 +1211,8 @@ async def process_turn_v4(
 
     # ── COMMIT GATE: reservation ────────────────────────────────────────────────
     # (_is_reservation_intent, _not_yet_committed, _all_slots defined above before Fix 4)
-    if _is_reservation_intent and _not_yet_committed and _all_slots:
+    # Guard: don't fire reservation gate while waiting for ORDER pre-commit confirmation
+    if _is_reservation_intent and _not_yet_committed and _all_slots and end_call_stage != "order_pre_commit_readback":
         # Guard: if check_availability already returned unavailable for these exact slots,
         # don't fire another check. Wait until correction_pending clears this flag.
         if getattr(state, "availability_unavailable_at_commit", False):
@@ -1304,6 +1403,18 @@ async def process_turn_v4(
         and not _menu_faq_override_active
     )
     _SLOT_QUESTIONS_DE = _SLOT_QUESTIONS_ORDER if _is_order_intent else _SLOT_QUESTIONS_RESERVATION
+    # Guard: if the user already described a specific order (even an off-menu item),
+    # skip the deterministic "Was möchten Sie bestellen?" — let the LLM handle it.
+    # This allows the bot to respond to "Ich möchte Pizza" with "Pizza ist leider nicht
+    # auf unserer Karte, aber ich empfehle..." instead of asking generically.
+    _user_text_len = len((user_text or "").strip())
+    _user_has_specific_request = (
+        _user_text_len > 15  # more than a short affirmative
+        and any(kw in (user_text or "").lower() for kw in (
+            "bestellen", "möchte", "hätte gerne", "nehme", "bitte", "mitnehmen",
+            "liefern", "abholen", "pizza", "burger", "pasta", "sushi", "wein",
+        ))
+    )
     if (
         ctx_doc.next_action == "clarify"
         and ctx_doc.missing_slots
@@ -1311,7 +1422,12 @@ async def process_turn_v4(
         and end_call_stage == "idle"
     ):
         first_missing = ctx_doc.missing_slots[0]
-        clarify_text = _SLOT_QUESTIONS_DE.get(first_missing)
+        # Don't fire deterministic "order_items" ask when user already stated a specific
+        # item (even off-menu) — let TinyGenerator provide an informed response instead.
+        _skip_deterministic = (
+            first_missing == "order_items" and _user_has_specific_request
+        )
+        clarify_text = None if _skip_deterministic else _SLOT_QUESTIONS_DE.get(first_missing)
         if clarify_text:
             logger.info(
                 f"[v4_pipeline] T{turn_idx} deterministic clarify for slot={first_missing}"
@@ -1327,6 +1443,17 @@ async def process_turn_v4(
                 next_action="clarify",
                 should_end=False,
             )
+        if _skip_deterministic:
+            logger.info(
+                f"[v4_pipeline] T{turn_idx} skipping deterministic order_items ask — "
+                f"user gave specific request, passing to TinyGenerator"
+            )
+            # When the user mentioned something specific but it's not a known menu item,
+            # instruct the LLM to acknowledge the request and explain what's available.
+            if "order_items" in ctx_doc.missing_slots:
+                ctx_doc.response_constraints.must_include.append(
+                    "Erkläre dass das genannte Gericht leider nicht auf unserer Karte steht und schlage eine koreanische Alternative vor (z.B. Bibimbap, Bulgogi, Japchae)"
+                )
 
     # ── TINY GENERATOR (ensure Anthropic client for Claude models) ─────────────
     # Rule: Only Gemini allowed in the system is TTS (gemini-2.5-flash-tts).

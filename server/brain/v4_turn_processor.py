@@ -60,7 +60,7 @@ class V4TurnProcessor:
         caller_phone: str = "",
         filler_cb=None,
     ):
-        from server.brain.conversation_state import ConversationState
+        from server.brain.conversation_state import ConversationState, set_known_items
         from anthropic import AsyncAnthropic
 
         self.tenant_id = tenant_id
@@ -68,6 +68,20 @@ class V4TurnProcessor:
         self.caller_phone = caller_phone
         self._filler_cb = filler_cb
         self.session = session
+
+        # Populate known items from tenant config so dish extraction works
+        _tid = tenant_id or "doboo"
+        try:
+            import pathlib, yaml as _yaml
+            _cfg_path = pathlib.Path(__file__).parent.parent.parent / "configs" / "tenants" / f"{_tid}.yaml"
+            with open(_cfg_path) as _f:
+                _cfg = _yaml.safe_load(_f)
+            _items = _cfg.get("items", [])
+            if _items:
+                set_known_items(_items)
+                logger.debug(f"[V4Turn] loaded {len(_items)} known items for tenant={_tid}")
+        except Exception as _e:
+            logger.warning(f"[V4Turn] could not load known items for tenant={_tid}: {_e}")
 
         # Core state — real ConversationState so all slot extraction works
         self.state = ConversationState()
@@ -123,6 +137,8 @@ class V4TurnProcessor:
         update_state_from_utterance(self.state, user_text)
 
         # Step 2: run v4 pipeline — workers + context_doc + commit gate + TinyGenerator
+        # Include current user turn in last_turns so TinyGenerator always sees it in context.
+        turns_with_current = list(self.last_turns) + ([("user", user_text)] if user_text else [])
         result_dict = await process_turn_v4(
             user_text=user_text,
             turn_idx=self.turn_idx,
@@ -130,7 +146,7 @@ class V4TurnProcessor:
             call_sid=self.call_sid,
             tenant_id=self.tenant_id or "doboo",
             llm_client=self._llm_client,
-            last_turns=self.last_turns,
+            last_turns=turns_with_current,
             tts_callback=tts_callback,
             caller_phone=self.caller_phone,
         )
