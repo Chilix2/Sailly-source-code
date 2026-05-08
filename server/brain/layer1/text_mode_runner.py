@@ -74,6 +74,25 @@ class TextModeRunner:
             })
             await self._init_processor()
 
+            # Auto-send bot greeting (turn 0) so caller-bot receives it before speaking.
+            # In a real call the bot speaks first; this mirrors that behaviour.
+            try:
+                from server.core.tenant_config import load_tenant_config
+                _tcfg = load_tenant_config(self._tenant_id)
+                _greeting = (
+                    getattr(_tcfg, "greeting_line", None)
+                    or "Hallo, hier ist Sailly! Wie kann ich Ihnen behilflich sein?"
+                )
+            except Exception:
+                _greeting = "Hallo, hier ist Sailly! Wie kann ich Ihnen behilflich sein?"
+            await self._ws.send_json({
+                "type": "bot_text",
+                "text": _greeting,
+                "tools_fired": [],
+                "turn_idx": 0,
+            })
+            logger.info(f"[TextMode] Sent greeting (turn 0): {_greeting[:60]!r}")
+
             while True:
                 msg = await asyncio.wait_for(self._ws.receive_json(), timeout=120.0)
                 if msg.get("type") == "end_session":
