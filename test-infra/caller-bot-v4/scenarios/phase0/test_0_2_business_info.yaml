@@ -1,0 +1,25 @@
+# Phase 0.2 — Business info only (no reservation/order)
+
+id: phase0_test_0_2_business_info
+phase: 0
+description: "Bot answers opening hours without routing to reservation/order"
+
+caller:
+  goal: "Frage nach den Öffnungszeiten."
+  identity:
+    name: "Test Caller"
+  patience_turns: 3
+  hesitation: low
+
+expectations:
+  must_fire_after_confirmation: []
+  must_not_fire_before_confirmation: ["create_reservation", "create_order"]
+  forbid_phrases:
+    - "ihrem namen"
+    - "{name}"
+    - "[tool:"
+
+release_thresholds:
+  internal_alpha: required
+  supervised_beta: required
+  production: required

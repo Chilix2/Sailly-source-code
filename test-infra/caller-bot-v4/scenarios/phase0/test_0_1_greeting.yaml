@@ -1,0 +1,33 @@
+# Phase 0.1 — Greeting through v4
+
+id: phase0_test_0_1_greeting
+phase: 0
+description: "Greeting generated through v4/TinyGenerator — no canned legacy greeting path"
+
+caller:
+  goal: "Rufe an und begrüße das System."
+  identity:
+    name: "Test Caller"
+    phone: "+4915100000000"
+  patience_turns: 3
+  hesitation: low
+
+expectations:
+  must_not_contain:
+    - "[tool:"
+    - "technisches problem"
+  must_contain_one_of:
+    - "guten tag"
+    - "hallo"
+    - "wie kann ich"
+    - "willkommen"
+  forbid_phrases:
+    - "ihrem namen"
+    - "{name}"
+    - "[tool:"
+    - "technisches problem"
+
+release_thresholds:
+  internal_alpha: required
+  supervised_beta: required
+  production: required
