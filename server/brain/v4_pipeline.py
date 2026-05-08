@@ -372,7 +372,14 @@ async def process_turn_v4(
     """
     t0 = time.monotonic()
 
-    # Use pre-resolved intent from IntentSessionManager when supplied; this is
+    # Load tenant config once — used for restaurant identity, city, menu keywords, etc.
+    # Cached by load_tenant_config so this is cheap on repeat calls.
+    _tcfg_top = None
+    try:
+        from server.core.tenant_config import load_tenant_config as _ltc_top
+        _tcfg_top = _ltc_top(tenant_id)
+    except Exception as _cfg_err:
+        logger.debug(f"[v4_pipeline] tenant config load failed ({_cfg_err}); using defaults")
     # the universal intent path that handles locking, CONFIRM/DENY inheritance,
     # and reroute. Fall back to bare classify() only for direct callers (tests).
     if intent_result is None:
@@ -736,7 +743,11 @@ async def process_turn_v4(
                 if tool_name == "get_weather":
                     temp = result.get("temperature")
                     desc = result.get("description", "")
-                    loc = result.get("location", "Bonn")
+                    _default_city = (
+                        ((_tcfg_top.location or {}).get("city") or _tcfg_top.city)
+                        if _tcfg_top else "der Stadt"
+                    )
+                    loc = result.get("location", _default_city)
                     if temp is not None:
                         ctx_doc.resolved_entities["weather_temp"] = f"{temp}°C"
                         ctx_doc.resolved_entities["weather_desc"] = desc
@@ -786,7 +797,14 @@ async def process_turn_v4(
     # Without this, alternating FAQ/ordering/reservation turns leave menu_data absent
     # from ctx_doc, causing the grounding gate to reject "Speisekarte" mentions.
     _menu_data_loaded = False
-    _dish_kw_set = {"bibimbap", "bulgogi", "mandu", "ramen", "sushi", "kimchi"}
+    # Build dish keyword set from tenant menu items (not hardcoded Korean dishes)
+    _dish_kw_set = set()
+    if _tcfg_top:
+        _dish_kw_set = {item.lower() for item in (getattr(_tcfg_top, "items", None) or [])}
+    if not _dish_kw_set:
+        # Fallback: extract from cuisine_type string (e.g. "Koreanisch & Japanisch (Sushi, Bibimbap, ...)")
+        _cuisine = getattr(_tcfg_top, "cuisine_type", "") if _tcfg_top else ""
+        _dish_kw_set = {w.strip("(), ").lower() for w in _cuisine.replace("&", ",").split(",") if len(w.strip()) > 3}
     _price_kw_set = {"preis", "kostet", "kosten", "teuer", "billig", "wie viel", "wieviel"}
     _user_lower = user_text.lower() if user_text else ""
     _dish_in_text = bool(_dish_kw_set & set(_user_lower.split()))
@@ -808,7 +826,10 @@ async def process_turn_v4(
             with open(_faq_yaml) as _yf:
                 _raw_cfg = _yaml.safe_load(_yf)
             _faqs = _raw_cfg.get("faqs", [])
-            _menu_kw_set = {"bibimbap", "bulgogi", "mandu", "ramen", "gerichte", "speisekarte", "menu", "menü", "essen", "angebot", "korean", "koreanisch"}
+            # Build menu keyword set from tenant items (not hardcoded Korean dishes)
+            _menu_kw_set = {"gerichte", "speisekarte", "menu", "menü", "essen", "angebot"}
+            if _tcfg_top:
+                _menu_kw_set |= {item.lower() for item in (getattr(_tcfg_top, "items", None) or [])}
             # First try to find a price-specific FAQ entry if both dish and price keywords present
             _best_answer = ""
             if _dish_in_text and _price_in_text:
@@ -1094,7 +1115,12 @@ async def process_turn_v4(
             # For delivery orders: call verify_address first
             if _is_delivery and delivery_address and "verify_address" not in commit_tools_run:
                 try:
-                    verify_args = {"address": delivery_address, "city": "Bonn", "country": "Deutschland"}
+                    _tenant_city = (
+                        getattr(_tcfg_top, "city", None)
+                        or ((_tcfg_top.location or {}).get("city") if _tcfg_top else None)
+                        or "Deutschland"
+                    )
+                    verify_args = {"address": delivery_address, "city": _tenant_city, "country": "Deutschland"}
                     verify_result = await execute_tool("verify_address", verify_args, call_sid, tenant_id)
                     commit_tools_run.append("verify_address")
                     logger.info(f"[v4_pipeline] T{turn_idx} verify_address → {verify_result}")
@@ -1131,9 +1157,20 @@ async def process_turn_v4(
             if _res_also_pending:
                 state.end_call_stage = "idle"  # reset so reservation gate can fire on next turn
             if _res_also_pending:
+                # Reference the actual reservation date, not a hardcoded day name
+                _res_date_str = getattr(state, "reservation_date", "") or ""
+                _res_date_ref = "Ihrer Reservierung"
+                if _res_date_str:
+                    try:
+                        import datetime as _dt2
+                        _GERMAN_WD = {0: "Montag", 1: "Dienstag", 2: "Mittwoch",
+                                      3: "Donnerstag", 4: "Freitag", 5: "Samstag", 6: "Sonntag"}
+                        _rd = _dt2.date.fromisoformat(_res_date_str)
+                        _res_date_ref = f"Ihrer Reservierung am {_GERMAN_WD[_rd.weekday()]}, dem {_rd.day}. {_GERMAN_MONTHS.get(_rd.month, '')}"
+                    except Exception:
+                        pass
                 readback = _build_readback_v4(state) + (
-                    f" Jetzt zu Ihrer Reservierung für nächsten Freitag — "
-                    f"wie viele Personen sollen kommen?"
+                    f" Jetzt zu {_res_date_ref} — wie viele Personen sollen kommen?"
                 )
                 logger.info(f"[v4_pipeline] T{turn_idx} ORDER COMMITTED (multi-intent, reservation pending) → readback: {readback!r}")
             else:
@@ -1525,9 +1562,21 @@ async def process_turn_v4(
             # When the user mentioned something specific but it's not a known menu item,
             # instruct the LLM to acknowledge the request and explain what's available.
             if "order_items" in ctx_doc.missing_slots:
-                ctx_doc.response_constraints.must_include.append(
-                    "Erkläre dass das genannte Gericht leider nicht auf unserer Karte steht und schlage eine koreanische Alternative vor (z.B. Bibimbap, Bulgogi, Japchae)"
+                # Build off-menu suggestion from tenant cuisine type, not hardcoded Korean items
+                _cuisine_hint = ""
+                if _tcfg_top:
+                    _t_items = getattr(_tcfg_top, "items", None) or []
+                    if _t_items:
+                        _examples = ", ".join(_t_items[:3])
+                        _cuisine_hint = f"z.B. {_examples}"
+                    elif getattr(_tcfg_top, "cuisine_type", ""):
+                        _cuisine_hint = _tcfg_top.cuisine_type
+                _alt_constraint = (
+                    f"Erkläre dass das genannte Gericht leider nicht auf unserer Karte steht "
+                    f"und schlage eine Alternative vor"
+                    + (f" ({_cuisine_hint})" if _cuisine_hint else "")
                 )
+                ctx_doc.response_constraints.must_include.append(_alt_constraint)
 
     # ── TINY GENERATOR (ensure Anthropic client for Claude models) ─────────────
     # Rule: Only Gemini allowed in the system is TTS (gemini-2.5-flash-tts).
@@ -1582,6 +1631,11 @@ async def process_turn_v4(
             turns_with_current.append(("user", user_text))
         spoken, json_meta = await generator.generate(
             ctx_doc, turns_with_current, current_node_name=profile,
+            restaurant_identity=(
+                f"{_tcfg_top.restaurant_name} in {(_tcfg_top.location or {}).get('city') or _tcfg_top.city}"
+                if _tcfg_top and getattr(_tcfg_top, "restaurant_name", "")
+                else ""
+            ),
         )
     except Exception as gen_err:
         logger.warning(

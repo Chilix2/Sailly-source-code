@@ -81,7 +81,11 @@ def _grounding_gate(spoken: str, ctx: ContextDocument) -> tuple[str, bool]:
     return spoken, True
 
 
-def _build_prompt(ctx: ContextDocument, last_turns: list[tuple[str, str]]) -> str:
+def _build_prompt(
+    ctx: ContextDocument,
+    last_turns: list[tuple[str, str]],
+    restaurant_identity: str = "",
+) -> str:
     """Build the ~280 token cached prompt for Haiku."""
     history = ""
     if last_turns:
@@ -102,7 +106,7 @@ def _build_prompt(ctx: ContextDocument, last_turns: list[tuple[str, str]]) -> st
     if ctx.missing_slots:
         logger.info(f"[TinyGenerator] LLM prompted to ask about: {ctx.missing_slots}")
 
-    return f"""Du bist Sailly, die KI-Assistentin von DOBOO Korean Soulfood in Bonn.
+    return f"""Du bist Sailly, die KI-Assistentin von {restaurant_identity or "dem Restaurant"}.
 Verwende IMMER "Sie".
 Antworte in maximal {ctx.response_constraints.max_sentences} Sätzen auf Deutsch.
 
@@ -182,6 +186,7 @@ class TinyGenerator:
         last_turns: list[tuple[str, str]],
         model: str | None = None,
         current_node_name: str | None = None,
+        restaurant_identity: str | None = None,
     ) -> tuple[str, dict]:
         """Generate a spoken response using the inner monologue technique.
 
@@ -198,7 +203,7 @@ class TinyGenerator:
         if self._client is None:
             return _FALLBACK_RESPONSE, {}
 
-        prompt = _build_prompt(ctx, last_turns)
+        prompt = _build_prompt(ctx, last_turns, restaurant_identity=restaurant_identity or "")
         t0 = time.monotonic()
 
         try:
@@ -218,7 +223,7 @@ class TinyGenerator:
             if not was_clean:
                 # Regenerate once with tighter constraint
                 ctx.response_constraints.must_include.append("Antwort ohne SMS-Erwähnung")
-                prompt2 = _build_prompt(ctx, last_turns)
+                prompt2 = _build_prompt(ctx, last_turns, restaurant_identity=restaurant_identity or "")
                 raw2 = await self._call_llm(prompt2, model)
                 _, spoken2 = _parse_response(raw2)
                 if spoken2:
@@ -237,7 +242,7 @@ class TinyGenerator:
                     "WICHTIG: Du hast keine Daten zu diesem Thema. "
                     "Sage dem Anrufer kurz, dass du diese Information gerade nicht hast."
                 )
-                prompt3 = _build_prompt(ctx, last_turns)
+                prompt3 = _build_prompt(ctx, last_turns, restaurant_identity=restaurant_identity or "")
                 raw3 = await self._call_llm(prompt3, model)
                 _, spoken3 = _parse_response(raw3)
                 if spoken3:
