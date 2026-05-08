@@ -11,6 +11,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import time
 import time as _time
 import uuid
@@ -25,6 +26,7 @@ from pipecat.frames.frames import (
     EndFrame,
     StartFrame,
     OutputTransportMessageFrame,
+    TTSAudioRawFrame,
 )
 
 import re as _re
@@ -59,7 +61,7 @@ class LatencyTimer:
         self._prev_name = name
         self._prev_t = t
 
-from server.brain.adk_turn_processor import ADKTurnProcessor
+from server.brain.v4_turn_processor import V4TurnProcessor as ADKTurnProcessor
 from server.brain.conversation_state import strip_tool_call_leakage as _strip_tool_call_leakage
 
 
@@ -111,6 +113,37 @@ def _is_backchannel(text: str) -> bool:
     return cleaned in _BACKCHANNEL_UTTERANCES
 
 
+# META_FEEDBACK_RE — P0.3: caller/tester meta-feedback channel.
+# Anchored to start of utterance (or after punctuation), includes 'fehler' as alias.
+# Tolerates typos in "Sailly": Sally, Selly, Sallé.
+_META_FEEDBACK_RE = re.compile(
+    r"^[\s,]*"                                                  # optional leading whitespace/comma
+    r"(achtung|attention|warnung|fehler)\s*,?\s*"               # trigger word (now includes 'fehler')
+    r"(?:sailly|sally|selly|sall[eé])?\s*"                     # optional name (not required for 'fehler')
+    r"[.:,]?\s*"                                                # optional separator
+    r"(.+)",                                                    # captured feedback text
+    re.IGNORECASE | re.DOTALL,
+)
+
+# Keep legacy alias for compatibility with any external callers
+_ACHTUNG_SAILLY = _META_FEEDBACK_RE
+
+
+def _is_achtung_sailly_marker(text: str) -> tuple[bool, str]:
+    """Check if text is a caller/tester meta-feedback marker.
+
+    Anchored to start of utterance. Accepts 'Achtung Sailly:', 'Fehler:', etc.
+    Returns (is_marker, captured_text).
+    """
+    if not text:
+        return False, ""
+    match = _META_FEEDBACK_RE.match(text.strip())
+    if match:
+        return True, match.group(2).strip() if match.lastindex >= 2 else ""
+    return False, ""
+
+
+
 class BrowserBrainService(FrameProcessor):
 
     def __init__(self, tenant_id: str = "doboo", caller_phone: str = "browser_demo", call_sid_prefix: str = "demo", **kwargs):
@@ -128,6 +161,14 @@ class BrowserBrainService(FrameProcessor):
         # process_turn call. Flushed to google_turn_metrics on finalize.
         self._turn_metrics: list[dict] = []
         self._turn_counter: int = 0
+        # Phase 3 shadow: IntentSessionManager runs in parallel with legacy pipeline
+        # and logs to google_context_documents. Does not affect live behaviour.
+        self._intent_session_mgr = None
+        try:
+            from server.brain.intent_session_manager import IntentSessionManager
+            self._intent_session_mgr = IntentSessionManager()
+        except Exception as _ism_err:
+            pass  # shadow mode is optional
         # Set by _init_session when a prior Redis session is successfully
         # restored — suppresses the turn-0 greeting so the caller is not
         # re-greeted after a mid-call WebSocket reconnect.
@@ -165,6 +206,35 @@ class BrowserBrainService(FrameProcessor):
         self._loop_reason_this_turn: str | None = None
         self._stream_aborted_at_sentence: int | None = None
         self._cross_turn_similarity_this_turn: float | None = None
+
+        # Phase 8.6 EOT + audio observability (populated by Flux event handlers
+        # and the FillerScheduler / BackchannelInjector when wired).
+        self._last_tts_ttfb_ms: int | None = None
+        self._last_tts_total_ms: int | None = None  # Phase 3: end-to-end TTS latency
+        self._tts_start_time: float | None = None  # Phase 3: track when TTS generation begins
+        self._last_eot_event_type: str | None = None
+        self._last_eot_confidence: float | None = None
+        self._last_eot_latency_ms: int | None = None
+        
+        # Phase 7: Barge-in sensitivity tuning
+        # Environment variable controls how aggressive the barge-in detection is
+        # Lower values = more aggressive (suppress TTS sooner)
+        self._barge_in_grace_ms = int(
+            os.environ.get("BARGE_IN_GRACE_MS", "200")  # Default 200ms grace period after TTS starts
+        )
+        self._last_backchannel_fired: bool = False
+        self._last_eot_followed_immediately: bool = False
+
+        # Phase 8.2 — FillerScheduler instance (lazy).
+        # Pushes pre-baked PCM into the TTS pipeline when LLM > 400ms.
+        self._filler_scheduler = None
+        # Phase 8.3 — BackchannelInjector instance (lazy).
+        # Plays backchannel ("mhm", "ja") at -10dB on caller hesitation pauses.
+        self._backchannel_injector = None
+        # Phase 8.4 — SpeculativeExecutor instance (lazy).
+        # Fires Required workers on Flux EagerEndOfTurn events; cancels on
+        # TurnResumed; reuses on EndOfTurn confirmation.
+        self._speculative_executor = None
 
     # ------------------------------------------------------------------
     # STT confidence hook — populated by STTConfidenceTracker in the pipeline
@@ -256,6 +326,118 @@ class BrowserBrainService(FrameProcessor):
             )
         logger.info(f"[BRAIN] ADKTurnProcessor ready: {self.call_sid}")
 
+    async def _emit_filler_pcm(self, pcm: bytes) -> None:
+        """Phase 8.2 — push pre-baked filler PCM directly into the TTS output
+        path so the caller hears 'Einen Moment bitte' within ~400ms when the
+        LLM is slow. Bypasses TTS synthesis (the audio is pre-baked at startup).
+        """
+        if not pcm:
+            return
+        try:
+            await self.push_frame(TTSAudioRawFrame(
+                audio=pcm, sample_rate=24000, num_channels=1,
+            ))
+            logger.info(f"[FillerScheduler] PCM filler pushed ({len(pcm)} bytes)")
+        except Exception as e:
+            logger.warning(f"[FillerScheduler] PCM push failed: {e}")
+
+    def _get_filler_scheduler(self):
+        """Lazy-init the FillerScheduler with the PCM callback."""
+        if self._filler_scheduler is None:
+            try:
+                from server.brain.filler_scheduler import FillerScheduler
+                self._filler_scheduler = FillerScheduler(
+                    audio_callback=self._emit_filler_pcm,
+                )
+            except Exception as _fs_err:
+                logger.debug(f"[BRAIN] FillerScheduler init failed: {_fs_err}")
+                self._filler_scheduler = None
+        return self._filler_scheduler
+
+    def _get_backchannel_injector(self):
+        """Lazy-init the BackchannelInjector with the PCM callback."""
+        if self._backchannel_injector is None:
+            try:
+                from server.brain.backchannel_injector import BackchannelInjector
+                self._backchannel_injector = BackchannelInjector(
+                    audio_callback=self._emit_filler_pcm,
+                )
+            except Exception as _bi_err:
+                logger.debug(f"[BRAIN] BackchannelInjector init failed: {_bi_err}")
+                self._backchannel_injector = None
+        return self._backchannel_injector
+
+    def on_user_started_speaking(self) -> None:
+        """Called by the audio pipeline when the user begins a new utterance.
+        Resets per-turn backchannel state."""
+        bi = self._get_backchannel_injector()
+        if bi is not None:
+            bi.reset_for_turn()
+
+    async def on_user_silence_start(self) -> None:
+        """Called when VAD detects silence onset during user utterance.
+        Triggers the hesitation timer for backchannel playback."""
+        bi = self._get_backchannel_injector()
+        if bi is not None:
+            await bi.on_user_silence_start_safe()
+
+    async def on_user_speech_resume(self) -> None:
+        """Called when VAD detects speech resuming after a pause."""
+        bi = self._get_backchannel_injector()
+        if bi is not None:
+            await bi.on_speech_resume()
+
+    def _get_speculative_executor(self):
+        """Lazy-init the SpeculativeExecutor with the worker_router."""
+        if self._speculative_executor is None:
+            try:
+                from server.brain.speculative_executor import SpeculativeExecutor
+                from server.brain import worker_router as _wr
+                self._speculative_executor = SpeculativeExecutor(worker_router=_wr)
+            except Exception as _se_err:
+                logger.debug(f"[BRAIN] SpeculativeExecutor init failed: {_se_err}")
+                self._speculative_executor = None
+        return self._speculative_executor
+
+    async def on_flux_eager_eot(
+        self,
+        confidence: float | None = None,
+        partial_text: str = "",
+    ) -> None:
+        """Called by the Flux EagerEndOfTurn handler.
+        Suppresses any pending backchannel, fires speculative workers,
+        and records EOT observability."""
+        self._last_eot_event_type = "EagerEndOfTurn"
+        if confidence is not None:
+            self._last_eot_confidence = confidence
+        bi = self._get_backchannel_injector()
+        if bi is not None:
+            bi.on_eager_eot()
+            self._last_backchannel_fired = bi.backchannel_fired
+            self._last_eot_followed_immediately = bi.eot_followed_immediately
+        # Phase 8.4 — fire speculative workers on the partial text.
+        try:
+            se = self._get_speculative_executor()
+            if se is not None and partial_text:
+                turn_idx = getattr(self.turn_processor, "turn_idx", 0) if self.turn_processor else 0
+                await se.on_eager_eot(
+                    partial_text=partial_text,
+                    turn_idx=turn_idx,
+                    call_sid=self.call_sid,
+                    tenant_id=self.tenant_id or "doboo",
+                )
+        except Exception as _se_err:
+            logger.debug(f"[BRAIN] speculative_executor.on_eager_eot failed: {_se_err}")
+
+    async def on_flux_turn_resumed(self) -> None:
+        """Called when Flux emits TurnResumed — cancel speculative work."""
+        try:
+            se = self._get_speculative_executor()
+            if se is not None:
+                await se.on_turn_resumed()
+        except Exception as _se_err:
+            logger.debug(f"[BRAIN] speculative_executor.on_turn_resumed failed: {_se_err}")
+
     async def _emit_filler_tts(self, text: str) -> None:
         """Push a short filler text to the TTS pipeline immediately — used by the
         brain to fill silence BEFORE a slow tool (verify_address, create_order, …)
@@ -282,6 +464,33 @@ class BrowserBrainService(FrameProcessor):
         payload = {"type": msg_type, **kwargs}
         await self.push_frame(OutputTransportMessageFrame(message=payload))
 
+    async def _persist_context_doc(self, turn_number: int, shadow_data: dict) -> None:
+        """Persist v4 pipeline IntentSession classification to google_context_documents."""
+        try:
+            from server.database import get_pool
+            pool = await get_pool()
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    """
+                    INSERT INTO google_context_documents
+                        (call_sid, tenant_id, turn_number,
+                         intent, turn_type, intent_locked, lock_confidence,
+                         reroute_fired, worker_profile, shadow_mode)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, FALSE)
+                    """,
+                    self.call_sid,
+                    self.tenant_id,
+                    turn_number,
+                    shadow_data.get("intent"),
+                    shadow_data.get("turn_type"),
+                    shadow_data.get("intent_locked", False),
+                    shadow_data.get("lock_confidence", 0.0),
+                    shadow_data.get("reroute_fired", False),
+                    shadow_data.get("worker_profile"),
+                )
+        except Exception as _db_err:
+            pass  # shadow persistence is non-fatal
+
     async def process_frame(self, frame, direction):
         if isinstance(frame, StartFrame):
             await super().process_frame(frame, direction)
@@ -298,6 +507,9 @@ class BrowserBrainService(FrameProcessor):
             timer = LatencyTimer(self.call_sid, self._turn_counter + 1)
             timer.mark("stt_final")
             
+            # Phase 4: Track barge-in attempt
+            self._barge_in_attempted_this_turn = True  # User spoke while bot was speaking
+            
             user_text = self._extract_latest_user_text(frame.context)
             if not user_text or not user_text.strip():
                 return
@@ -310,6 +522,42 @@ class BrowserBrainService(FrameProcessor):
             if _is_backchannel(user_text):
                 logger.info(f"[BRAIN] Backchannel suppressed: {user_text!r}")
                 return
+
+            # Achtung Sailly marker filter (Fix 1.1 / E2) — caller meta-feedback
+            # Short-circuit and respond with a fixed apology turn.
+            # Fix E2: Do NOT early-return if the message ALSO contains a farewell —
+            # let the normal turn_processor run so the farewell cascade can fire.
+            is_marker, captured_text = _is_achtung_sailly_marker(user_text)
+            _FAREWELL_QUICK_RE = re.compile(
+                r"\b(tsch[uü]s{1,2}|auf wiedersehen|auf wiederhören|bye|das war.?s|"
+                r"das reicht|zu ende|gespräch beendet|gespräch ist (zu |vorbei|beendet)|"
+                r"gespräch ist vorbei)\b",
+                re.IGNORECASE,
+            )
+            has_farewell = bool(_FAREWELL_QUICK_RE.search(user_text))
+            if is_marker and not has_farewell:
+                logger.info(
+                    f"[META_FEEDBACK] marker detected: {captured_text[:120]!r}",
+                    extra={"call_sid": self.call_sid, "meta_feedback": captured_text},
+                )
+                # Send user transcript to browser so caller sees their message
+                await self._send_to_browser("transcript", speaker="user", text=user_text)
+                # Short, neutral ack — does not pretend to act on the feedback
+                bot_text = "Verstanden, ich habe das notiert."
+                await self._send_to_browser("transcript", speaker="bot", text=bot_text)
+                # Log to session if available
+                if self.session:
+                    try:
+                        await self.session.add_transcript("user", user_text)
+                        await self.session.add_transcript("bot", bot_text)
+                    except Exception:
+                        pass
+                return  # Early exit — do NOT call turn_processor
+            elif is_marker and has_farewell:
+                logger.info(
+                    f"[BRAIN][CALLER_FEEDBACK] Achtung+farewell — skipping early return so farewell cascade runs",
+                    extra={"call_sid": self.call_sid},
+                )
 
             logger.info(f"[BRAIN] User: '{user_text[:80]}'")
 
@@ -441,24 +689,43 @@ class BrowserBrainService(FrameProcessor):
                 _full_response_buf: list = []
 
                 _tts_turn_start: float = 0.0  # set on first TTS chunk, not at turn start
+                _tts_streaming_start: float = time.time()  # Capture TTS process start BEFORE any LLM streaming
+                _tts_last_chunk_time: float = 0.0  # Phase 3: track last TTS chunk for total latency
 
                 async def _tts_push(chunk: str) -> None:
-                    nonlocal _streamed_chunks, _full_response_buf, _tts_turn_start
+                    nonlocal _streamed_chunks, _full_response_buf, _tts_turn_start, _tts_last_chunk_time
                     # Capture when TTS actually starts streaming (not when turn processing started).
                     # This is the correct anchor for the barge-in comparison: we only want to
                     # suppress chunks if the user spoke AFTER audio started playing, not during
                     # the LLM generation window.
                     if not _streamed_chunks:
                         _tts_turn_start = time.time()
+                        self._tts_start_time = _tts_turn_start  # Phase 3
+                        # Cancel pending PCM filler — the LLM has produced its
+                        # first chunk so the filler is no longer needed.
+                        try:
+                            _fs = self._get_filler_scheduler()
+                            if _fs is not None:
+                                _fs.cancel()
+                        except Exception:
+                            pass
+                    # Phase 3: track timestamp of last chunk for end-to-end TTS latency
+                    _tts_last_chunk_time = time.time()
                     # Barge-in suppression: if user started speaking AFTER this
-                    # turn's TTS began streaming, the caller has interrupted —
+                    # turn's TTS began streaming (after grace period), the caller has interrupted —
                     # suppress audio but STILL accumulate _full_response_buf so
                     # bot_text in the DB reflects the complete LLM response, not
                     # the truncated pre-barge-in portion. (PR-16c)
-                    if self._barge_in_ts > _tts_turn_start:
+                    # Phase 7: Apply grace period — don't suppress too quickly
+                    _grace_delta = (self._barge_in_ts - _tts_turn_start) * 1000  # ms
+                    if _grace_delta > self._barge_in_grace_ms:
+                        # Phase 4: Track that barge-in succeeded in suppressing audio
+                        self._barge_in_succeeded_this_turn = True
+                        self._barge_in_latency_ms = int(_grace_delta)
                         logger.debug(
                             f"[BRAIN] TTS chunk suppressed (barge-in): "
-                            f"barge_in={self._barge_in_ts:.3f} tts_start={_tts_turn_start:.3f}"
+                            f"barge_in={self._barge_in_ts:.3f} tts_start={_tts_turn_start:.3f} "
+                            f"latency={self._barge_in_latency_ms}ms (grace={self._barge_in_grace_ms}ms)"
                         )
                         clean = _sanitize_for_tts(chunk)
                         if clean:
@@ -490,6 +757,17 @@ class BrowserBrainService(FrameProcessor):
                     _streamed_chunks.append(clean)
 
                 _turn_started_ms = time.time() * 1000.0
+                # Phase 8.2 — arm the PCM FillerScheduler for this turn.
+                # Will fire 'Einen Moment bitte' after 400ms IF the LLM hasn't
+                # produced a chunk yet AND the active profile is expected to
+                # take longer (commit-tool turns, multi-intent turns).
+                try:
+                    _fs = self._get_filler_scheduler()
+                    if _fs is not None:
+                        await _fs.arm(requires_slow_tool=True)
+                except Exception:
+                    pass
+
                 result = await self.turn_processor.process_turn(
                     user_text, tts_callback=_tts_push
                 )
@@ -507,6 +785,13 @@ class BrowserBrainService(FrameProcessor):
                 if _streamed_chunks:
                     timer.mark("tts_text_pushed")
                     await self.push_frame(LLMFullResponseEndFrame())
+                    # Phase 3: Measure TTS service readiness latency
+                    # (from when we start the TTS process to when we've finished pushing all text).
+                    # Note: This does NOT measure actual audio synthesis time (which happens
+                    # asynchronously in Pipecat); it measures text-to-Pipecat-readiness time.
+                    if _tts_streaming_start:
+                        self._last_tts_total_ms = int((time.time() - _tts_streaming_start) * 1000)
+                        logger.info(f"[Phase3] TTS service readiness latency: {self._last_tts_total_ms}ms")
                 else:
                     tts_text = _sanitize_for_tts(result.clean_text)
                     if tts_text:
@@ -514,6 +799,10 @@ class BrowserBrainService(FrameProcessor):
                         await self.push_frame(LLMFullResponseStartFrame())
                         await self.push_frame(LLMTextFrame(text=f"{_directive.inline_tag} {tts_text}"))
                         await self.push_frame(LLMFullResponseEndFrame())
+                        # Phase 3: Measure TTS service readiness latency (non-streaming path)
+                        if _tts_streaming_start:
+                            self._last_tts_total_ms = int((time.time() - _tts_streaming_start) * 1000)
+                            logger.info(f"[Phase3] TTS service readiness latency (non-streaming): {self._last_tts_total_ms}ms")
                     else:
                         logger.warning(
                             f"[BRAIN] Skipping TTS for empty/trivial fragment: {result.clean_text!r}"
@@ -522,12 +811,15 @@ class BrowserBrainService(FrameProcessor):
                 # Accumulate per-turn metrics for google_turn_metrics persistence
                 try:
                     self._turn_counter += 1
-                    node_name = None
-                    try:
-                        state = getattr(self.turn_processor, "state", None)
-                        node_name = getattr(state, "current_node", None) if state else None
-                    except Exception:
-                        pass
+                    # P0.1: read node_name from TurnResult (set by node_mgr.current_node_name)
+                    node_name = getattr(result, "node_name", None)
+                    if not node_name:
+                        # Fallback to live node_mgr if TurnResult didn't carry it
+                        try:
+                            _tp = getattr(self, "turn_processor", None)
+                            node_name = getattr(getattr(_tp, "node_mgr", None), "current_node_name", None)
+                        except Exception:
+                            pass
 
                     # Compute per-stage latencies from LatencyTimer marks.
                     # stt_latency_ms  = stt_final → brain_start
@@ -648,6 +940,7 @@ class BrowserBrainService(FrameProcessor):
                         "validation_breakdown": _validation_breakdown,
                         "tts_situation": _directive.situation.value,
                         "tts_mood": _directive.mood.value,
+                        "tts_inline_tag": _directive.inline_tag,
                         # Sprint 0 / Sprint 3.3: token counts from turn_processor
                         # (set by adk_turn_processor after build_context() returns the tuple).
                         "prompt_tokens_in": getattr(_tp, "_last_prompt_tokens_in", None) if _tp else None,
@@ -681,7 +974,7 @@ class BrowserBrainService(FrameProcessor):
                         "cross_turn_similarity_max": getattr(self, "_cross_turn_similarity_this_turn", None),
                         "subsystems_fired": _subsystems_fired,
                         "tts_rate_pct": getattr(_directive, "prosody_rate_pct", None),
-                        "tts_latency_ms": None,  # set if measurable
+                        "tts_latency_ms": self._last_tts_total_ms,  # Phase 3: end-to-end TTS latency
                         # Phase 9 A1 — per-stage latency, token counts, and cost_eur
                         # from TurnTimings. build_turn_metrics_extra calls to_metrics_dict()
                         # internally and appends cost_eur computed from token counts.
@@ -692,9 +985,72 @@ class BrowserBrainService(FrameProcessor):
                         "error_codes": (
                             getattr(_tp, "_current_turn_error_codes", None) or []
                         ) if _tp else [],
+                        # Phase 8.6 — v4 per-stage latency and EOT observability.
+                        # These are sourced from per-call trackers maintained in
+                        # the ADKTurnProcessor / brain_service. Missing values
+                        # become NULL in the DB.
+                        "intent_classify_ms": getattr(_tp, "_last_intent_classify_ms", None) if _tp else None,
+                        "worker_p50_ms": getattr(_tp, "_last_worker_p50_ms", None) if _tp else None,
+                        "worker_p95_ms": getattr(_tp, "_last_worker_p95_ms", None) if _tp else None,
+                        "context_build_ms": getattr(_tp, "_last_context_build_ms", None) if _tp else None,
+                        "generator_ttft_ms": getattr(_tp, "_last_generator_ttft_ms", None) if _tp else None,
+                        "tts_ttfb_ms": getattr(self, "_last_tts_ttfb_ms", None),
+                        "eot_event_type": getattr(self, "_last_eot_event_type", None),
+                        "eot_confidence": getattr(self, "_last_eot_confidence", None),
+                        "eot_latency_ms": getattr(self, "_last_eot_latency_ms", None),
+                        "backchannel_fired": getattr(self, "_last_backchannel_fired", False) or False,
+                        "eot_followed_immediately": getattr(self, "_last_eot_followed_immediately", False) or False,
+                        # Phase 0: Slot and validation diagnostics
+                        "slot_extraction_latency_ms": getattr(_tp, "_last_slot_extraction_latency_ms", None) if _tp else None,
+                        "slot_retention_status": getattr(_tp, "_last_slot_retention_status", None) if _tp else None,
+                        "validation_passes": getattr(_tp, "_last_validation_passes", None) if _tp else None,
                     })
                 except Exception as me:
                     logger.debug(f"[BRAIN] turn_metrics accumulate failed: {me}")
+
+                # Phase 3 shadow: run IntentSessionManager and persist to context_docs
+                try:
+                    if self._intent_session_mgr is not None:
+                        _turn_idx = getattr(self.turn_processor, "turn_idx", self._turn_counter) - 1
+                        _intent_session = self._intent_session_mgr.process_turn(
+                            user_text, turn_idx=_turn_idx
+                        )
+                        # Haiku fallback: when regex returns UNKNOWN, ask the LLM to
+                        # classify the intent.  This implements the two-layer architecture
+                        # documented in intent_classifier.py but never previously wired.
+                        if _intent_session.primary_intent.value == "unknown":
+                            try:
+                                from server.brain.intent_classifier import classify_with_haiku as _classify_haiku
+                                _haiku_result = await _classify_haiku(user_text, turn_idx=_turn_idx)
+                                if _haiku_result.intent.value != "unknown":
+                                    _intent_session.update(_haiku_result, _turn_idx)
+                                    logger.info(
+                                        f"[BRAIN] Haiku override: {_haiku_result.intent.value} "
+                                        f"(conf={_haiku_result.confidence})"
+                                    )
+                            except Exception as _haiku_err:
+                                logger.debug(f"[BRAIN] Haiku intent fallback failed: {_haiku_err}")
+                        _shadow_dict = self._intent_session_mgr.to_shadow_dict(_turn_idx)
+                        # Backfill intent classification into the most-recently-appended
+                        # turn_metrics entry so the DB row carries intent/turn_type/worker_profile.
+                        if self._turn_metrics:
+                            self._turn_metrics[-1]["intent"] = (
+                                _intent_session.primary_intent.value
+                                if _intent_session.primary_intent else None
+                            )
+                            self._turn_metrics[-1]["turn_type"] = (
+                                _intent_session.current_turn_type.value
+                                if _intent_session.current_turn_type else None
+                            )
+                            self._turn_metrics[-1]["worker_profile"] = _intent_session.worker_profile
+                        # Best-effort async persist — non-blocking
+                        import asyncio as _asyncio
+                        _asyncio.create_task(self._persist_context_doc(
+                            turn_number=self._turn_counter,
+                            shadow_data=_shadow_dict,
+                        ))
+                except Exception as _shadow_err:
+                    logger.debug(f"[BRAIN] shadow intent session failed: {_shadow_err}")
 
                 if self.session:
                     try:
@@ -706,16 +1062,23 @@ class BrowserBrainService(FrameProcessor):
                 await self._send_to_browser("transcript", speaker="bot", text=result.clean_text)
 
                 if result.should_end:
-                    # Estimate farewell audio length for the sleep guard.
+                    # Phase 6: Farewell hardening — ensure TTS completes before call ends.
                     # Use streamed chars if available, else result.clean_text.
                     _spoken = "".join(_streamed_chunks) if _streamed_chunks else _sanitize_for_tts(result.clean_text) or ""
                     if _spoken:
-                        _farewell_secs = max(2.0, min(10.0, len(_spoken) / _CHARS_PER_SEC_DE + 1.5))
+                        # Minimum 5s (user-requested floor) + generous +3s buffer to cover:
+                        # - TTS synthesis delay (~0.5–1s)
+                        # - Network / playback jitter (~0.5–1s)
+                        # - Slower speech rate for numbers/names in confirmations
+                        _farewell_secs = max(5.0, len(_spoken) / _CHARS_PER_SEC_DE + 3.0)
                         logger.info(
-                            f"[BRAIN] Waiting {_farewell_secs:.1f}s for farewell TTS before EndFrame "
-                            f"({len(_spoken)} chars)"
+                            f"[Phase6] Waiting {_farewell_secs:.1f}s for farewell TTS before EndFrame "
+                            f"({len(_spoken)} chars at ~{_CHARS_PER_SEC_DE} chars/sec)"
                         )
                         await asyncio.sleep(_farewell_secs)
+                    else:
+                        logger.info("[Phase6] No farewell text; waiting 5s minimum before end")
+                        await asyncio.sleep(5.0)
                     logger.info(f"[BRAIN] Ending: {result.end_reason}")
                     await self._finalize_session(result.end_reason)
                     await self.push_frame(EndFrame())
@@ -757,36 +1120,51 @@ class BrowserBrainService(FrameProcessor):
                 )
                 return
 
-            logger.info("[BRAIN-GREET] Triggering turn-0 greeting")
-            # EU AI Act Art. 50: the first bot line MUST contain the token "KI".
-            # Text is loaded from tenant config (greeting_line) with a hard fallback
-            # that keeps the KI disclosure even if the tenant config failed to load.
-            _fallback_greeting = (
-                "Hallo, hier ist Sailly, die KI-Assistentin vom DOBOO Korean Soulfood. — schön, dass Sie anrufen! Was kann ich für Sie tun?"
-            )
-            tenant = getattr(self.turn_processor, "_tenant", None) if self.turn_processor else None
-            greeting_text = (getattr(tenant, "greeting_line", None) or _fallback_greeting).strip()
-            if " KI" not in f" {greeting_text}":
-                logger.error(
-                    "[BRAIN-GREET] tenant.greeting_line missing 'KI' token — "
-                    "falling back to compliant default (EU AI Act Art. 50)"
+            logger.info("[BRAIN-GREET] Triggering turn-0 greeting via v4 pipeline")
+            
+            # Use fixed greeting from tenant config (doboo.yaml)
+            greeting_text = None
+            try:
+                from server.core.tenant_config import TenantRegistry
+                registry = TenantRegistry()
+                tenant = registry.load_tenant(self.tenant_id or "doboo")
+                if tenant and hasattr(tenant, 'greeting_line') and tenant.greeting_line:
+                    greeting_text = tenant.greeting_line
+                    logger.info(f"[BRAIN-GREET] Using tenant-configured greeting: '{greeting_text}'")
+            except Exception as _e:
+                logger.warning(f"[BRAIN-GREET] Failed to load tenant config: {_e}")
+            
+            # Fallback if no tenant config found
+            if not greeting_text:
+                greeting_text = (
+                    "Hallo, hier ist Sailly, die KI-Assistentin vom DOBOO Korean Soulfood — "
+                    "schön, dass Sie anrufen! Was kann ich für Sie tun?"
                 )
-                greeting_text = _fallback_greeting
 
-            class GreetingResult:
-                clean_text = greeting_text
-            result = GreetingResult()
-            if result.clean_text:
-                logger.info(f"[BRAIN-GREET] '{result.clean_text[:120]}'")
+            # EU AI Act Art. 50: the first bot line MUST contain "KI".
+            if " KI" not in f" {greeting_text}":
+                logger.warning(
+                    "[BRAIN-GREET] v4 greeting missing 'KI' token — prepending disclosure"
+                )
+                greeting_text = (
+                    "Hallo, hier ist Sailly, die KI-Assistentin von DOBOO. " + greeting_text
+                )
 
+            if greeting_text:
+                logger.info(f"[BRAIN-GREET] '{greeting_text[:120]}'")
+
+                # Always try to add greeting to session transcript
                 if self.session:
                     try:
-                        await self.session.add_transcript("assistant", result.clean_text)
-                    except Exception:
-                        pass
+                        await self.session.add_transcript("assistant", greeting_text)
+                        logger.info("[BRAIN-GREET] Added greeting to session transcript")
+                    except Exception as e:
+                        logger.warning(f"[BRAIN-GREET] Failed to add greeting to session: {e}")
+                else:
+                    logger.warning("[BRAIN-GREET] Session not yet initialized")
 
                 # Send bot transcript to browser
-                await self._send_to_browser("transcript", speaker="bot", text=result.clean_text)
+                await self._send_to_browser("transcript", speaker="bot", text=greeting_text)
 
                 # Apply greeting-specific TTS conditioning before synthesis.
                 # is_returning_caller is set if caller_id_phone is known from
@@ -810,7 +1188,7 @@ class BrowserBrainService(FrameProcessor):
                         speaking_rate=_greet_directive.prosody_rate_pct / 100.0,
                     )
 
-                tts_greet = _sanitize_for_tts(result.clean_text)
+                tts_greet = _sanitize_for_tts(greeting_text)
                 if tts_greet:
                     await self.push_frame(LLMFullResponseStartFrame())
                     await self.push_frame(LLMTextFrame(text=f"{_greet_directive.inline_tag} {tts_greet}"))
@@ -829,6 +1207,10 @@ class BrowserBrainService(FrameProcessor):
         self.session = None  # Prevent double-finalize
         try:
             session_data = await session_ref.end()
+            # Merge tenant info into session data for consistent reporting
+            if isinstance(session_data, dict):
+                session_data["tenant_id"] = self.tenant_id
+                session_data.setdefault("tenant", self.tenant_id)
             logger.info(f"[BRAIN] Session ended: {self.call_sid} reason={reason}")
 
             # ── Record monitoring metrics to Redis ─────────────────────────────
@@ -894,9 +1276,77 @@ class BrowserBrainService(FrameProcessor):
         ended_at = _parse_dt(session_data.get("ended_at") or now_dt)
         duration_secs = int(session_data.get("duration_secs") or max(0, time.time() - self._start_ts))
         transcripts = session_data.get("transcripts", [])
+        
+        # Reconstruct full conversation from adk_brain memory if needed
+        # (bot responses are stored in state.adk_brain.memory.recent_turns)
+        recent_turns = (
+            session_data.get("state", {})
+            .get("adk_brain", {})
+            .get("memory", {})
+            .get("recent_turns", [])
+        )
+        if recent_turns:
+            # Build expected transcript from recent_turns: customer, bot, customer, bot, ...
+            expected_from_brain = []
+            for turn in recent_turns:
+                if turn.get("customer") and turn["customer"] != "<call_start>":
+                    expected_from_brain.append({"role": "user", "text": turn["customer"]})
+                if turn.get("bot"):
+                    expected_from_brain.append({"role": "assistant", "text": turn["bot"]})
+            
+            # Preserve Sailly's initial greeting if it exists in transcripts
+            greeting = None
+            if transcripts and transcripts[0].get("role") == "assistant":
+                greeting_text = transcripts[0].get("text") or ""
+                # Greeting typically contains "Willkommen" or "Sailly"
+                if "Willkommen" in greeting_text or "Sailly" in greeting_text:
+                    greeting = transcripts[0]
+            
+            # Reconstruct: greeting (if exists) + alternating turns from recent_turns
+            if expected_from_brain or greeting:
+                merged = []
+                if greeting:
+                    merged.append(greeting)
+                merged.extend(expected_from_brain)
+                
+                if len(merged) > len(transcripts):
+                    logger.info(f"[BRAIN] Reconstructing transcripts: {len(transcripts)} → {len(merged)} (kept greeting={greeting is not None})")
+                    transcripts = merged
+        
+        # Sync ADK brain tool history into session_data["tool_calls"] if pipeline
+        # did not already populate it.  ADK brain tracks executed tools internally
+        # in state.adk_brain.all_tools (List[str]); the standard Pipecat tool
+        # registration path is bypassed when USE_ADK_BRAIN is active, so
+        # session_data["tool_calls"] stays empty without this sync.
+        if not session_data.get("tool_calls"):
+            _all_tools_adk = (
+                session_data.get("state", {})
+                .get("adk_brain", {})
+                .get("all_tools", [])
+            )
+            if _all_tools_adk:
+                session_data["tool_calls"] = [{"tool": t, "name": t} for t in _all_tools_adk]
+                logger.info(
+                    f"[BRAIN] synced {len(_all_tools_adk)} ADK tool(s) into session_data['tool_calls']"
+                )
+
         tool_calls = session_data.get("tool_calls", [])
         tool_names = [tc.get("tool", "") for tc in tool_calls]
         was_escalated = any(t in ("transfer_to_human", "transfer_to_tier2") for t in tool_names)
+
+        # Compute real quality score from the live auditor (Fix 6).
+        # score_live_call returns composite_score on a 0-100 scale; the DB
+        # stores it on a 0-10 scale (matching the Node.js quality.get("score",0)/10 convention).
+        # Fix 3 (role filter in call_auditor_live) must already be applied so
+        # the auditor correctly reads bot turns written as role="bot" by ADK brain.
+        try:
+            from server.call_auditor_live import score_live_call as _score_live_call
+            _audit_result = _score_live_call(session_data, industry=self.tenant_id or "restaurant")
+            _quality_score = round(_audit_result.get("composite_score", 50.0) / 10.0, 1)
+            logger.info(f"[BRAIN] quality_score={_quality_score} (composite={_audit_result.get('composite_score')})")
+        except Exception as _qs_err:
+            logger.warning(f"[BRAIN] quality score computation failed, using 5.0: {_qs_err}")
+            _quality_score = 5.0
 
         conn = await asyncpg.connect(db_url)
         try:
@@ -904,22 +1354,24 @@ class BrowserBrainService(FrameProcessor):
             row = await conn.fetchrow(
                 """
                 INSERT INTO google_calls
-                    (call_sid, caller_number, started_at, ended_at, duration_seconds,
-                     quality_score, outcome, language, was_escalated,
+                    (call_sid, caller_number, tenant_id, started_at, ended_at, duration_seconds,
+                     quality_score, outcome, language, was_escalated, total_turns,
                      total_cost_tokens, total_cost_telephony, session_data)
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
                 ON CONFLICT (call_sid) DO NOTHING
                 RETURNING id
                 """,
                 self.call_sid,
                 "browser_demo",
+                self.tenant_id or "doboo",
                 started_at,
                 ended_at,
                 duration_secs,
-                5.0,
+                _quality_score,
                 reason,
                 "de",
                 was_escalated,
+                len(transcripts),
                 0.0,
                 0.0,
                 json.dumps(session_data),
@@ -938,7 +1390,7 @@ class BrowserBrainService(FrameProcessor):
                     [
                         (
                             self.call_sid,
-                            t.get("role", "user"),
+                            t.get("role") or ("assistant" if t.get("speaker") == "bot" else "user"),
                             t.get("text") or t.get("content") or "",
                             i,
                             _parse_dt(t.get("timestamp") or t.get("ts")) if (t.get("timestamp") or t.get("ts")) else now_dt,
@@ -1016,7 +1468,13 @@ class BrowserBrainService(FrameProcessor):
                          subsystems_fired, tts_rate_pct,
                          stt_ms, extract_ms, l2_ms, tool_ms, tts_first_byte_ms, total_ms,
                          extract_tokens_in, extract_tokens_out, cost_eur,
-                         tool_durations, error_codes)
+                         tool_durations, error_codes,
+                         intent_classify_ms, worker_p50_ms, worker_p95_ms,
+                         context_build_ms, generator_ttft_ms, tts_ttfb_ms,
+                         eot_event_type, eot_confidence, eot_latency_ms,
+                         backchannel_fired, eot_followed_immediately,
+                         slot_extraction_latency_ms, slot_retention_status, validation_passes,
+                         intent, turn_type, worker_profile)
                     VALUES (
                         $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12,$13,$14,$15,
                         $16::jsonb,$17,$18,
@@ -1031,7 +1489,11 @@ class BrowserBrainService(FrameProcessor):
                         $47::jsonb,$48,
                         $49,$50,$51,$52,$53,$54,
                         $55,$56,$57,
-                        $58::jsonb,$59::text[]
+                        $58::jsonb,$59::text[],
+                        $60,$61,$62,$63,$64,$65,
+                        $66,$67,$68,$69,$70,
+                        $71,$72::jsonb,$73::jsonb,
+                        $74,$75,$76
                     )
                     """,
                     [
@@ -1096,6 +1558,25 @@ class BrowserBrainService(FrameProcessor):
                             tm.get("cost_eur"),
                             _jd(tm.get("tool_durations")),
                             tm.get("error_codes") or [],
+                            # Phase 8.6 v4 latency layers
+                            tm.get("intent_classify_ms"),
+                            tm.get("worker_p50_ms"),
+                            tm.get("worker_p95_ms"),
+                            tm.get("context_build_ms"),
+                            tm.get("generator_ttft_ms"),
+                            tm.get("tts_ttfb_ms"),
+                            tm.get("eot_event_type"),
+                            tm.get("eot_confidence"),
+                            tm.get("eot_latency_ms"),
+                            tm.get("backchannel_fired"),
+                            tm.get("eot_followed_immediately"),
+                            tm.get("slot_extraction_latency_ms"),
+                            _jd(tm.get("slot_retention_status")),
+                            _jd(tm.get("validation_passes")),
+                            # Phase A-D patch 1: intent classification columns
+                            tm.get("intent"),
+                            tm.get("turn_type"),
+                            tm.get("worker_profile"),
                         )
                         for tm in self._turn_metrics
                     ],

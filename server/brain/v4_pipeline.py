@@ -154,11 +154,13 @@ def _build_pre_commit_summary_v4(state) -> str:
     spoken_time = getattr(state, "reservation_time", None) or "der gewünschten Zeit"
     party = getattr(state, "party_size", None) or 2
     name = getattr(state, "customer_name", None) or "Ihrem Namen"
+    phone = getattr(state, "phone_number", None)
 
     plural = "Person" if party == 1 else "Personen"
+    phone_clause = f", Rückrufnummer {' '.join(phone)}" if phone else ""
     return (
         f"Ich würde {party} {plural} "
-        f"für {spoken_date} um {spoken_time} Uhr auf den Namen {name} reservieren."
+        f"für {spoken_date} um {spoken_time} Uhr auf den Namen {name}{phone_clause} reservieren."
     )
 
 
@@ -201,10 +203,12 @@ def _build_readback_v4(state) -> str:
         if not name:
             logger.error("[v4_pipeline] _build_readback_v4 called with no customer_name")
             return "Ich habe Ihre Reservierung eingetragen."
+        phone = getattr(state, "phone_number", None)
         plural = "Person" if party == 1 else "Personen"
+        phone_clause = f", Rückrufnummer {' '.join(phone)}" if phone else ""
         return (
             f"Ich habe {party} {plural} "
-            f"für {spoken_date} um {spoken_time} Uhr auf den Namen {name} reserviert."
+            f"für {spoken_date} um {spoken_time} Uhr auf den Namen {name}{phone_clause} reserviert."
         )
 
     if getattr(state, "order_created", False):
