@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import logging
+import re
 import time
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query, Request
@@ -543,7 +544,13 @@ async def websocket_demo(websocket: WebSocket):
             handshake = await websocket.receive_json()
             from server.core.tenant_guard import resolve_tenant_id
             tenant_id = resolve_tenant_id(handshake.get("tenant", ""), default="doboo")
-            logger.info(f"[DEMO] Handshake: tenant={tenant_id}")
+            requested_call_sid = handshake.get("call_sid")
+            if not isinstance(requested_call_sid, str) or not re.fullmatch(r"demo-[0-9a-f]{12}", requested_call_sid):
+                requested_call_sid = None
+            logger.info(
+                f"[DEMO] Handshake: tenant={tenant_id}"
+                f"{' resume_call_sid=' + requested_call_sid if requested_call_sid else ''}"
+            )
         except Exception as e:
             logger.error(f"[DEMO] Handshake error: {e}")
             await websocket.send_json(
@@ -567,7 +574,7 @@ async def websocket_demo(websocket: WebSocket):
 
         # Build call_sid early so it can be passed to audio recorder before transport.
         import uuid as _uuid
-        _early_call_sid = f"demo-{_uuid.uuid4().hex[:12]}"
+        _early_call_sid = requested_call_sid or f"demo-{_uuid.uuid4().hex[:12]}"
 
         # Caller audio recorder — callback is wired into the serializer so every
         # raw WebSocket binary message is captured synchronously before it enters
@@ -614,7 +621,7 @@ async def websocket_demo(websocket: WebSocket):
         stt = instantiate_stt(_tc, deepgram_api_key, keyterms=_stt_keywords)
         logger.info(f"[DEMO] STT service created via provider registry ({type(stt).__name__})")
 
-        brain = BrowserBrainService(tenant_id=tenant_id)
+        brain = BrowserBrainService(tenant_id=tenant_id, call_sid=requested_call_sid)
         # Sync the early caller recorder to use the brain's actual call_sid
         _early_caller_recorder._call_sid = brain.call_sid
         logger.info("[DEMO] Brain service created")
@@ -779,7 +786,7 @@ async def websocket_demo(websocket: WebSocket):
             logger.warning(f"[DEMO] Audio finalize error: {rec_err}")
         if brain is not None:
             try:
-                await brain._finalize_session("client_disconnect")
+                await brain._finalize_session(getattr(brain, "_pending_end_reason", None) or "client_disconnect")
                 logger.info("[DEMO] Session finalized")
             except Exception as fin_err:
                 logger.warning(f"[DEMO] Session finalize error: {fin_err}")

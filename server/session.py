@@ -43,6 +43,19 @@ class CallSession:
 
     async def start(self, caller: str = "", from_number: str = ""):
         """Initialize a new call session."""
+        existing = await self.get()
+        if existing:
+            logger.info(f"Session resumed: {self.call_sid} from {from_number}")
+            try:
+                await self.append_live_trace(
+                    "session",
+                    "call_resumed",
+                    {"caller": caller, "from_number": from_number},
+                )
+            except Exception:
+                pass
+            return existing
+
         now = datetime.now(BERLIN_TZ)
         data = {
             "call_sid": self.call_sid,

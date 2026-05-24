@@ -146,10 +146,20 @@ def _is_achtung_sailly_marker(text: str) -> tuple[bool, str]:
 
 class BrowserBrainService(FrameProcessor):
 
-    def __init__(self, tenant_id: str = "doboo", caller_phone: str = "browser_demo", call_sid_prefix: str = "demo", **kwargs):
+    def __init__(
+        self,
+        tenant_id: str = "doboo",
+        caller_phone: str = "browser_demo",
+        call_sid_prefix: str = "demo",
+        call_sid: str | None = None,
+        **kwargs,
+    ):
         super().__init__(**kwargs)
         self.tenant_id = tenant_id
-        self.call_sid = f"{call_sid_prefix}-{uuid.uuid4().hex[:12]}"
+        if call_sid and re.fullmatch(r"demo-[0-9a-f]{12}", call_sid):
+            self.call_sid = call_sid
+        else:
+            self.call_sid = f"{call_sid_prefix}-{uuid.uuid4().hex[:12]}"
         self.session = None
         self.turn_processor = None
         # Sprint 0 — propagated to ADKTurnProcessor for caller-ID prefill.
@@ -161,6 +171,7 @@ class BrowserBrainService(FrameProcessor):
         # process_turn call. Flushed to google_turn_metrics on finalize.
         self._turn_metrics: list[dict] = []
         self._turn_counter: int = 0
+        self._pending_end_reason: str | None = None
         # Phase 3 shadow: IntentSessionManager runs in parallel with legacy pipeline
         # and logs to google_context_documents. Does not affect live behaviour.
         self._intent_session_mgr = None
@@ -324,7 +335,30 @@ class BrowserBrainService(FrameProcessor):
                 caller_phone=self.caller_phone or "browser_demo",
                 filler_cb=self._emit_filler_tts,
             )
+        await self._restore_turn_counter_from_postgres()
         logger.info(f"[BRAIN] ADKTurnProcessor ready: {self.call_sid}")
+
+    async def _restore_turn_counter_from_postgres(self) -> None:
+        """Keep resumed browser demo sessions from reusing turn numbers."""
+        db_url = os.environ.get("DATABASE_URL")
+        if not db_url:
+            return
+        try:
+            import asyncpg
+            conn = await asyncpg.connect(db_url)
+            try:
+                row = await conn.fetchrow(
+                    "SELECT COALESCE(MAX(turn_number), 0)::int AS n FROM google_turn_metrics WHERE call_sid = $1",
+                    self.call_sid,
+                )
+                n = int((row or {}).get("n") or 0)
+                if n > self._turn_counter:
+                    self._turn_counter = n
+                    logger.info(f"[BRAIN] Restored turn counter for {self.call_sid}: {n}")
+            finally:
+                await conn.close()
+        except Exception as e:
+            logger.debug(f"[BRAIN] turn counter restore skipped: {e}")
 
     async def _emit_filler_pcm(self, pcm: bytes) -> None:
         """Phase 8.2 — push pre-baked filler PCM directly into the TTS output
@@ -1052,6 +1086,9 @@ class BrowserBrainService(FrameProcessor):
                 except Exception as _shadow_err:
                     logger.debug(f"[BRAIN] shadow intent session failed: {_shadow_err}")
 
+                if self._turn_metrics:
+                    asyncio.create_task(self._persist_turn_metric_live(dict(self._turn_metrics[-1])))
+
                 if self.session:
                     try:
                         await self.session.add_transcript("assistant", result.clean_text)
@@ -1080,7 +1117,7 @@ class BrowserBrainService(FrameProcessor):
                         logger.info("[Phase6] No farewell text; waiting 5s minimum before end")
                         await asyncio.sleep(5.0)
                     logger.info(f"[BRAIN] Ending: {result.end_reason}")
-                    await self._finalize_session(result.end_reason)
+                    self._pending_end_reason = result.end_reason
                     await self.push_frame(EndFrame())
             except Exception as e:
                 logger.error(f"[BRAIN] Turn error: {e}", exc_info=True)
@@ -1252,6 +1289,96 @@ class BrowserBrainService(FrameProcessor):
         except Exception as e:
             logger.warning(f"[BRAIN] Session finalize failed: {e}")
 
+    async def _persist_turn_metric_live(self, tm: dict) -> None:
+        """Best-effort live write for the Call Analysis turn view."""
+        db_url = os.environ.get("DATABASE_URL")
+        if not db_url:
+            return
+
+        import asyncpg
+
+        try:
+            from server.core.obs import get_build_sha
+            build_sha = get_build_sha()
+        except Exception:
+            build_sha = None
+
+        tools_called = json.dumps(tm.get("tools_called") or [])
+        validation_breakdown = json.dumps(tm.get("validation_breakdown") or {})
+        values = (
+            self.call_sid,
+            self.tenant_id,
+            int(tm.get("turn_number") or 0),
+            tm.get("user_text") or "",
+            tm.get("bot_text") or "",
+            int(tm.get("stt_latency_ms") or 0),
+            int(tm.get("llm_latency_ms") or 0),
+            int(tm.get("tts_latency_ms") or 0),
+            int(tm.get("total_latency_ms") or 0),
+            tools_called,
+            tm.get("node_name"),
+            tm.get("stage3_text") or tm.get("bot_text") or "",
+            tm.get("stt_confidence"),
+            build_sha,
+            validation_breakdown,
+            tm.get("tts_situation"),
+            tm.get("tts_mood"),
+        )
+
+        conn = await asyncpg.connect(db_url)
+        try:
+            try:
+                await conn.execute(
+                    """
+                    INSERT INTO google_turn_metrics
+                        (call_sid, tenant_id, turn_number, user_text, bot_text,
+                         stt_latency_ms, llm_latency_ms, tts_latency_ms, total_latency_ms,
+                         tools_called, node_name, stage3_text, stt_confidence, build_sha,
+                         validation_breakdown, tts_situation, tts_mood)
+                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13,$14,$15::jsonb,$16,$17)
+                    ON CONFLICT (call_sid, turn_number) DO UPDATE SET
+                        tenant_id = EXCLUDED.tenant_id,
+                        user_text = EXCLUDED.user_text,
+                        bot_text = EXCLUDED.bot_text,
+                        stt_latency_ms = EXCLUDED.stt_latency_ms,
+                        llm_latency_ms = EXCLUDED.llm_latency_ms,
+                        tts_latency_ms = EXCLUDED.tts_latency_ms,
+                        total_latency_ms = EXCLUDED.total_latency_ms,
+                        tools_called = EXCLUDED.tools_called,
+                        node_name = EXCLUDED.node_name,
+                        stage3_text = EXCLUDED.stage3_text,
+                        stt_confidence = EXCLUDED.stt_confidence,
+                        build_sha = EXCLUDED.build_sha,
+                        validation_breakdown = EXCLUDED.validation_breakdown,
+                        tts_situation = EXCLUDED.tts_situation,
+                        tts_mood = EXCLUDED.tts_mood
+                    """,
+                    *values,
+                )
+            except Exception as e:
+                # Older deployments may not yet have a unique constraint for
+                # ON CONFLICT. Fall back to delete+insert for this turn only.
+                if "no unique or exclusion constraint" not in str(e):
+                    raise
+                await conn.execute(
+                    "DELETE FROM google_turn_metrics WHERE call_sid = $1 AND turn_number = $2",
+                    self.call_sid,
+                    int(tm.get("turn_number") or 0),
+                )
+                await conn.execute(
+                    """
+                    INSERT INTO google_turn_metrics
+                        (call_sid, tenant_id, turn_number, user_text, bot_text,
+                         stt_latency_ms, llm_latency_ms, tts_latency_ms, total_latency_ms,
+                         tools_called, node_name, stage3_text, stt_confidence, build_sha,
+                         validation_breakdown, tts_situation, tts_mood)
+                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13,$14,$15::jsonb,$16,$17)
+                    """,
+                    *values,
+                )
+        finally:
+            await conn.close()
+
     async def _write_call_to_postgres(self, session_data: dict, reason: str):
         """Write demo call record to PostgreSQL google_calls table."""
         db_url = os.environ.get("DATABASE_URL")
@@ -1358,7 +1485,17 @@ class BrowserBrainService(FrameProcessor):
                      quality_score, outcome, language, was_escalated, total_turns,
                      total_cost_tokens, total_cost_telephony, session_data)
                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
-                ON CONFLICT (call_sid) DO NOTHING
+                ON CONFLICT (call_sid) DO UPDATE SET
+                    ended_at = EXCLUDED.ended_at,
+                    duration_seconds = EXCLUDED.duration_seconds,
+                    quality_score = EXCLUDED.quality_score,
+                    outcome = EXCLUDED.outcome,
+                    language = EXCLUDED.language,
+                    was_escalated = EXCLUDED.was_escalated,
+                    total_turns = EXCLUDED.total_turns,
+                    total_cost_tokens = EXCLUDED.total_cost_tokens,
+                    total_cost_telephony = EXCLUDED.total_cost_telephony,
+                    session_data = EXCLUDED.session_data
                 RETURNING id
                 """,
                 self.call_sid,
@@ -1382,6 +1519,10 @@ class BrowserBrainService(FrameProcessor):
 
             # Insert transcripts
             if transcripts:
+                await conn.execute(
+                    "DELETE FROM google_transcripts WHERE call_sid = $1",
+                    self.call_sid,
+                )
                 await conn.executemany(
                     """
                     INSERT INTO google_transcripts (call_sid, role, content, turn_number, timestamp)
@@ -1403,6 +1544,10 @@ class BrowserBrainService(FrameProcessor):
 
             # Insert tool calls
             if tool_calls:
+                await conn.execute(
+                    "DELETE FROM google_tool_calls WHERE call_sid = $1",
+                    self.call_sid,
+                )
                 await conn.executemany(
                     """
                     INSERT INTO google_tool_calls
@@ -1443,6 +1588,14 @@ class BrowserBrainService(FrameProcessor):
 
                 def _jd(val):
                     return json.dumps(val, ensure_ascii=False) if val is not None else None
+
+                _turn_numbers = [int(tm.get("turn_number") or 0) for tm in self._turn_metrics]
+                if _turn_numbers:
+                    await conn.execute(
+                        "DELETE FROM google_turn_metrics WHERE call_sid = $1 AND turn_number = ANY($2::int[])",
+                        self.call_sid,
+                        _turn_numbers,
+                    )
 
                 await conn.executemany(
                     """

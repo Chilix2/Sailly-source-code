@@ -13,6 +13,7 @@ class DemoBrowser {
         this.ws = null;
         this.isConnected = false;
         this.callActive = false;
+        this.callSidStorageKey = "saillyDemoCallSid";
 
         // Audio contexts
         this.recordingCtx = null;
@@ -150,8 +151,10 @@ class DemoBrowser {
         this.callBtn.disabled = false;
         this.callActive = true;
 
-        // Send handshake
-        this.ws.send(JSON.stringify({ tenant: "doboo", voice: "Kore" }));
+        // Send handshake. Reuse call_sid after transient reconnects so one
+        // logical browser call stays attached to one server-side transcript.
+        const savedCallSid = sessionStorage.getItem(this.callSidStorageKey);
+        this.ws.send(JSON.stringify({ tenant: "doboo", voice: "Kore", call_sid: savedCallSid }));
     }
 
     onWsMessage(evt) {
@@ -162,7 +165,9 @@ class DemoBrowser {
             // Text: JSON messages
             try {
                 const msg = JSON.parse(evt.data);
-                if (msg.type === "transcript") {
+                if (msg.type === "session_init" && msg.call_sid) {
+                    sessionStorage.setItem(this.callSidStorageKey, msg.call_sid);
+                } else if (msg.type === "transcript") {
                     this.addTranscript(msg.role, msg.text);
                 }
             } catch (e) {
@@ -285,6 +290,7 @@ class DemoBrowser {
     }
 
     async endCall() {
+        sessionStorage.removeItem(this.callSidStorageKey);
         this.callActive = false;
         this._setBotSpeaking(false);
         this.showStatus("Beendet", "inactive");
