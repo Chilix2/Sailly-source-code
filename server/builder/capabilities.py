@@ -25,11 +25,20 @@ class CapabilityTool(BaseModel):
     optional_slots: list[str] = Field(default_factory=list)
 
 
+class CapabilityGuard(BaseModel):
+    id: str
+    description: str
+    severity: Literal["info", "warning", "blocking"] = "blocking"
+    applies_to: list[str] = Field(default_factory=list)
+    forbidden_behaviors: list[Any] = Field(default_factory=list)
+
+
 class ExpectedOutcome(BaseModel):
     tools: list[str] = Field(default_factory=list)
     final_state: Optional[str] = None
     transcript_assertions: list[str] = Field(default_factory=list)
     forbidden_behaviors: list[str] = Field(default_factory=list)
+    guards: list[str] = Field(default_factory=list)
 
 
 class CapabilityScenario(BaseModel):
@@ -50,6 +59,8 @@ class CapabilityPack(BaseModel):
     default_enabled: bool = True
     tools: list[CapabilityTool] = Field(default_factory=list)
     slots: list[str] = Field(default_factory=list)
+    variables: list[str] = Field(default_factory=list)
+    guards: list[CapabilityGuard] = Field(default_factory=list)
     prompt_fragments: list[str] = Field(default_factory=list)
     scenarios: list[CapabilityScenario] = Field(default_factory=list)
 
@@ -69,6 +80,12 @@ def load_industry_pack(industry: str) -> IndustryPack:
     if not path.exists():
         raise FileNotFoundError(f"Industry pack not found: {industry}")
     return IndustryPack(**(yaml.safe_load(path.read_text(encoding="utf-8")) or {}))
+
+
+def _model_dump(model: BaseModel) -> dict[str, Any]:
+    if hasattr(model, "model_dump"):
+        return model.model_dump()  # type: ignore[attr-defined]
+    return model.dict()
 
 
 def list_industry_packs() -> list[dict[str, Any]]:
@@ -95,5 +112,38 @@ def list_industry_packs() -> list[dict[str, Any]]:
 def capabilities_response(industry: Optional[str] = None) -> dict[str, Any]:
     if industry:
         pack = load_industry_pack(industry)
-        return {"packs": [pack.model_dump()]}
+        return {"packs": [_model_dump(pack)]}
     return {"packs": list_industry_packs()}
+
+
+def scenario_templates_response(
+    industry: Optional[str] = None,
+    capability: Optional[str] = None,
+) -> dict[str, Any]:
+    """Return scenario templates embedded in industry capability packs."""
+
+    templates: list[dict[str, Any]] = []
+    pack_ids = [industry] if industry else [pack["id"] for pack in list_industry_packs()]
+    for pack_id in pack_ids:
+        pack = load_industry_pack(pack_id)
+        for cap in pack.capabilities:
+            if capability and cap.id != capability:
+                continue
+            for scenario in cap.scenarios:
+                templates.append(
+                    {
+                        "id": scenario.id,
+                        "name": scenario.name,
+                        "description": scenario.description,
+                        "industry": pack.id,
+                        "industry_name": pack.name,
+                        "capability": cap.id,
+                        "capability_name": cap.name,
+                        "category": cap.category,
+                        "caller_goal": scenario.caller_goal,
+                        "required_data": scenario.required_data,
+                        "expected": _model_dump(scenario.expected),
+                        "mandatory": scenario.mandatory,
+                    }
+                )
+    return {"templates": templates}

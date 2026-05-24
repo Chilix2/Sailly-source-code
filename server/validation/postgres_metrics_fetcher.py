@@ -76,6 +76,7 @@ class PostgresMetricsFetcher:
             conn = await asyncpg.connect(self.db_url)
 
             failed_tool_calls: List[Dict] = []
+            successful_tool_calls: List[Dict] = []
             conversation_issues: List[Dict] = []
             achtung_flags: List[Dict] = []
             loop_detections: List[Dict] = []
@@ -118,7 +119,12 @@ class PostgresMetricsFetcher:
                     for i in range(1, len(bot_turns)):
                         prev = bot_turns[i - 1]["content"].strip()
                         curr = bot_turns[i]["content"].strip()
-                        if prev and curr and prev == curr:
+                        # Only flag literal consecutive assistant repeats. If a user
+                        # repeats the same request between two readbacks, that is not
+                        # a bot loop; caller [Achtung Sailly: BOT_LOOP] flags cover
+                        # semantic loops with intervening turns.
+                        adjacent_bot_turns = bot_turns[i]["turn"] == bot_turns[i - 1]["turn"] + 1
+                        if adjacent_bot_turns and prev and curr and prev == curr:
                             loop_detections.append({
                                 "call_sid": call_sid,
                                 "turn": bot_turns[i]["turn"],
@@ -149,7 +155,14 @@ class PostgresMetricsFetcher:
                         call_sid,
                     )
                     for r in tool_rows:
-                        if not r["success"]:
+                        if r["success"]:
+                            successful_tool_calls.append({
+                                "call_sid": call_sid,
+                                "turn": r["turn_number"],
+                                "tool": r["tool_name"],
+                                "arguments": r["arguments"],
+                            })
+                        else:
                             failed_tool_calls.append({
                                 "call_sid": call_sid,
                                 "turn": r["turn_number"],
@@ -170,6 +183,7 @@ class PostgresMetricsFetcher:
             return {
                 "total_calls": len(call_sids),
                 "transcripts": formatted_transcripts,
+                "tool_calls": successful_tool_calls[:30],
                 "failed_tool_calls": failed_tool_calls[:15],
                 "conversation_issues": conversation_issues[:15],
                 "achtung_flags": achtung_flags[:20],

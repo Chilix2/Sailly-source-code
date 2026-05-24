@@ -12,4 +12,6 @@ PHASE_SCENARIO_DIRS: dict[str, str] = {
     "e": "phase4",
     "f": "phase5",
     "g": "phase6",
+    "h": "phase7",
+    "i": "phase8",
 }

@@ -280,6 +280,55 @@ async def _get_tenant_config(tenant_id: Optional[str]):
         return None
 
 
+_WEEKDAY_KEYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+
+
+def _opening_hours_gate(req_date, time_str: str, tenant) -> Optional[dict]:
+    """Return an unavailable response when requested time is outside tenant hours."""
+    hours = getattr(tenant, "opening_hours", None) or {}
+    day_hours = str(hours.get(_WEEKDAY_KEYS[req_date.weekday()], "") or "").lower()
+    if not day_hours:
+        return None
+    if "geschlossen" in day_hours or "closed" in day_hours:
+        return {
+            "available": False,
+            "date": req_date.isoformat(),
+            "time": time_str,
+            "reason": "Das Restaurant ist an diesem Tag geschlossen.",
+        }
+
+    normalized = day_hours.replace("–", "-").replace("—", "-")
+    windows = re.findall(r"(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})", normalized)
+    if not windows:
+        return None
+
+    req_minutes = _time_to_minutes(time_str)
+    if req_minutes is None:
+        return {"error": "Ungültige Uhrzeit. Bitte im Format HH:MM angeben."}
+
+    for start, end in windows:
+        start_min = _time_to_minutes(start)
+        end_min = _time_to_minutes(end)
+        if start_min is not None and end_min is not None and start_min <= req_minutes <= end_min:
+            return None
+
+    return {
+        "available": False,
+        "date": req_date.isoformat(),
+        "time": time_str,
+        "reason": f"Das Restaurant ist um {time_str} Uhr nicht geöffnet.",
+        "opening_hours": day_hours,
+    }
+
+
+def _time_to_minutes(value: str) -> Optional[int]:
+    try:
+        hour, minute = value.split(":", 1)
+        return int(hour) * 60 + int(minute)
+    except Exception:
+        return None
+
+
 # ── GUARDIAN Pre-Commit Gate ─────────────────────────────────────────────────
 # Validates required fields before high-stakes tool execution.
 # On block: logs, persists to guardian_blocks table, returns structured error
@@ -579,18 +628,6 @@ async def _check_availability(args: dict, call_sid: str, tenant_id: Optional[str
     time_str = args.get("time")
     party_size = int(args.get("party_size", 2) or 2)
 
-    # For headless regression tests, always report availability so test DB state
-    # doesn't cause spurious failures when slots fill up from repeated test runs.
-    if call_sid and call_sid.startswith("headless-"):
-        return {
-            "available": True,
-            "date": date_str,
-            "time": time_str,
-            "party_size": party_size,
-            "seats_remaining": 20,
-            "message": f"Tisch für {party_size} Personen am {date_str} um {time_str} Uhr ist verfügbar.",
-        }
-
     now = datetime.now(BERLIN_TZ)
 
     if not date_str or not time_str:
@@ -619,6 +656,22 @@ async def _check_availability(args: dict, call_sid: str, tenant_id: Optional[str
 
     # Sprint 2 — real capacity check.
     tenant = await _get_tenant_config(tenant_id)
+    hours_block = _opening_hours_gate(req_date, time_str, tenant) if tenant else None
+    if hours_block:
+        return hours_block
+
+    # For headless regression tests, skip mutable capacity state but keep
+    # deterministic calendar/opening-hours validation above.
+    if call_sid and call_sid.startswith("headless-"):
+        return {
+            "available": True,
+            "date": date_str,
+            "time": time_str,
+            "party_size": party_size,
+            "seats_remaining": 20,
+            "message": f"Tisch für {party_size} Personen am {date_str} um {time_str} Uhr ist verfügbar.",
+        }
+
     grid_min = int(getattr(tenant, "reservation_slot_minutes", 30) or 30)
     capacity = int(getattr(tenant, "reservation_slot_capacity", 30) or 30)
 
@@ -683,7 +736,7 @@ async def _check_availability(args: dict, call_sid: str, tenant_id: Optional[str
 
 
 async def _create_reservation(args: dict, call_sid: str, tenant_id: Optional[str] = None) -> dict:
-    required = ["date", "time", "party_size", "name", "phone"]
+    required = ["date", "time", "party_size", "name"]
     missing = [f for f in required if not args.get(f)]
     if missing:
         return {"error": f"Fehlende Pflichtfelder: {', '.join(missing)}"}
@@ -695,7 +748,7 @@ async def _create_reservation(args: dict, call_sid: str, tenant_id: Optional[str
         "time": args["time"],
         "party_size": args["party_size"],
         "name": args["name"],
-        "phone": args["phone"],
+        "phone": args.get("phone"),
         "email": args.get("email"),
         "notes": args.get("notes"),
         "created_at": datetime.now(BERLIN_TZ).isoformat(),
@@ -1100,7 +1153,7 @@ async def _create_order(args: dict, call_sid: str, tenant_id: Optional[str] = No
     except Exception as _86_err:  # pragma: no cover — cache miss is non-fatal
         logger.debug(f"[create_order] 86-filter skipped: {_86_err!r}")
 
-    required = ["name", "phone", "messaging_phone", "order_items", "order_type", "payment_method", "total_price"]
+    required = ["name", "order_items", "order_type", "payment_method", "total_price"]
     missing = [f for f in required if not args.get(f)]
     # total_price=0.0 is treated as missing
     if not missing and (not args.get("total_price") or float(args.get("total_price", 0)) <= 0.0):
@@ -1759,8 +1812,8 @@ async def _transfer_to_human(args: dict, call_sid: str, tenant_id: Optional[str]
     # offer a callback (technical_issues_callback handles the write path) and
     # tell the caller when we reopen.  Fails open on parse failure.
     try:
-        from server.core.tenant_config import TenantRegistry
-        tcfg = TenantRegistry().load_tenant(tenant_id) if tenant_id else None
+        from server.core.tenant_config import get_tenant_registry
+        tcfg = get_tenant_registry().load_tenant(tenant_id) if tenant_id else None
         if tcfg is not None and not tcfg.is_open_now():
             next_open_de = tcfg.next_opening_de()
             suffix = f" Wir sind wieder {next_open_de} erreichbar." if next_open_de else ""

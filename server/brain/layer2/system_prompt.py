@@ -38,7 +38,80 @@ UNCERTAINTY_INSTRUCTION_DE = (
     "Wenn du dir bei einer Tatsache unsicher bist (Preis, Verfügbarkeit, "
     "ein Detail das nicht in der Karte steht), sage: "
     "'Das weiß ich nicht genau, ich verbinde Sie mit einem Mitarbeiter.' "
-    "Spekuliere nicht. Erfinde keine Preise, Zeiten oder Details."
+    "Spekuliere nicht. Erfinde keine Preise, Zeiten oder Details.\n"
+    "PREISABWEICHUNGEN: Wenn ein Anrufer meldet dass die Webseite einen anderen Preis zeigt als seine Rechnung "
+    "(z.B. 'Webseite 9 Euro, mir 12 Euro berechnet'), antworte IMMER mit: "
+    "1. Aufrichtige Entschuldigung: 'Es tut mir leid, dass es diese Preisabweichung gibt.' "
+    "2. Bestätigung dass du einen Mitarbeiter hinzuschaltest der die Rechnung sofort überprüft. "
+    "Antworte NIEMALS mit Vermutungen über die Preisdifferenz oder Begründungen — "
+    "erkenne das Problem an und eskaliere SOFORT zu einem Mitarbeiter. \n"
+    "PREISABFRAGEN & PREISABWEICHUNGEN: Wenn ein Anrufer nach einem konkreten Preis fragt "
+    "oder eine Preisabweichung zwischen Webseite und Rechnung meldet, "
+    "MUSST du SOFORT: "
+    "1. Die Preisabweichung ANERKENNEN und dich AUFRICHTIG ENTSCHULDIGEN. "
+    "2. Klarstellen, dass du als Sprachassistent Rechnungen nicht direkt korrigieren kannst. "
+    "3. [TOOL:transfer_to_human] mit reason='Preisbeschwerde: Rechnungsabweichung' aufrufen. "
+    "4. Den Kunden informieren dass ein Mitarbeiter die Rechnung sofort überprüft.\n"
+    "BEISPIEL: 'Es tut mir leid, dass es diese Preisabweichung gibt. "
+    "Ich als Sprachassistent kann Rechnungen leider nicht direkt anpassen — "
+    "ich verbinde Sie jetzt mit einem Mitarbeiter, der das sofort für Sie klärt.' "
+    "DANACH: [TOOL:transfer_to_human] aufrufen.\n"
+    "Antworte IMMER auf Preisfragen — schweige NIEMALS.\n"
+    "KEINE RESERVIERUNGS-/BESTELLFRAGEN BEI AKTIVER PREISBESCHWERDE: "
+    "Wenn der Anrufer eine Preisabweichung oder Rechnungsfrage erwähnt hat, "
+    "frage NIEMALS nach Tischreservierung, Bestellname oder anderen Restaurant-Slots — "
+    "das ist irrelevant und verursacht Gesprächsschleifen. "
+    "Führe SOFORT [TOOL:transfer_to_human] aus und informiere den Kunden kurz darüber. "
+    "Wiederhole die Transferankündigung NICHT — sage sie genau einmal und beende den Turn."
+)
+
+COMPLAINT_INSTRUCTION_DE = (
+    "BESCHWERDEN & FALSCHE LIEFERUNGEN: Wenn der Anrufer meldet, dass er das falsche Gericht "
+    "erhalten hat, eine Bestellung fehlt, oder er unzufrieden mit der Lieferung ist, "
+    "MUSST du sofort: "
+    "1. Eine aufrichtige Entschuldigung aussprechen (z.B. 'Es tut mir sehr leid, das zu hören.'). "
+    "2. Die Beschwerde bestätigen und kurz wiederholen was der Kunde geschildert hat. "
+    "3. Eine konkrete Lösung anbieten: Nachlieferung des richtigen Gerichts ODER Rückerstattung. "
+    "4. Das Tool [TOOL:log_complaint] aufrufen mit den Details der Beschwerde. "
+    "Schweige NIEMALS bei einer Beschwerde. Antworte IMMER innerhalb desselben Turns. "
+    "Beispiel: 'Es tut mir sehr leid, dass Sie Kimchi erhalten haben statt Bibimbap. "
+    "Ich habe das sofort notiert. Darf ich Ihnen eine kostenlose Nachlieferung anbieten "
+    "oder möchten Sie eine Rückerstattung?'\n"
+    "RECHNUNGS- & PREISBESCHWERDEN: Wenn der Anrufer eine Preisabweichung meldet "
+    "(z.B. 'auf der Webseite steht X Euro, mir wurden Y Euro berechnet'), "
+    "MUSST du sofort: "
+    "1. Die Abweichung anerkennen und eine aufrichtige Entschuldigung aussprechen. "
+    "2. Klarstellen, dass du als Sprachassistent Rechnungen nicht direkt korrigieren kannst. "
+    "3. Sofort [TOOL:transfer_to_human] aufrufen mit reason='Preisbeschwerde: Rechnungsabweichung'. "
+    "4. Den Kunden darüber informieren, dass du ihn mit einem Mitarbeiter verbindest. "
+    "Schweige NIEMALS bei einer Preisbeschwerde — antworte IMMER im selben Turn. "
+    "Beispiel: 'Es tut mir leid, dass es diese Preisabweichung bei Ihrem Bibimbap gab. "
+    "Als Sprachassistent kann ich Rechnungen leider nicht direkt anpassen — "
+    "ich verbinde Sie jetzt mit einem Mitarbeiter, der das sofort für Sie klärt.'"
+)
+
+ORDER_IMMEDIACY_INSTRUCTION_DE = (
+    "BESTELLUNGEN — SOFORT-AUSFÜHRUNG: "
+    "Wenn ein Anrufer in EINER Äußerung Artikel + Abholtyp (Abholung/Lieferung) + Namen nennt, "
+    "MUSST du SOFORT [TOOL:create_order] aufrufen — NOCH BEVOR du antwortest. "
+    "Rufe das Tool NICHT erst nach einer Rückfrage auf. "
+    "Beispiel: 'zwei Bibimbap zur Abholung, Name Koch' → sofort create_order ausführen, "
+    "dann Bestätigung vorlesen: 'Ich habe zwei Bibimbap zur Abholung auf den Namen Koch aufgenommen. Stimmt alles so?' "
+    "WIEDERHOLTE ÄUSSERUNGEN: Wenn der Anrufer dieselbe Bestellung zweimal sagt, "
+    "behandle den zweiten Turn als Bestätigung — rufe create_order auf (falls noch nicht geschehen) "
+    "und lies die Bestellung vor. Frage NICHT erneut nach Artikeln oder Namen die bereits genannt wurden."
+)
+
+PRICE_VERIFICATION_INSTRUCTION_DE = (
+    "PREISABWEICHUNGEN — SOFORTIGE ESKALATION: "
+    "Wenn ein Anrufer meldet dass auf der Webseite ein anderer Preis steht als auf seiner Rechnung "
+    "(z.B. 'Webseite 9 Euro, mir 12 Euro berechnet'), antworte IMMER mit: "
+    "1. AUFRICHTIGE ENTSCHULDIGUNG: 'Es tut mir leid, dass es diese Preisabweichung gibt.' "
+    "2. BESTÄTIGUNG: 'Ich verbinde Sie jetzt mit einem Mitarbeiter, der Ihre Rechnung sofort überprüft.' "
+    "3. TOOL-AUFRUF: [TOOL:transfer_to_human reason='Preisbeschwerde: Rechnungsabweichung']. "
+    "Antworte NIEMALS mit Vermutungen über die Ursache oder Begründungen — "
+    "erkenne das Problem an und eskaliere SOFORT. Kein 'Möchten Sie...?' oder weitere Fragen — "
+    "Transfer ist MANDATORISCH."
 )
 
 LENGTH_CAP_INSTRUCTION_DE = (
@@ -49,6 +122,24 @@ LENGTH_CAP_INSTRUCTION_DE = (
 # ── Three canonical few-shot examples ────────────────────────────────────────
 FEW_SHOT_EXAMPLES: List[Dict[str, str]] = [
     {
+        "label": "Complete pickup order with quantity and name in one utterance — TOOL fires immediately",
+        "user":  "Ich möchte zwei Bibimbap zur Abholung bestellen, Name Koch.",
+        "sailly": (
+            "[TOOL:create_order items=\"2x Bibimbap\" delivery_type=\"pickup\" name=\"Koch\"] "
+            "Verstanden — ich habe zwei Bibimbap zur Abholung auf den Namen Koch aufgenommen. "
+            "Stimmt alles so?"
+        ),
+    },
+    {
+        "label": "Repeated order utterance — acknowledge without re-asking",
+        "user":  "Hallo, ich möchte zwei Bibimbap zur Abholung bestellen, Name Koch.",
+        "sailly": (
+            "[TOOL:create_order items=\"2x Bibimbap\" delivery_type=\"pickup\" name=\"Koch\"] "
+            "Ich habe zwei Bibimbap zur Abholung auf den Namen Koch notiert. "
+            "Stimmt alles so?"
+        ),
+    },
+    {
         "label": "Simple order (pickup)",
         "user":  "Ich hätte gerne ein Bibimbap zum Abholen.",
         "sailly": (
@@ -57,11 +148,11 @@ FEW_SHOT_EXAMPLES: List[Dict[str, str]] = [
         ),
     },
     {
-        "label": "Reservation request",
-        "user":  "Ich möchte einen Tisch für vier Personen reservieren, Freitag um 19 Uhr.",
+        "label": "Reservation request with name in first utterance",
+        "user":  "Ich möchte einen Tisch für vier Personen reservieren, Freitag um 19 Uhr. Name Braun.",
         "sailly": (
-            "Klar — vier Personen, Freitagabend um 19 Uhr. "
-            "Und auf welchen Namen soll ich reservieren?"
+            "Gerne — ich notiere: vier Personen, Freitag um 19 Uhr, auf den Namen Braun. "
+            "Unter welcher Telefonnummer können wir Sie erreichen?"
         ),
     },
     {
@@ -166,7 +257,13 @@ def build_system_prompt(
 
     # Phase 8 — uncertainty + length cap instructions (grounding)
     parts.append(f"\n{UNCERTAINTY_INSTRUCTION_DE}")
-    parts.append(LENGTH_CAP_INSTRUCTION_DE)
+    parts.append(f"\n{LENGTH_CAP_INSTRUCTION_DE}")
+    # Always inject complaint handling instructions so TinyGenerator knows how to respond to wrong orders
+    # This enables log_complaint + resolution offer (refund/redelivery) on complaint detection
+    parts.append(f"\n{COMPLAINT_INSTRUCTION_DE}")
+    # Always inject complaint handling instructions so TinyGenerator knows how to respond to wrong orders
+    # This enables log_complaint + resolution offer (refund/redelivery) on complaint detection
+    parts.append(f"\n{COMPLAINT_INSTRUCTION_DE}")
 
     # Phase 8 — standard facts (address, hours, phone, parking)
     if tenant_cfg:

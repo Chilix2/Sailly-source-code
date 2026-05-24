@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional, Optional
+from typing import Any, Optional
 
 import yaml
 
@@ -35,7 +35,15 @@ class ValidationScenario:
     def expected_tools(self) -> list[str]:
         """Extract expected tools from expectations."""
         exp = self.expectations or {}
-        return exp.get("tools", [])
+        tools: list[str] = []
+        for key in ("tools", "must_call"):
+            raw = exp.get(key) or []
+            if isinstance(raw, str):
+                raw = [raw]
+            for tool_name in raw:
+                if tool_name and tool_name not in tools:
+                    tools.append(tool_name)
+        return tools
 
 
 def repo_root() -> Path:
@@ -69,6 +77,7 @@ def load_scenario_file(path: Path) -> Optional[ValidationScenario]:
         tenant_id=data.get("tenant", "doboo"),
         confirmation_phrases=list(conf),
         expectations=dict(data.get("expectations") or {}),
+        required_data=dict(data.get("required_data") or {}),
     )
 
 

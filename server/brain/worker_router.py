@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 from typing import Optional
+from dataclasses import replace
 
 from server.brain.intent_session import TurnType
 from server.brain.workers import ExecutionPlan, Worker
@@ -189,23 +190,53 @@ _PROFILES: dict[str, ExecutionPlan] = {
 
 # All profiles are live — v4 is the single pipeline, no legacy fallback.
 MIGRATED_PROFILES: set[str] = set(_PROFILES.keys())
+ALL_PROFILE_NAMES: tuple[str, ...] = tuple(_PROFILES.keys())
+DEFAULT_FALLBACK_PROFILE = "greeting"
 
 
-def route(profile_name: str, turn_type: Optional[TurnType] = None) -> ExecutionPlan:
+def _apply_profile_override(plan: ExecutionPlan, override: dict) -> ExecutionPlan:
+    """Apply shallow, safe ExecutionPlan overrides from tenant pipeline config."""
+    if not isinstance(override, dict):
+        return plan
+    kwargs = {}
+    if isinstance(override.get("scheduled_tools"), list):
+        kwargs["scheduled_tools"] = [str(x) for x in override["scheduled_tools"]]
+    if isinstance(override.get("deadline_required_ms"), int):
+        kwargs["deadline_required_ms"] = int(override["deadline_required_ms"])
+    if isinstance(override.get("deadline_optional_ms"), int):
+        kwargs["deadline_optional_ms"] = int(override["deadline_optional_ms"])
+    return replace(plan, **kwargs) if kwargs else plan
+
+
+def route(
+    profile_name: str,
+    turn_type: Optional[TurnType] = None,
+    pipeline: Optional[dict] = None,
+) -> ExecutionPlan:
     """Return the ExecutionPlan for a given worker profile.
 
     Falls back to 'greeting' profile if profile_name is unknown.
     The returned plan is a shared object — do not mutate it.
     """
+    enabled_profiles = None
+    profile_overrides = {}
+    if isinstance(pipeline, dict):
+        enabled_profiles = pipeline.get("enabled_profiles")
+        profile_overrides = pipeline.get("profile_overrides") or {}
+
+    if isinstance(enabled_profiles, list) and profile_name not in enabled_profiles:
+        profile_name = DEFAULT_FALLBACK_PROFILE
+
     plan = _PROFILES.get(profile_name)
     if plan is None:
         logger.warning(f"[WorkerRouter] unknown profile '{profile_name}', using greeting")
-        plan = _PROFILES["greeting"]
+        profile_name = DEFAULT_FALLBACK_PROFILE
+        plan = _PROFILES[DEFAULT_FALLBACK_PROFILE]
 
     # Turn-type overrides
     if turn_type in (TurnType.CONFIRM, TurnType.DENY):
         # Confirmation turns only need confirmation_parser + goodbye_detector
-        return ExecutionPlan(
+        confirm_plan = ExecutionPlan(
             profile_name=f"{profile_name}_confirm",
             required=[goodbye_detector, confirmation_parser],
             optional=[],
@@ -214,10 +245,15 @@ def route(profile_name: str, turn_type: Optional[TurnType] = None) -> ExecutionP
             deadline_required_ms=plan.deadline_required_ms,
             deadline_optional_ms=plan.deadline_optional_ms,
         )
+        return _apply_profile_override(confirm_plan, profile_overrides.get(profile_name, {}))
 
-    return plan
+    return _apply_profile_override(plan, profile_overrides.get(profile_name, {}))
 
 
-def is_migrated(profile_name: str) -> bool:
+def is_migrated(profile_name: str, pipeline: Optional[dict] = None) -> bool:
     """True if this profile runs live (not shadow-only)."""
+    if isinstance(pipeline, dict):
+        enabled = pipeline.get("enabled_profiles")
+        if isinstance(enabled, list):
+            return profile_name in enabled
     return profile_name in MIGRATED_PROFILES

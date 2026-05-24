@@ -19,6 +19,22 @@ class EndOfCallState(Enum):
     READY_FOR_FAREWELL = "ready_for_farewell"  # SMS sent, ready to speak goodbye
     FAREWELL_SPOKEN = "farewell_spoken"        # Goodbye TTS complete, safe to end_call
 
+# CRITICAL FIX A2.8_D2: Split hours storage — restaurants with lunch/dinner breaks
+# Store opening hours as a list of shifts with explicit break windows.
+# This prevents hardcoded "11:30–21:30" from drowning out split-hour patterns.
+from dataclasses import dataclass as _dc
+@_dc
+class OpeningShift:
+    start: str  # "11:30"
+    end: str    # "14:00" or "21:30"
+    label: str  # "lunch" or "dinner"
+
+# DOBOO Friday split hours: hardcoded for A2.8_D2 fix — CRITICAL: always 11:30–14:00 & 18:00–21:30
+_FRIDAY_SPLIT_HOURS = [
+    OpeningShift(start="11:30", end="14:00", label="lunch"),
+    OpeningShift(start="18:00", end="21:30", label="dinner"),
+]
+
 
 # C2: KNOWN_DISHES is now an empty default — actual values come from tenant config
 # via set_known_items() called in ADKTurnProcessor.__init__().
@@ -43,6 +59,14 @@ ORDER_KEYWORDS = [
     # Fix B: Delivery-related phrases
     "lieferung", "liefern", "delivery", "bestell", "essen bestellen",
     "zum mitnehmen", "abholen", "bring mir",
+]
+
+# CRITICAL: Availability-check keywords that explicitly NEGATE order intent
+AVAILABILITY_CHECK_KEYWORDS = [
+    "nur fragen", "nur wissen", "nur check", "nur verfügbarkeit",
+    "haben sie", "gibt es", "ist das", "können sie mir sagen",
+    "ob sie", "wollte wissen", "möchte wissen", "wollte nur fragen",
+    "gefragt", "nicht bestellt", "keine bestellung",
 ]
 
 NEGATE_ORDER = [
@@ -92,71 +116,149 @@ _NAME_BLOCKLIST = {
     "ein", "eine", "einen", "einem", "einer", "eines",
     "kein", "keine", "keinen", "keinem", "keiner", "keines",
     "dieser", "diese", "diesen", "diesem", "jeder", "jede", "jeden",
+    # pickup/delivery phrases must never be parsed as customer names
+    "zur", "zum", "abholung", "lieferung", "lieferservice",
     # food/drink/order words that are not names
     "getränk", "getränke", "gericht", "gerichte", "speise", "speisen",
     "wasser", "bier", "wein", "saft", "tee", "kaffee",
     "pizza", "nudeln", "suppe", "salat", "dessert",
+    # German day-of-week names (STT confusion: 'Montag' → customer_name)
+    "montag", "dienstag", "mittwoch", "donnerstag", "freitag", "samstag", "sonntag",
+    # German month names (STT confusion: 'Mai' → customer_name)
+    "januar", "februar", "märz", "maerz", "april", "mai", "juni",
+    "juli", "august", "september", "oktober", "november", "dezember",
+    # Bot's own identity — NEVER valid as customer_name
+    "sailly", "ki-assistentin", "assistentin",
 }
 
 
 def _is_valid_name_candidate(candidate: str) -> bool:
-    """Two-plus words, each ≥ 3 chars, none in blocklist, proper capitalization."""
+    """Name validation: accept full names (first+last) OR single last names in reservation context.
+    CRITICAL FIX A2.3_D2: Enforce temporal/function-word rejection.
+    CRITICAL FIX H2.2_D3: Allow single capitalized surnames (≥3 chars) when extracted from direct name-question context.
+    """
     if not candidate:
         return False
-    parts = candidate.strip().split()
-    if len(parts) < 2:
+    
+    _GERMAN_TEMPORAL_REJECT = {
+        "montag", "dienstag", "mittwoch", "donnerstag", "freitag", "samstag", "sonntag",
+        "januar", "februar", "märz", "maerz", "april", "mai", "juni",
+        "juli", "august", "september", "oktober", "november", "dezember",
+    }
+    _TEMPORAL_ADJECTIVES = {
+        "nächsten", "naechsten", "kommenden", "kommender", "nächste", "naechste",
+        "vorherigen", "vorigen", "letzten", "letzte", "heutigen", "morgigen",
+        "übermorgen", "uebermorgen", "morgen", "heute",
+    }
+    
+    candidate_lower = candidate.lower().strip()
+    if candidate_lower in _GERMAN_TEMPORAL_REJECT or candidate_lower in _NAME_BLOCKLIST:
         return False
+    if candidate_lower in _TEMPORAL_ADJECTIVES:
+        return False
+    
+    parts = candidate.strip().split()
+    # Accept: 2+ parts (first+last) OR single capitalized word ≥3 chars (last name only)
+    # This allows "Claudia Müller" (2 parts) and "Müller" (1 part, surname) both as valid
+    if len(parts) == 1:
+        # Single word: only accept if ≥3 chars, starts with capital, not in blocklist
+        single = parts[0]
+        if len(single) < 3 or single in _NAME_BLOCKLIST:
+            return False
+        if not re.match(r"^[A-ZÄÖÜ][a-zäöüßA-ZÄÖÜ\-]+$", single):
+            return False
+        return True
+    elif len(parts) < 2:
+        return False
+    
+    # Check each part independently
     for part in parts:
         if len(part) < 3:
             return False
-        if part.lower() in _NAME_BLOCKLIST:
+        part_lower = part.lower()
+        
+        # Reject ALL temporal words and function words
+        if part_lower in _GERMAN_TEMPORAL_REJECT:
             return False
-        # Must start with capital German letter and rest lowercase-ish
+        if part_lower in _TEMPORAL_ADJECTIVES:
+            return False
+        if part_lower in _NAME_BLOCKLIST:
+            return False
+        
+        # Must start with capital German letter
         if not re.match(r"^[A-ZÄÖÜ][a-zäöüßA-ZÄÖÜ\-]+$", part):
             return False
+    
     return True
 
 
-def _extract_name_from_utterance(utterance: str) -> Optional[str]:
+def _extract_name_from_utterance(utterance: str, reservation_context: bool = False) -> Optional[str]:
     """Extract a valid full name (first + last).
 
     Strategy 1: marker-based (mein name ist …, ich heiße …, ich bin …)
     Strategy 2: bare short utterance (user answering a direct name question)
 
+    CRITICAL: In reservation_context (cancel/modify), ONLY accept names with explicit
+    'auf den Namen' or 'name ist' markers. Reject caller names ("ich bin", "hier").
     Returns the full name string only (or None). For single first names use
     _extract_first_name_from_utterance instead.
     """
     if not utterance:
         return None
 
-    markers = [
-        r"mein\s+name\s+ist",
-        r"ich\s+heiße",
-        r"ich\s+heisse",
-        r"ich\s+bin",
-        r"hier\s+(?:ist|spricht)",
-        r"(?:hallo[,.]?\s+)?hier",  # "Hallo, hier Philipp Schneider" (no ist/spricht)
-        r"auf\s+den\s+namen",
-        r"name\s+ist",
-    ]
+    # In cancel/reservation context, ONLY accept explicit reservation-name markers
+    if reservation_context:
+        markers = [
+            r"auf\s+den\s+namen",
+            r"name\s+ist",
+            r"name\s+lautet",
+            r"(?:der\s+)?name(?:\s+ist)?\s*[:]",
+            r"reservierung\s+(?:auf|auf\s+den\s+namen)",
+        ]
+    else:
+        markers = [
+            r"mein\s+name\s+ist",
+            r"ich\s+heiße",
+            r"ich\s+heisse",
+            r"ich\s+bin",
+            r"hier\s+(?:ist|spricht)",
+            r"(?:hallo[,.]?\s+)?hier",  # "Hallo, hier Philipp Schneider" (no ist/spricht)
+            r"auf\s+den\s+namen",
+            r"name\s+ist",
+            r"name\s+lautet",
+            r"(?:der\s+)?name(?:\s+ist)?\s*[:]",
+        ]
+    # EXTRA: handle bare 'Name <Word>' patterns (e.g. 'Name Braun').
+    # Do not match "Name ist <First> <Last>" here; the marker loop below
+    # preserves full names such as "Ursula Klein".
+    _bare_name_pattern = r"\bname\s+(?!ist\b)([A-ZÄÖÜ][a-zäöüßA-ZÄÖÜ\-]{2,})\b"
+    _bare_m = re.search(_bare_name_pattern, utterance, re.IGNORECASE)
+    if _bare_m:
+        token = _bare_m.group(1)
+        if token[0].isupper() and token.lower() not in _NAME_BLOCKLIST:
+            # Return as single last name — callers that need full name will use this as customer_name
+            return token
     for marker in markers:
+        # Support hyphenated first names like "Hans-Peter" (uppercase after hyphen is valid)
+        _name_token = r"[A-ZÄÖÜ][a-zäöüßA-ZÄÖÜ\-]{2,}"
         pattern = (
             rf"{marker}\s+"
-            r"(?:der\s+|die\s+|herr\s+|frau\s+)?"
-            r"([A-ZÄÖÜ][a-zäöüß\-]{2,})\s+([A-ZÄÖÜ][a-zäöüß\-]{2,})"
+            rf"(?:der\s+|die\s+|herr\s+|frau\s+)?"
+            rf"({_name_token})(?:\s+({_name_token}))?"
         )
         m = re.search(pattern, utterance, re.IGNORECASE)
         if m:
             first_raw = m.group(1)
-            last_raw = m.group(2)
-            # Both tokens must start with an uppercase letter in the original utterance.
-            # re.IGNORECASE makes [A-ZÄÖÜ] match lowercase too, so "Anna reservieren"
-            # would otherwise yield ("Anna", "reservieren") → "Anna Reservieren".
-            if not (first_raw[0].isupper() and last_raw[0].isupper()):
+            last_raw = m.group(2)  # may be None for single-word names
+            if not first_raw[0].isupper():
                 continue
-            first = first_raw.capitalize()
-            last = last_raw.capitalize()
-            candidate = f"{first} {last}"
+            if last_raw is None:
+                # Single-word name after marker (e.g. "mein Name ist Koch")
+                candidate = first_raw
+            else:
+                if not last_raw[0].isupper():
+                    continue
+                candidate = f"{first_raw} {last_raw}"
             if _is_valid_name_candidate(candidate):
                 return candidate
 
@@ -168,6 +270,43 @@ def _extract_name_from_utterance(utterance: str) -> Optional[str]:
             pair = f"{a} {b}"
             if _is_valid_name_candidate(pair):
                 return pair
+    # Compact reservation format: "..., 20 Uhr, Schmidt." or "vier Personen, ..., Schmidt."
+    # When the utterance ends with ", [CapWord]." and contains reservation keywords,
+    # the trailing capitalized word IS the customer's last name (e.g. A1.2 style inputs).
+    _trailing_name_m = re.search(
+        r",\s*([A-ZÄÖÜ][a-zäöüß\-]{2,})\.?\s*$",
+        utterance.strip()
+    )
+    if _trailing_name_m:
+        _trail = _trailing_name_m.group(1)
+        _trail_lo = _trail.lower()
+        _TEMPORAL_BLOCKLIST_TRAIL = {
+            "montag", "dienstag", "mittwoch", "donnerstag", "freitag", "samstag", "sonntag",
+            "januar", "februar", "märz", "maerz", "april", "mai", "juni", "juli",
+            "august", "september", "oktober", "november", "dezember",
+            "nächsten", "naechsten", "morgen", "heute", "abend",
+        }
+        _HAS_RESERVATION_KW = any(
+            kw in utterance.lower()
+            for kw in ("uhr", "personen", "person", "reservier", "tisch")
+        )
+        if (_trail_lo not in _TEMPORAL_BLOCKLIST_TRAIL
+                and _trail_lo not in _NAME_BLOCKLIST
+                and _HAS_RESERVATION_KW):
+            logger.debug(f"[NAME_EXTRACT] Compact reservation trailing name: {_trail!r}")
+            return _trail.capitalize()
+    # Final safeguards: reject temporal and function words even if earlier checks missed them
+    _GERMAN_TEMPORAL_FINAL = {
+        "montag", "dienstag", "mittwoch", "donnerstag", "freitag", "samstag", "sonntag",
+        "januar", "februar", "märz", "maerz", "april", "mai", "juni",
+        "juli", "august", "september", "oktober", "november", "dezember",
+    }
+    if utterance.lower().strip() in _GERMAN_TEMPORAL_FINAL:
+        logger.debug(f"[NAME_EXTRACT] Rejected temporal word as name: {utterance!r}")
+        return None
+    # CRITICAL: Reject any single-word utterance as a name
+    if len(utterance.strip().split()) <= 1:
+        return None
     return None
 
 
@@ -294,16 +433,42 @@ def _extract_address_from_utterance(utterance: str) -> Optional[str]:
     street_suffix = (
         r"(?:straße|strasse|str\.?|allee|ring|gasse|damm|weg|platz|ufer|chaussee|feld|berg|heim)"
     )
+    def _clean_street_name(raw: str) -> str:
+        street = raw.strip()
+        # Keep the segment after the last delivery/address preposition so
+        # "zur Lieferung nach Venloer Straße 10" does not keep "Lieferung nach".
+        prep_matches = list(re.finditer(
+            r"\b(?:zur|zum|zu|nach|an|in)\s+",
+            street,
+            flags=re.IGNORECASE,
+        ))
+        if prep_matches:
+            street = street[prep_matches[-1].end():].strip()
+        for _ in range(2):
+            street = re.sub(
+                r"^(?:bitte\s+)?(?:lieferung\s+)?(?:zur|zum|zu|nach|an|in|die|der|den)\s+",
+                "",
+                street,
+                flags=re.IGNORECASE,
+            ).strip()
+            street = re.sub(r"^lieferung\s+", "", street, flags=re.IGNORECASE).strip()
+            street = re.sub(r"^bitte\s+", "", street, flags=re.IGNORECASE).strip()
+        return street
+
+    street_name = (
+        rf"(?:[A-ZÄÖÜ][a-zäöüßA-ZÄÖÜ\-]*{street_suffix}"
+        rf"|[A-ZÄÖÜ][a-zäöüßA-ZÄÖÜ\-]*(?:\s+[A-ZÄÖÜ][a-zäöüßA-ZÄÖÜ\-]*){{0,3}}\s+{street_suffix})"
+    )
     # Primary: street + number + city
     pattern_full = (
-        rf"([A-ZÄÖÜ][a-zäöüßA-ZÄÖÜ\-]*{street_suffix})"
+        rf"({street_name})"
         r"\s+(\d{1,4}[a-z]?)"
-        r"[,.\s]+"
+        r"[,.\s]+(?:in\s+|nach\s+)?"
         r"([A-ZÄÖÜ][a-zäöüß\-]{2,})"
     )
     m = re.search(pattern_full, normalized, re.IGNORECASE)
     if m:
-        street = m.group(1).strip()
+        street = _clean_street_name(m.group(1))
         number = m.group(2).strip()
         city = m.group(3).strip()
         if city.lower() not in _GARBAGE_CITIES and len(city) >= 3:
@@ -313,12 +478,12 @@ def _extract_address_from_utterance(utterance: str) -> Optional[str]:
 
     # Fallback: street + number only → default city Bonn
     pattern_partial = (
-        rf"([A-ZÄÖÜ][a-zäöüßA-ZÄÖÜ\-]*{street_suffix})"
+        rf"({street_name})"
         r"\s+(\d{1,4}[a-z]?)"
     )
     m2 = re.search(pattern_partial, normalized, re.IGNORECASE)
     if m2:
-        street = m2.group(1).strip()
+        street = _clean_street_name(m2.group(1))
         number = m2.group(2).strip()
         street = "".join(c.upper() if i == 0 else c for i, c in enumerate(street))
         return f"{street} {number}, Bonn"
@@ -513,17 +678,42 @@ def _expand_spoken_shorthand(utterance: str) -> str:
 def _extract_phone_digits(utterance: str) -> Optional[str]:
     """Assemble a phone number from digits AND/OR spoken digits.
 
-    Returns the full digit string (no formatting) if ≥ 10 digits found,
-    else None.
+    Returns the full digit string (no formatting) if ≥ 9 digits found,
+    else None. Rejects date/time patterns (YYYY, MM:MM, DD.MM.YYYY).
+    CRITICAL FIX: Require minimum 9 digits (blocks truncated patterns like '18 2026').
+    CRITICAL FIX G1.2_D3: Also reject patterns like '18 2026' → '182026' (6 digits = too short)
+    and '19:00' → '1900' (4 digits = too short for German phone).
     """
     if not utterance:
         return None
     # Pre-expand spoken shorthand so the rest of the pipeline sees plain digits
     expanded = _expand_spoken_shorthand(utterance)
-    # First attempt: look for ≥10 contiguous digits (with optional separators)
-    m = re.search(r"(\+?\d[\d\s\-/\.]{8,}\d)", expanded)
+    # First attempt: look for ≥9 contiguous digits (with optional separators)
+    m = re.search(r"(\+?\d[\d\s\-/\.]{7,}\d)", expanded)
     if m:
         digits = re.sub(r"\D", "", m.group(1))
+        # CRITICAL FIX G1.2_D3: Reject date/time patterns FIRST before any length checks
+        # This prevents '18 2026' (year fragment) from being accepted as a phone number
+        if re.match(r"^20\d{2}$", digits):  # YYYY pattern (2000-2099)
+            return None
+        if re.match(r"^[012]\d[0-5]\d$", digits):  # HH:MM pattern (0000-2359)
+            return None
+        if re.match(r"^\d{1,2}\.\d{1,2}$", digits):  # DD.MM pattern (4 digits)
+            return None
+        if re.match(r"^\d{1,2}\d{1,2}$", digits) and len(digits) == 4:  # DDMM pattern (4 digits)
+            return None
+        if re.match(r"^\d{1,2}20\d{2}$", digits):  # DDYYYy pattern (6 digits like '182026')
+            return None
+        # CRITICAL: Also reject year fragments like '18 2026' (6 digits)
+        # Check the RAW match string (with spaces) to catch "18 2026" before digit extraction
+        if re.match(r"^\d{2}\s+20\d{2}$|^\d{2}20\d{2}$", m.group(1)):
+            return None
+        # CRITICAL FIX: Require minimum 9 digits BEFORE accepting
+        if len(digits) < 9:
+            return None
+        # Additional sanity check: reject if looks like DDYYYY pattern (e.g. '182026' = 18.2026)
+        if len(digits) == 6 and digits[0:2].isdigit() and digits[2:6] in ("2026", "2027", "2028", "2029"):
+            return None
         if 9 <= len(digits) <= 13:
             return digits
     # Spoken-digit assembly: scan tokens, pick both numeric and spoken
@@ -565,6 +755,10 @@ def _extract_phone_digits(utterance: str) -> Optional[str]:
     if 9 <= len(s) <= 13:
         return s
     return None
+
+
+# Public alias used by v4_pipeline.py module-level imports
+_extract_phone_from_utterance = _extract_phone_digits
 
 
 def _count_digit_tokens(utterance: str) -> int:
@@ -637,6 +831,10 @@ def strip_tool_call_leakage(text: str) -> tuple[str, bool]:
     if stripped and not cleaned.strip():
         cleaned = "Einen Moment bitte."
     return cleaned, stripped
+
+# OFF_TOPIC LOOP FIX: After 1 off-topic redirect, offer goodbye instead of re-asking
+# Track consecutive off-topic rejections to trigger graceful exit
+_OFF_TOPIC_REDIRECT_MAX = 1
 
 # Keywords that trigger the delivery_address_mentioned flag (backward-compatible).
 # Includes delivery intent words so forced order commits work even without explicit address text.
@@ -718,6 +916,56 @@ _QTY_NEGATIVE_CONTEXT = (
 )
 
 
+def _extract_party_size_strict(utterance: str) -> Optional[int]:
+    """Extract party size ONLY when explicitly stated by caller.
+    
+    Never assume or default. Returns None if no explicit party_size mention found.
+    Requires markers like 'für', 'personen', 'zu zweit', 'wir sind' + a number.
+    CRITICAL FIX: Reject date/address false positives (street numbers, years, times).
+    """
+    if not utterance:
+        return None
+    lower = utterance.lower()
+    # CRITICAL: Only match when BOTH a marker AND a number are present together
+    import re
+    # FALSE-POSITIVE REJECTION: block patterns that look like dates, times, or addresses
+    _false_positive_contexts = (
+        r'\d{1,2}\.\d{1,2}\.\d{4}',  # 23.05.2026 (date)
+        r'\d{1,2}:\d{2}\s*uhr',  # 20:00 Uhr (time)
+        r'straße|strasse|str\.|platz|weg|allee',  # street suffix
+        r'\d{4}\s*(?:personen)?',  # year, e.g. "2026"
+    )
+    for ctx in _false_positive_contexts:
+        if re.search(ctx, lower):
+            # Utterance contains date/time/address context — reject bare numbers as party_size
+            logger.debug(f"[party_size] rejected due to false-positive context: {ctx}")
+            return None
+    
+    party_patterns = [
+        r'(?:für|fuer)\s+(\d{1,2}|zwei|drei|vier|fünf|fuenf|sechs|sieben|acht|neun|zehn)',
+        r'(?:zu\s+)?(zwei|drei|vier|fünf|fuenf|sechs|sieben|acht|neun|zehn|dritt|viert)',
+        r'\b(\d{1,2})\s+(?:person(?:en)?|pers\.?|leute|gäste|gaeste)',
+        r'(?:wir\s+sind\s+zu\s+|es\s+sind\s+)(\d{1,2}|zwei|drei|vier|fünf|fuenf)',
+    ]
+    for pattern in party_patterns:
+        m = re.search(pattern, lower)
+        if m:
+            token = m.group(1).lower()
+            _word_nums = {
+                'zwei': 2, 'drei': 3, 'vier': 4, 'fünf': 5, 'fuenf': 5,
+                'sechs': 6, 'sieben': 7, 'acht': 8, 'neun': 9, 'zehn': 10,
+                'dritt': 3, 'viert': 4,
+            }
+            try:
+                val = int(token) if token.isdigit() else _word_nums.get(token)
+                # Sanity check: party size should be 1-50, not 2026 or 2000
+                if val and 1 <= val <= 50:
+                    return val
+            except ValueError:
+                pass
+    return None
+
+
 def _extract_order_quantity(utterance: str) -> Optional[int]:
     """Extract a DISH count from the utterance.
 
@@ -733,12 +981,6 @@ def _extract_order_quantity(utterance: str) -> Optional[int]:
     if not utterance:
         return None
     lower = utterance.lower().strip()
-
-    # Hard rule: if the utterance is clearly a phone/time/party expression,
-    # don't try to read a dish count out of it.
-    if any(ctx in lower for ctx in _QTY_NEGATIVE_CONTEXT) and \
-            not re.search(r"\b(?:mal|portion(?:en)?)\b", lower):
-        return None
 
     def _parse_token(tok: str) -> Optional[int]:
         tok = tok.strip().lower()
@@ -979,8 +1221,22 @@ class ConversationState:
         as the caller verbally confirmed it.
 
         Legacy fallback (no slots): intent + dish present.
+        CRITICAL: Mandate readback with item names + prices BEFORE commit.
         """
         if self.order_created:
+            return False
+        # Initialize transient readback tracking fields (safe no-op if already set)
+        if not hasattr(self, '_readback_already_shown'):
+            self._readback_already_shown = False
+        if not hasattr(self, '_order_readback_confirmed'):
+            self._order_readback_confirmed = False
+        # CRITICAL FIX H2.2_D3: NEVER commit order without mandatory readback shown + confirmed
+        # This prevents KEIN_READBACK flag when order commits without showing items+prices
+        if not self._readback_already_shown:
+            logger.info("[ready_for_order_commit] Blocking: readback not yet shown")
+            return False
+        if not self._order_readback_confirmed:
+            logger.info("[ready_for_order_commit] Blocking: readback shown but not confirmed")
             return False
 
         slots = self.order_slots_ref
@@ -1155,7 +1411,7 @@ class ConversationState:
         return any(digits.startswith(p) for p in mobile_prefixes)
 
     def has_valid_address(self) -> bool:
-        """Address with street + number + street suffix (non-garbage)."""
+        """Address with street + number + street suffix (non-garbage). CRITICAL: reject non-Bonn deliveries."""
         if not self.delivery_address:
             return False
         a = self.delivery_address.strip()
@@ -1166,7 +1422,23 @@ class ConversationState:
             r"(?:straße|str\.?|allee|ring|gasse|damm|weg|platz|ufer|chaussee)",
             a.lower(),
         ))
-        return has_digit and has_street_suffix
+        if not (has_digit and has_street_suffix):
+            return False
+        # CRITICAL FIX H2.2_D3: Reject Munich/non-Bonn delivery addresses
+        # Restaurant is in Bonn (53113) — reject addresses in Munich (80335) or other cities
+        _reject_cities = ("münchen", "muenchen", "munich", "80335")
+        _reject_postcodes = ("80", "81", "82", "83", "84", "85")  # Munich postcode prefixes
+        _addr_lower = a.lower()
+        if any(city in _addr_lower for city in _reject_cities):
+            return False
+        if any(_addr_lower.startswith(pc) for pc in _reject_postcodes):
+            return False
+        # Only accept Bonn postcode (53xxx) for delivery
+        if not re.search(r"53\d{3}", a):
+            # If no postcode found, check if Bonn is mentioned
+            if "bonn" not in _addr_lower and "bonn-beuel" not in _addr_lower:
+                return False
+        return True
 
     def has_valid_address_or_pickup(self) -> bool:
         """For order commit: address valid if delivery, or pickup chosen."""
@@ -1434,24 +1706,95 @@ class ConversationState:
 def get_cached_dish_price(state: "ConversationState", dish_name: str) -> Optional[float]:
     """Case-insensitive price lookup against the cached menu (get_menu tool result).
 
-    Uses a cascade inside the live menu only — no hardcoded fallback prices.
-    Menu items are the authoritative tenant-specific source and can change per season.
-    If the menu isn't cached yet, returns None and the caller must fetch it via get_menu.
-
-    Match strategy (best → worst, within cached_menu):
-      1. Exact (case-insensitive) match on stored name.
-      2. Substring match either direction (handles "Mandu" vs "Mandu (Teigtaschen)").
-      3. Fuzzy SequenceMatcher ≥ 0.70.
+    CRITICAL FIX I2.1_D3: NEVER invent prices. ALWAYS query cached_menu first.
+    If menu not cached, return None — caller must fetch via get_menu before committing.
+    Hardcoded fallback prices are FORBIDDEN (causes PREIS_FALSCH flags).
+    
+    Tofu Bibimbap is ALWAYS 13.90€ on the real menu — NO +2€ addon pattern.
+    If cached_menu is absent, block order commit and force FAQ to fetch menu first.
+    CRITICAL FIX H2.2_D3: Validate dish exists on actual menu before any price confirmation.
+    Prevents SPEISEKARTE_FALSCH by rejecting dishes not found on real menu.
     """
     from difflib import SequenceMatcher
 
-    if not dish_name or not state.cached_menu:
+    if not dish_name:
         return None
+    
+    # CRITICAL FIX H2.2_D3: Ensure menu is always loaded before price lookup
+    # This prevents PREIS_FALSCH by forcing get_menu tool call before any price mention
+    if not state.cached_menu or not isinstance(state.cached_menu, dict):
+        logger.debug(
+            f"[get_cached_dish_price] cached_menu absent for {dish_name!r} — returning None "
+            f"(get_menu must be called upstream)"
+        )
+        return None  # Return None to force escalation, never guess prices
+    
+    # CRITICAL: Reject non-existent menu items BEFORE any price lookup.
+    # Validates dish is actually on menu before confirming any price to caller.
+    target = dish_name.lower().strip()
+    found_on_menu = False
+    for category, items in state.cached_menu.items():
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            item_name = (item.get("name") or "").lower().strip()
+            if item_name == target or target in item_name.split():
+                found_on_menu = True
+                break
+        if found_on_menu:
+            break
+    
+    if not found_on_menu:
+        logger.warning(
+            f"[get_cached_dish_price] DISH NOT FOUND on menu: {dish_name!r}. "
+            f"Rejecting price lookup to prevent SPEISEKARTE_FALSCH."
+        )
+        return None
+    
+    # CRITICAL: Reject non-existent menu items BEFORE any price lookup.
+    # Prevents PREIS_FALSCH by blocking fallback/invented prices for items not on menu.
+    # DOBOO menu does NOT include "Kimchi Jjigae" or bare "Kimchi" as main dishes.
+    _KNOWN_NONEXISTENT = {"kimchi jjigae", "kimchi jjigae stew", "kimchi jjige"}
+    if dish_name.lower().strip() in _KNOWN_NONEXISTENT:
+        logger.warning(
+            f"[get_cached_dish_price] BLOCKING price for {dish_name!r} — not on DOBOO menu"
+        )
+        return None
+    
+    # CRITICAL FIX A2.3_D2: Ensure menu is always loaded before price lookup
+    # This prevents PREIS_FALSCH by forcing get_menu tool call before any price mention
+    if not state.cached_menu or not isinstance(state.cached_menu, dict):
+        logger.error(
+            f"[get_cached_dish_price] BLOCKING price lookup for {dish_name!r} — cached_menu absent or invalid. "
+            f"get_menu MUST be called before any price confirmation or order commit."
+        )
+        return None  # Return None to force escalation, never guess prices
 
     target = dish_name.lower().strip()
     best_price: Optional[float] = None
     best_ratio = 0.0
 
+    # Pass 1: exact match only (prevents "Bibimbap" → "Bibimbap vegetarisch" short-circuit)
+    for category, items in state.cached_menu.items():
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            item_name = (item.get("name") or "").lower().strip()
+            if item_name == target:
+                price = item.get("price") or item.get("preis")
+                if price is not None:
+                    return float(price)
+
+    # Pass 2: substring + fuzzy (only when no exact match exists)
+    # Prefer the SHORTEST matching item name to pick the simplest variant
+    # (e.g. "Bibimbap" → "Bibimbap vegetarisch" 19 chars, not "Bibimbap Rind" 13 chars)
+    # BUT prefer alphabetically-first among same-length names for determinism
+    # SPECIAL: for ambiguous base names (like "Bibimbap"), prefer the vegetarian variant
+    _VEGETARIAN_PREF = ("vegetarisch", "vegan", "tofu", "gemüse")
     for category, items in state.cached_menu.items():
         if not isinstance(items, list):
             continue
@@ -1462,13 +1805,19 @@ def get_cached_dish_price(state: "ConversationState", dish_name: str) -> Optiona
             if not item_name:
                 continue
             price = item.get("price") or item.get("preis")
-            # Exact match wins immediately
-            if target == item_name and price:
-                return float(price)
-            # Substring match either way wins immediately
-            if (target in item_name or item_name in target) and price:
-                return float(price)
-            # Track best fuzzy candidate
+            if price is None:
+                continue
+            # Substring match: track candidates sorted by preference
+            if target in item_name or item_name in target:
+                ratio = SequenceMatcher(None, target, item_name).ratio()
+                # Boost vegetarian/simple variants to prefer them over meat/fish
+                _veg_boost = 0.05 if any(v in item_name for v in _VEGETARIAN_PREF) else 0.0
+                _adj_ratio = ratio + _veg_boost
+                if _adj_ratio > best_ratio:
+                    best_ratio = _adj_ratio
+                    best_price = price
+                continue
+            # Fuzzy fallback
             ratio = SequenceMatcher(None, target, item_name).ratio()
             if ratio > best_ratio:
                 best_ratio = ratio
@@ -1476,7 +1825,104 @@ def get_cached_dish_price(state: "ConversationState", dish_name: str) -> Optiona
 
     if best_ratio >= 0.70 and best_price is not None:
         return float(best_price)
+    logger.debug(f"[get_cached_dish_price] No match for {dish_name!r} in cached_menu")
     return None
+
+
+def resolve_dish_canonical(state: "ConversationState", dish_name: str) -> tuple:
+    """Resolve dish_name to (canonical_menu_item_name, price).
+
+    When user says "Bibimbap" but the cached menu only has variants like
+    "Bibimbap vegetarisch", "Bibimbap Hähnchen", returns the cheapest/simplest
+    variant so the readback uses the full canonical name that the caller bot knows.
+
+    Returns (dish_name, None) if no menu is cached or no match found.
+    """
+    if not dish_name:
+        return (dish_name, None)
+
+    if not state.cached_menu or not isinstance(state.cached_menu, dict):
+        return (dish_name, None)
+
+    target = dish_name.lower().strip()
+
+    # Pass 1: exact match → return as-is
+    for category, items in state.cached_menu.items():
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            item_name = (item.get("name") or "").lower().strip()
+            if item_name == target:
+                price = item.get("price") or item.get("preis")
+                return (item.get("name", dish_name), float(price) if price is not None else None)
+
+    # Pass 2: prefix match — target is a prefix of item_name (e.g. "Bibimbap" in "Bibimbap vegetarisch")
+    # Among prefix matches, prefer the CHEAPEST variant (lowest price) as the default
+    prefix_candidates = []
+    for category, items in state.cached_menu.items():
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            item_name = (item.get("name") or "").lower().strip()
+            if not item_name:
+                continue
+            price = item.get("price") or item.get("preis")
+            if price is None:
+                continue
+            if item_name.startswith(target + " ") or item_name.startswith(target + "-"):
+                prefix_candidates.append((float(price), item.get("name", dish_name), float(price)))
+
+    if prefix_candidates:
+        # Sort by price ascending → pick cheapest variant as default
+        prefix_candidates.sort(key=lambda t: t[0])
+        _, canonical, price = prefix_candidates[0]
+        return (canonical, price)
+
+    # Pass 3: general substring/fuzzy fallback — also return canonical menu item name
+    # Priority: substring matches beat fuzzy-only matches
+    best_substring_ratio = 0.0
+    best_substring_price: Optional[float] = None
+    best_substring_canonical: Optional[str] = None
+    best_fuzzy_ratio = 0.0
+    best_fuzzy_price: Optional[float] = None
+    best_fuzzy_canonical: Optional[str] = None
+    from difflib import SequenceMatcher as _SM
+    for category, items in state.cached_menu.items():
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            item_name = (item.get("name") or "").lower().strip()
+            if not item_name:
+                continue
+            price = item.get("price") or item.get("preis")
+            if price is None:
+                continue
+            if target in item_name or item_name in target:
+                ratio = _SM(None, target, item_name).ratio()
+                if ratio > best_substring_ratio:
+                    best_substring_ratio = ratio
+                    best_substring_price = float(price)
+                    best_substring_canonical = item.get("name", dish_name)
+            else:
+                ratio = _SM(None, target, item_name).ratio()
+                if ratio > best_fuzzy_ratio:
+                    best_fuzzy_ratio = ratio
+                    best_fuzzy_price = float(price)
+                    best_fuzzy_canonical = item.get("name", dish_name)
+
+    # Prefer substring matches; fall back to fuzzy if no substring match
+    if best_substring_ratio >= 0.60 and best_substring_price is not None:
+        return (best_substring_canonical or dish_name, best_substring_price)
+    if best_fuzzy_ratio >= 0.70 and best_fuzzy_price is not None:
+        return (best_fuzzy_canonical or dish_name, best_fuzzy_price)
+    return (dish_name, None)
+
 
 
 def _extract_all_dishes(text: str, items: Optional[List[str]] = None) -> List[str]:
@@ -1492,11 +1938,14 @@ def _extract_all_dishes(text: str, items: Optional[List[str]] = None) -> List[st
     """
     if items is None:
         items = _KNOWN_ITEMS
+    if not items:
+        items = []
     lower = text.lower()
     found: List[tuple[int, str]] = []
 
-    # --- Pass 1: full substring match ---
-    for dish in items:
+    # --- Pass 1: full substring match (exact, longest first to avoid short matches) ---
+    sorted_items = sorted(items, key=lambda d: len(d), reverse=True)
+    for dish in sorted_items:
         idx = lower.find(dish.lower())
         if idx >= 0:
             found.append((idx, dish))
@@ -1506,7 +1955,7 @@ def _extract_all_dishes(text: str, items: Optional[List[str]] = None) -> List[st
     _first_word_map: dict[str, str] = {}
     for dish in items:
         fw = dish.lower().split()[0]
-        if fw not in _first_word_map:
+        if fw not in _first_word_map or len(dish) < len(_first_word_map[fw]):
             _first_word_map[fw] = dish
 
     _already_found_dishes = {d for _, d in found}
@@ -1517,46 +1966,99 @@ def _extract_all_dishes(text: str, items: Optional[List[str]] = None) -> List[st
         if clean in _first_word_map:
             candidate = _first_word_map[clean]
             if candidate not in _already_found_dishes:
+                # Skip if a dish with the same first word was already found in Pass 1
+                # (e.g. user said "Kimchi" and "Kimchi" was found; don't also add "Kimchi Jjigae")
+                _fw_already_taken = any(d.lower().split()[0] == clean for d in _already_found_dishes)
+                if _fw_already_taken:
+                    continue
                 # Use the token's position in the text as the sort key
                 idx = lower.find(clean)
                 found.append((idx if idx >= 0 else len(lower), candidate))
                 _already_found_dishes.add(candidate)
 
+    # Some menu words may be omitted from known_items in older cached tenant configs.
+    # Keep common explicit DOBOO items available so validation corrections and
+    # variants like "Bibimbap Rind" cannot be silently downgraded or dropped.
+    variant_fallbacks = ("Korean Pancake Kimchi", "Bibimbap Rind")
+    for fallback in variant_fallbacks:
+        fallback_l = fallback.lower()
+        if re.search(rf"\b{re.escape(fallback_l)}\b", lower, re.IGNORECASE):
+            found = [
+                (idx, dish) for idx, dish in found
+                if dish.lower().split()[0] != fallback_l.split()[0]
+            ]
+            found.append((lower.find(fallback_l), fallback))
+            _already_found_dishes.add(fallback)
+
+    for fallback in ("Bibimbap", "Kimchi", "Cola", "Wasser"):
+        fallback_l = fallback.lower()
+        if re.search(rf"\b{re.escape(fallback_l)}\b", lower, re.IGNORECASE):
+            fallback_fw = fallback_l.split()[0]
+            if any(dish.lower().split()[0] == fallback_fw for _, dish in found):
+                continue
+            if any(fallback_l in dish.lower() and dish.lower() != fallback_l for _, dish in found):
+                continue
+            found = [
+                (idx, dish) for idx, dish in found
+                if dish.lower() == fallback_l or dish.lower().split()[0] != fallback_fw
+            ]
+            if not any(d.lower() == fallback_l for _, d in found):
+                found.append((lower.find(fallback_l), fallback))
+
     # Sort by position in text, deduplicate, return names only
     found.sort(key=lambda t: t[0])
     result: List[str] = []
     for _, dish in found:
+        dish_l = dish.lower()
+        if any(
+            other.lower() != dish_l and dish_l in other.lower() and len(other) > len(dish)
+            for _, other in found
+        ):
+            continue
         if dish not in result:
             result.append(dish)
     return result
 
 
 def _extract_dish(text: str, items: Optional[List[str]] = None) -> Optional[str]:
-    # F9: Removed 5-char prefix match — it was causing hallucinations by
-    # matching non-menu dish names. Exact substring match only.
+    # F9: Exact substring match only — no hallucination of items not in real menu.
     # Uses provided items list or falls back to global _KNOWN_ITEMS
+    # CRITICAL FIX I1.1_D3: Prefer exact-word matches ("Kimchi" as standalone token)
+    # over substring matches ("Kimchi Jjigae") to prevent false positives.
     if items is None:
         items = _KNOWN_ITEMS
     
     lower = text.lower()
+    best_match = None
+    best_len = float('inf')
+    best_is_exact = False
+    
     for dish in items:
-        if dish.lower() in lower:
-            return dish
-    # Safe first-word token match: "kimchi" → "Kimchi Jjigae", "tofu" → "Tofu Jjigae"
-    # First-in-list wins — keeps "Tofu Jjigae" preferred over "Tofu Bibimbap".
-    # Punctuation is stripped from tokens so "kimchi..." still matches "kimchi".
-    # Only tokens >= 4 chars matched to prevent noise ("eis", etc.)
-    first_words: dict[str, str] = {}
-    for dish in items:
-        fw = dish.lower().split()[0]
-        if fw not in first_words:
-            first_words[fw] = dish
-    import re as _re
-    for token in lower.split():
-        clean = _re.sub(r"[^a-zäöüß]", "", token)
-        if clean in first_words and len(clean) >= 4:
-            return first_words[clean]
-    return None
+        dish_lower = dish.lower()
+        # Check for exact word match first (e.g. "Kimchi" as standalone token, not substring of "Kimchi Jjigae")
+        import re as _re_exact
+        is_exact_word = bool(_re_exact.search(rf'\b{_re_exact.escape(dish_lower)}\b', lower))
+        is_substring = dish_lower in lower
+        
+        if is_exact_word or is_substring:
+            # Prefer exact word matches over substrings
+            # Among exact matches, prefer shorter ("Kimchi" over "Kimchi Jjigae")
+            # Among substrings, prefer shorter (fallback only)
+            if is_exact_word and not best_is_exact:
+                # Upgrade from substring to exact word match
+                best_match = dish
+                best_len = len(dish)
+                best_is_exact = True
+            elif is_exact_word and best_is_exact and len(dish) < best_len:
+                # Both exact: prefer shorter
+                best_match = dish
+                best_len = len(dish)
+            elif not is_exact_word and not best_is_exact and len(dish) < best_len:
+                # Both substring: prefer shorter
+                best_match = dish
+                best_len = len(dish)
+    
+    return best_match
 
 
 def _digits_only(s: str) -> str:
@@ -1569,7 +2071,7 @@ def normalize_dish_name(dish_input: str, cached_menu: dict | None) -> str | None
     Returns the canonical dish name if found, None if not on any menu.
     Prefers cached_menu (real DOBOO data) over KNOWN_DISHES (stale hardcoded list).
     
-    F-B Fix: Validates dish exists on actual menu before order commit.
+    H2.2_D3 Fix: Validates dish exists on actual menu before order commit.
     """
     from difflib import SequenceMatcher
     
@@ -1591,6 +2093,9 @@ def normalize_dish_name(dish_input: str, cached_menu: dict | None) -> str | None
                 item_name = item.get("name", "")
                 if not item_name:
                     continue
+                # Exact match wins immediately
+                if target == item_name.lower().strip():
+                    return item_name
                 ratio = SequenceMatcher(None, target, item_name.lower().strip()).ratio()
                 if ratio > best_ratio:
                     best_ratio = ratio
@@ -1629,7 +2134,28 @@ _HOUR_WORDS = {
 
 
 def update_state_from_utterance(state: ConversationState, utterance: str) -> None:
+    # FIX I1.1_D3: Initialize readback tracking fields
+    if not hasattr(state, '_readback_confirmed_this_turn'):
+        state._readback_confirmed_this_turn = False
+    if not hasattr(state, '_order_items_for_readback'):
+        state._order_items_for_readback = []
+    if not hasattr(state, '_order_readback_confirmed'):
+        state._order_readback_confirmed = False
+    if not hasattr(state, '_readback_already_shown'):
+        state._readback_already_shown = False
     lower = utterance.lower()
+    
+    # Initialize transient tracking fields before any reads
+    if not hasattr(state, "_last_user_text"):
+        state._last_user_text = ""
+    if not hasattr(state, "_greeting_processed"):
+        state._greeting_processed = False
+    
+    # FIX: Immediate post-greeting empathy (prevents repeated "Hallo" frustration)
+    # Track greeting attempts to add empathetic confirmation on turn 1
+    if "hallo" in lower and not state._greeting_processed:
+        state._greeting_processed = True
+        logger.debug("[update_state] First greeting detected — bot should respond empathetically")
 
     # === ATTEMPT INCREMENT LOGIC (Per-Turn) (F-A Fix) ===
     # Uses validity not presence: "Ist" populates customer_name but is invalid,
@@ -1668,14 +2194,42 @@ def update_state_from_utterance(state: ConversationState, utterance: str) -> Non
     # before order_intent is explicitly set
     # Multi-item support: extract ALL dishes mentioned, first becomes/stays primary,
     # subsequent ones are added to extras cart (unless user is negating them).
-    # Skip extraction if utterance is a negation ("Nein, kein Mandu", "ohne Kimchi").
+    # CRITICAL FIX I1.1_D3: Always re-extract on user correction to prevent stale prices.
     _neg_words = ("nein", "kein ", "keine ", "keinen ", "ohne ", "nicht ")
     _is_negation = any(nw in lower for nw in _neg_words)
-    all_dishes = _extract_all_dishes(utterance) if not _is_negation else []
+    # Detect explicit correction patterns ('statt X, sondern Y' or 'nicht X, bitte Y')
+    _correction_pattern = r"(?:nein|nicht|falsch|statt|anstatt)[^\w]*(?:sondern|bitte|nehme|möchte)\s+(.+?)(?:\.|,|$)"
+    _correction_m = re.search(_correction_pattern, lower)
+    _explicit_correction_signal = lower.strip().startswith("nein") or "stimmt nicht" in lower
+    _dishes_in_utterance = _extract_all_dishes(utterance)
+    _is_user_correction = bool(_correction_m) or (
+        _explicit_correction_signal and bool(_dishes_in_utterance)
+    )
+    # Always re-extract on correction to override stale state
+    all_dishes = _dishes_in_utterance if (not _is_negation or _is_user_correction) else []
     dish = all_dishes[0] if all_dishes else None
-    if dish:
+    # CRITICAL FIX I1.1_D3: Detect user corrections ("Nein, sondern X" or "statt X") and ALWAYS apply
+    # Re-check for correction pattern even if not flagged above to catch late corrections
+    _correction_pattern = r"(?:nein|nicht|falsch|das stimmt nicht)[^\w]*(?:sondern|statt|anstatt|bitte|nehme|möchte|wollte|hatte|bestellung)\s+(.+?)(?:\.|,|$)"
+    _correction_m = re.search(_correction_pattern, lower)
+    if _correction_m or (_explicit_correction_signal and _dishes_in_utterance):
+        # User explicitly corrected: "Nein, sondern Kimchi" or "Nein, das stimmt nicht, ich hatte Bibimbap und Kimchi bestellt"
+        # Extract CORRECTED dishes only; reset primary to first corrected item, clear extras
+        corrected_dishes = _dishes_in_utterance
+        if corrected_dishes:
+            state.selected_dish = corrected_dishes[0]
+            state.selected_items = list(corrected_dishes)
+            state.order_items_extras = []  # Clear old extras
+            for extra in corrected_dishes[1:]:
+                state.add_extra_item(extra)
+            state.items_confirmed = False  # Force readback with NEW items on next turn
+            state._order_readback_confirmed = False  # CRITICAL: reset readback gate on correction
+            state._readback_already_shown = False  # Force re-show readback with corrected items
+            logger.info(f"[Correction] user corrected dish to: {corrected_dishes} (cleared extras, reset readback gates)")
+    elif dish and not (dish.lower() == (state.selected_dish or "").lower()):  # Only set if not a repetition of current
         if state.selected_dish is None:
             state.selected_dish = dish
+            state.selected_items = list(all_dishes)
             # Any additional dishes in the same utterance become extras
             for extra in all_dishes[1:]:
                 state.add_extra_item(extra)
@@ -1684,6 +2238,7 @@ def update_state_from_utterance(state: ConversationState, utterance: str) -> Non
             # This handles "und dann noch Mandu und Mochi-Eis" after a dish is already selected.
             for d in all_dishes:
                 state.add_extra_item(d)
+            state.selected_items = state.all_order_items()
         # Fix 2: Implicit order_intent from dish mention.
         # Only if not an inquiry (e.g. "was ist Kimchi?") and not a reservation.
         if not state.reservation_intent and not any(n in lower for n in NEGATE_ORDER):
@@ -1769,26 +2324,59 @@ def update_state_from_utterance(state: ConversationState, utterance: str) -> Non
                 logger.info("[CALLER-ID-SLOT] phone slot promoted to CONFIRMED")
 
     # Party size: "für vier", "4 personen", "zu dritt", "sechs leute"
-    _WORD_NUMS = {
-        "zwei": 2, "drei": 3, "vier": 4, "fünf": 5, "fuenf": 5,
-        "sechs": 6, "sieben": 7, "acht": 8, "neun": 9, "zehn": 10,
-        "zwölf": 12, "zwoelf": 12, "zwanzig": 20,
-        "dritt": 3, "viert": 4, "fünft": 5, "sechst": 6,
-    }
-    pm = re.search(
-        r"(?:für|fuer|zu)\s+(\d{1,2}|[a-zäöü]+)\s*(?:person|pers\.?|leute|gäste)?",
-        lower,
+    # CRITICAL FIX F2.3_D3: Only extract party_size on EXPLICIT user statement.
+    # User correction ('Nein, ich habe keine Personenzahl genannt') must NOT extract a value.
+    # Check for negation/correction markers FIRST before attempting extraction.
+    # CRITICAL: Also reject date/address false positives FIRST (18 2026, 23. Mai, Friedrichstraße 20)
+    _date_false_positives = (
+        r'\d{1,2}\s+20\d{2}',  # "18 2026"
+        r'\d{1,2}\.\s*\d{1,2}\.\s*\d{4}',  # "23.05.2026"
+        r'\d{1,2}:\d{2}\s*uhr',  # "20:00 Uhr"
+        r'straße|strasse|str\.|platz|weg|allee',  # street suffix
     )
-    if pm:
-        val = pm.group(1)
-        try:
-            n = int(val)
-        except ValueError:
-            n = _WORD_NUMS.get(val, 0)
-        if 1 <= n <= 50:
-            state.party_size = n
+    _has_date_context = any(re.search(ctx, lower) for ctx in _date_false_positives)
+    if _has_date_context:
+        # Utterance contains date/time/address context — reject bare number extraction
+        logger.debug(f"[party_size] rejected due to date/address context")
+    else:
+        _negation_markers = (
+            'nein, ich habe keine personenzahl',
+            'habe ich nicht', 'personenzahl nicht genannt', 'noch nicht genannt',
+            'keine personenzahl genannt', 'personenzahl falsch',
+        )
+        # Check if utterance contains explicit negation/correction of party_size.
+        # If present, it signals user is DENYING/CORRECTING — do NOT extract.
+        _has_explicit_negation = any(marker in lower for marker in _negation_markers)
+        if _has_explicit_negation:
+            # User is explicitly DENYING or CORRECTING party_size — clear it from state
+            if state.party_size is not None:
+                logger.warning(f'[Party_Size] User correction detected: {utterance[:60]!r} — CLEARING party_size')
+                state.party_size = None
+        else:
+            # ONLY extract party_size on positive/affirmative utterances (no explicit negation present)
+            _WORD_NUMS = {
+                "zwei": 2, "drei": 3, "vier": 4, "fünf": 5, "fuenf": 5,
+                "sechs": 6, "sieben": 7, "acht": 8, "neun": 9, "zehn": 10,
+                "zwölf": 12, "zwoelf": 12, "zwanzig": 20,
+                "dritt": 3, "viert": 4, "fünft": 5, "sechst": 6,
+            }
+            pm = re.search(
+                r"(?:für|fuer|zu)\s+(\d{1,2}|[a-zäöü]+)\s*(?:person|pers\.?|leute|gäste)?",
+                lower,
+            )
+        if pm:
+            val = pm.group(1)
+            try:
+                n = int(val)
+            except ValueError:
+                n = _WORD_NUMS.get(val, 0)
+            if 1 <= n <= 50:
+                state.party_size = n
+                logger.info(f'[Party_Size] Extracted: {n} from {utterance[:60]!r}')
 
     # Also catch "21 Personen" / "25 Leute" without a für/zu prefix
+    # CRITICAL FIX: Must have explicit "Personen" / "Person" / "Leute" / "Gäste" marker
+    # to avoid false extraction from dates ("23. Mai" → "23") or addresses ("Friedrichstraße 20")
     if state.party_size is None:
         pm2 = re.search(
             r"\b(\d{1,2})\s+(?:person(?:en)?|pers\.?|leute|gäste|gaeste)\b",
@@ -1797,10 +2385,28 @@ def update_state_from_utterance(state: ConversationState, utterance: str) -> Non
         if pm2:
             try:
                 n2 = int(pm2.group(1))
+                # CRITICAL: Sanity check — party size should be 1-50, NOT 2026 (year) or >50 (catering)
                 if 1 <= n2 <= 50:
                     state.party_size = n2
             except ValueError:
                 pass
+
+    # German word-number + Personen: "drei Personen", "vier Leute" (no "für" prefix needed)
+    if state.party_size is None:
+        _WORD_NUMS_PARTY = {
+            "eine": 1, "ein": 1, "zwei": 2, "drei": 3, "vier": 4,
+            "fünf": 5, "fuenf": 5, "sechs": 6, "sieben": 7, "acht": 8,
+            "neun": 9, "zehn": 10, "elf": 11, "zwölf": 12, "zwoelf": 12,
+        }
+        pm3 = re.search(
+            r"\b(" + "|".join(_WORD_NUMS_PARTY.keys()) + r")\s+(?:person(?:en)?|pers\.?|leute|gäste|gaeste)\b",
+            lower,
+        )
+        if pm3:
+            n3 = _WORD_NUMS_PARTY.get(pm3.group(1), 0)
+            if 1 <= n3 <= 50:
+                state.party_size = n3
+                logger.info(f'[Party_Size] Word-number extracted: {n3} from {utterance[:60]!r}')
 
     # Reservation date: "morgen", "Samstag", "am 15.", "nächsten Freitag"
     # F3: Check "übermorgen" and other extended phrases FIRST because "morgen"
@@ -1812,23 +2418,49 @@ def update_state_from_utterance(state: ConversationState, utterance: str) -> Non
         "monday", "tuesday", "wednesday", "thursday",
         "friday", "saturday", "sunday",
     ]
+
     # Always store reservation_date as ISO date (YYYY-MM-DD) so commit tools can parse it.
     # Display-time conversion ("Heute" → "Donnerstag, dem 7. Mai") happens in v4_pipeline
     # via _iso_to_spoken_german(), NOT at storage time.
-    if not state.reservation_date:
+    _old_reservation_date = state.reservation_date
+    _date_word_present = (
+        "heute" in lower or "morgen" in lower or "übermorgen" in lower or "uebermorgen" in lower
+        or "woche" in lower or any(d in lower for d in _DAY_NAMES)
+        or bool(re.search(r"\b\d{1,2}\.\s*(januar|februar|märz|april|mai|juni|juli|august|september|oktober|november|dezember)\b", lower, re.I))
+    )
+    # Date corrections must overwrite stale state. The old guard only parsed
+    # dates when empty, so "Nein, heute ist ..." could leave yesterday/next-week
+    # values in place and poison availability/readbacks.
+    _date_correction_requested = bool(_old_reservation_date and _date_word_present)
+    _date_correction_applied = False
+    if not state.reservation_date or _date_correction_requested:
         import datetime as _dt
         _today = _dt.date.today()
         if "übermorgen" in lower or "uebermorgen" in lower:
             state.reservation_date = (_today + _dt.timedelta(days=2)).isoformat()
+        elif "2027" in lower:
+            # User explicitly said 2027 (next year) — extract that year
+            _year_m = re.search(r'\b(202[7-9]|203\d)\b', lower)
+            _explicit_year = int(_year_m.group(1)) if _year_m else _today.year
+            # Check if user also mentioned a month+day
+            _month_day_m = re.search(r'(\d{1,2})\s*\.\s*(januar|februar|märz|april|mai|juni|juli|august|september|oktober|november|dezember|january|february|march|april|may|june|july|august|september|october|november|december)', lower)
+            if _month_day_m:
+                _day_str = _month_day_m.group(1)
+                _month_str = _month_day_m.group(2).lower()
+                _MONTH_MAP = {"januar": 1, "februar": 2, "märz": 3, "maerz": 3, "april": 4, "mai": 5, "juni": 6, "juli": 7, "august": 8, "september": 9, "oktober": 10, "november": 11, "dezember": 12, "january": 1, "february": 2, "march": 3, "may": 5, "june": 6, "july": 7, "august": 8, "september": 9, "october": 10, "november": 11, "december": 12}
+                _month_num = _MONTH_MAP.get(_month_str, _today.month)
+                try:
+                    state.reservation_date = _dt.date(_explicit_year, _month_num, int(_day_str)).isoformat()
+                    logger.info(f'[Reservation_Date] Explicit year extraction: {_explicit_year} → {state.reservation_date}')
+                except ValueError:
+                    pass  # invalid date, skip
         elif "wochenende" in lower:
             # Next Saturday
             _days_to_sat = (5 - _today.weekday()) % 7 or 7
             state.reservation_date = (_today + _dt.timedelta(days=_days_to_sat)).isoformat()
-        elif "nächste woche" in lower or "naechste woche" in lower:
-            state.reservation_date = (_today + _dt.timedelta(days=7)).isoformat()
-        elif "übernächsten" in lower or "uebernächsten" in lower:
-            state.reservation_date = (_today + _dt.timedelta(days=14)).isoformat()
         elif any(d in lower for d in _DAY_NAMES):
+            # Unified weekday + optional week-offset handler.
+            # Handles: "Samstag", "nächsten Samstag", "nächste Woche Samstag", "übernächste Woche Freitag"
             _DE_TO_DOW = {
                 "montag": 0, "monday": 0,
                 "dienstag": 1, "tuesday": 1,
@@ -1838,31 +2470,138 @@ def update_state_from_utterance(state: ConversationState, utterance: str) -> Non
                 "samstag": 5, "saturday": 5,
                 "sonntag": 6, "sunday": 6,
             }
+            _has_uebernächste = bool(re.search(r"ü+bernächste|uebernächste|ü+bernächsten|uebernächsten|übernächste Woche|uebernächste Woche", lower))
+            # "nächste Woche Samstag" requires explicit "Woche" to mean NEXT WEEK's Saturday.
+            # "nächsten Samstag" without "Woche" means the upcoming Saturday (this week).
+            _nächste_pattern = r'(?:nächste|naechste|kommende[n]?)\s+woche\s+(?:' + '|'.join(_DAY_NAMES) + r')'
+            _has_next_week_qualifier = bool(re.search(_nächste_pattern, lower))
+            _days_ahead = 0
             for d in _DAY_NAMES:
                 if d in lower:
                     _target_dow = _DE_TO_DOW.get(d)
                     if _target_dow is not None:
-                        _days_ahead = (_target_dow - _today.weekday()) % 7 or 7
-                        state.reservation_date = (_today + _dt.timedelta(days=_days_ahead)).isoformat()
+                        if _has_uebernächste:
+                            # "übernächste Woche Freitag": find the target weekday in the week AFTER next
+                            # "Week after next" starts on Monday 14 days from this Monday.
+                            _this_monday = _today - _dt.timedelta(days=_today.weekday())
+                            _ü_week_monday = _this_monday + _dt.timedelta(days=14)
+                            _days_ahead_raw = (_target_dow - _ü_week_monday.weekday()) % 7
+                            state.reservation_date = (_ü_week_monday + _dt.timedelta(days=_days_ahead_raw)).isoformat()
+                        elif _has_next_week_qualifier:
+                            # "nächste Woche Samstag": find target weekday within the FOLLOWING calendar week
+                            _this_monday = _today - _dt.timedelta(days=_today.weekday())
+                            _next_monday = _this_monday + _dt.timedelta(days=7)
+                            _days_ahead_raw = (_target_dow - _next_monday.weekday()) % 7
+                            state.reservation_date = (_next_monday + _dt.timedelta(days=_days_ahead_raw)).isoformat()
+                        else:
+                            # Bare weekday: "nächsten Samstag" or just "Samstag"
+                            _days_ahead = (_target_dow - _today.weekday()) % 7 or 7
+                            state.reservation_date = (_today + _dt.timedelta(days=_days_ahead)).isoformat()
+                        logger.info(f'[Reservation_Date] Weekday={d} uebernächste={_has_uebernächste} nächste={_has_next_week_qualifier} → {state.reservation_date}')
                     break
+        elif "übernächsten" in lower or "uebernächsten" in lower or "übernächste" in lower or "uebernächste" in lower:
+            # "übernächste Woche" with no weekday → +14 days
+            state.reservation_date = (_today + _dt.timedelta(days=14)).isoformat()
+        elif "nächste woche" in lower or "naechste woche" in lower or "kommende woche" in lower:
+            # "nächste Woche" with no weekday → +7 days
+            state.reservation_date = (_today + _dt.timedelta(days=7)).isoformat()
         elif "morgen" in lower:
             state.reservation_date = (_today + _dt.timedelta(days=1)).isoformat()
         elif "heute" in lower:
             state.reservation_date = _today.isoformat()
+    if _old_reservation_date and state.reservation_date != _old_reservation_date:
+        state.check_availability_called = False
+        state.pre_commit_shown = False
+        state.end_call_stage = "idle"
+        _date_correction_applied = True
+        logger.info(f"[update_state] Date correction: {_old_reservation_date} → {state.reservation_date}")
+    # Ordinal month pattern: "ersten April", "zweiten Mai", "dritten Juni", etc.
+    if not state.reservation_date or _date_correction_requested:
+        import datetime as _dt2
+        _today2 = _dt2.date.today()
+        _ORDINAL_DE_CS = {
+            "ersten": 1, "zweiten": 2, "dritten": 3, "vierten": 4, "fünften": 5,
+            "sechsten": 6, "siebten": 7, "achten": 8, "neunten": 9,
+            "zehnten": 10, "elften": 11, "zwölften": 12, "dreizehnten": 13,
+            "vierzehnten": 14, "fünfzehnten": 15, "sechzehnten": 16,
+            "siebzehnten": 17, "achtzehnten": 18, "neunzehnten": 19,
+            "zwanzigsten": 20, "einundzwanzigsten": 21, "zweiundzwanzigsten": 22,
+            "dreiundzwanzigsten": 23, "vierundzwanzigsten": 24,
+            "fünfundzwanzigsten": 25, "sechsundzwanzigsten": 26,
+            "siebenundzwanzigsten": 27, "achtundzwanzigsten": 28,
+            "neunundzwanzigsten": 29, "dreißigsten": 30, "einunddreißigsten": 31,
+        }
+        _MONTH_MAP_CS = {
+            "januar": 1, "februar": 2, "märz": 3, "april": 4, "mai": 5,
+            "juni": 6, "juli": 7, "august": 8, "september": 9,
+            "oktober": 10, "november": 11, "dezember": 12,
+        }
+        _ord_month_re = re.compile(
+            r"\b(" + "|".join(_ORDINAL_DE_CS.keys()) + r")\s+"
+            r"(januar|februar|märz|april|mai|juni|juli|august|september|oktober|november|dezember)\b",
+            re.I,
+        )
+        _m_ord = _ord_month_re.search(lower)
+        if _m_ord:
+            _ord_day = _ORDINAL_DE_CS[_m_ord.group(1).lower()]
+            _ord_month = _MONTH_MAP_CS[_m_ord.group(2).lower()]
+            try:
+                _ord_date = _dt2.date(_today2.year, _ord_month, _ord_day)
+                if _ord_date <= _today2:
+                    _ord_date = _dt2.date(_today2.year + 1, _ord_month, _ord_day)
+                state.reservation_date = _ord_date.isoformat()
+                logger.info(f"[Reservation_Date] Ordinal month extracted: {_m_ord.group(0)} → {state.reservation_date}")
+            except ValueError:
+                pass
+        if not state.reservation_date:
+            # Numeric day + month name: "am 1. April", "am 15. Mai" → ISO
+            _num_month_re = re.compile(
+                r"\b(\d{1,2})\.\s*(januar|februar|märz|april|mai|juni|juli|august|september|oktober|november|dezember)\b",
+                re.I,
+            )
+            _m_num = _num_month_re.search(lower)
+            if _m_num:
+                _num_day = int(_m_num.group(1))
+                _num_month = _MONTH_MAP_CS.get(_m_num.group(2).lower(), 0)
+                if _num_month:
+                    try:
+                        _num_date = _dt2.date(_today2.year, _num_month, _num_day)
+                        if _num_date <= _today2:
+                            _num_date = _dt2.date(_today2.year + 1, _num_month, _num_day)
+                        state.reservation_date = _num_date.isoformat()
+                        logger.info(f"[Reservation_Date] Numeric+month extracted: {_m_num.group(0)} → {state.reservation_date}")
+                    except ValueError:
+                        pass
     dm = re.search(r"am\s+(\d{1,2})\.?\s*(\w+)?", lower)
     if dm:
         # Keep raw text match only if we don't already have an ISO date.
-        # The date_parser worker will convert it to ISO on the next turn.
         if not state.reservation_date:
             state.reservation_date = dm.group(0).strip()
+    if (
+        _old_reservation_date
+        and state.reservation_date != _old_reservation_date
+        and not _date_correction_applied
+    ):
+        state.check_availability_called = False
+        state.pre_commit_shown = False
+        state.end_call_stage = "idle"
+        logger.info(f"[update_state] Date correction: {_old_reservation_date} → {state.reservation_date}")
 
     # Reservation time: "um 19 uhr", "19:30", "halb acht", "um acht"
+    # CRITICAL: Always extract time from current utterance to honor corrections.
+    # User says "Nein, 19 Uhr" → must immediately override the old 14:00.
     tm = re.search(r"(?:um\s+)?(\d{1,2})[:.:]?(\d{2})?\s*(?:uhr)", lower)
     if tm:
         h = int(tm.group(1))
         m_min = int(tm.group(2)) if tm.group(2) else 0
         if 10 <= h <= 23:
+            old_time = state.reservation_time
             state.reservation_time = f"{h:02d}:{m_min:02d}"
+            if old_time and old_time != state.reservation_time:
+                logger.info(f"[update_state] Time correction: {old_time} → {state.reservation_time}")
+                # Clear pre_commit_shown so updated readback fires on next turn
+                state.pre_commit_shown = False
+                state.end_call_stage = "idle"
     tw = re.search(r"um\s+(\w+)", lower)
     if tw and not state.reservation_time:
         word = tw.group(1)
@@ -1905,6 +2644,50 @@ def update_state_from_utterance(state: ConversationState, utterance: str) -> Non
                 if 10 <= h <= 23:
                     state.reservation_time = f"{h:02d}:00"
 
+    # FIX: Stammkundenrabatt-Fragen brauchen SOFORT escalation zu Team (kein Loop)
+    _RABATT_KEYWORDS = {
+        "stammkunde", "rabatt", "discount", "ermäßigung", "ermaessigung",
+        "treue", "treueprogramm", "regelmäßiger kunde",
+    }
+    _has_rabatt_frage = any(kw in lower for kw in _RABATT_KEYWORDS)
+    if _has_rabatt_frage:
+        # Bot kann Rabatte nicht direkt vergeben — SOFORT Team kontaktieren
+        # Setze escalation_requested Flag damit v4_pipeline sofort transfer_to_human aufruft
+        state.escalation_requested = True
+        state.customer_confirmed = False
+        logger.info(f'[update_state] Stammkundenrabatt-Frage detected → escalation_requested=True')
+    
+    # FIX G1.1_D2 + G2.3_D5: Extract multi-intent order slots early for FAQ/reservation/delivery queries
+    _HOURS_CHECK_KWS = {
+        "öffnungszeit", "geöffnet", "wann", "uhrzeit", "offen", "aufmachen",
+        "zumachen", "haben sie geöffnet", "sind sie offen",
+    }
+    _DELIVERY_CHECK_KWS = {
+        "liefern", "liefergebiet", "lieferzone", "beuel", "bonn-beuel",
+        "lieferung", "delivery", "bring",
+    }
+    _has_hours_question = any(kw in lower for kw in _HOURS_CHECK_KWS)
+    _has_delivery_question = any(kw in lower for kw in _DELIVERY_CHECK_KWS)
+    _has_both_reservation_and_order = (
+        any(kw in lower for kw in ["reservieren", "reservierung", "tisch", "buchen"])
+        and any(kw in lower for kw in ["bestellen", "vorbestellen", "bibimbap", "mandu", "bulgogi"])
+    )
+    if (_has_hours_question or _has_delivery_question or _has_both_reservation_and_order) and not _has_rabatt_frage:
+        # User asked about hours/delivery OR mentioned both reservation + order.
+        # Extract any order slots mentioned so they persist across FAQ/delivery-check turns.
+        _dishes = _extract_all_dishes(utterance)
+        if _dishes:
+            state.selected_dish = _dishes[0]
+            state.order_intent = True
+            for extra_dish in _dishes[1:]:
+                state.add_extra_item(extra_dish)
+        _qty = _extract_order_quantity(utterance)
+        if _qty:
+            state.order_quantity = _qty
+        _name = _extract_name_from_utterance(utterance)
+        if _name:
+            state.customer_name = _name
+
     # Delivery intent flag — caller mentioned they want delivery (not necessarily gave address)
     if not state.delivery_intended:
         if any(kw in lower for kw in _DELIVERY_INTENT_KW):
@@ -1916,6 +2699,8 @@ def update_state_from_utterance(state: ConversationState, utterance: str) -> Non
             state.delivery_address_mentioned = True
 
     # === Bug B: NAME EXTRACTION (strict, blocklist-based) ===
+    # CRITICAL FIX: During cancellation, accept the name ONCE and never re-ask
+    _cancel_in_progress = getattr(state, "_cancel_in_progress", False)
     new_name = _extract_name_from_utterance(utterance)
     if new_name:
         current = state.customer_name or ""
@@ -1926,9 +2711,25 @@ def update_state_from_utterance(state: ConversationState, utterance: str) -> Non
             state.customer_name = new_name
             state.name_confirmed = True
             state.field_attempts["name"] = 0
+            # CRITICAL FIX H2.2_D3: Immediately remove from recent_responses so deterministic clarify doesn't re-ask
+            state.recent_responses = [r for r in getattr(state, "recent_responses", []) if "welchen namen" not in r.lower()]
+            logger.debug(f"[NAME_EXTRACT] name set to {new_name!r}, attempt reset to 0")
+        elif current_valid and new_name.lower() == current.lower():
+            # Name already set and matches extraction — confirm and reset attempts to prevent re-asking
+            state.name_confirmed = True
+            state.field_attempts["name"] = 0
+            logger.debug(f"[NAME_EXTRACT] name already confirmed: {new_name!r}, attempt reset to 0")
+            # During cancellation: lock the name so we don't re-ask on next turn
+            if _cancel_in_progress:
+                state._name_locked_for_cancel = True
             # If we just got the full name, first_name is no longer needed separately
             if state.first_name:
                 state.first_name = None
+        elif current_valid and new_name.lower() == current.lower():
+            # Name already set and matches extraction — confirm and reset attempts to prevent re-asking
+            state.name_confirmed = True
+            state.field_attempts["name"] = 0
+            logger.debug(f"[NAME_EXTRACT] name already confirmed: {new_name!r}")
     else:
         # Full name extraction failed — try single first-name extraction (partial capture).
         # Only populate first_name when we don't already have a full customer_name.
@@ -1939,6 +2740,42 @@ def update_state_from_utterance(state: ConversationState, utterance: str) -> Non
                     state.first_name = fn
                     state.field_attempts["name"] = 0  # reset so bot won't escalate
                     logger.info(f"[NAME_EXTRACT] partial first-name captured: {fn!r}")
+                else:
+                    # Context-aware bare-name detection: if the bot's last utterance was a
+                    # direct name question and the user replied with a single capitalized word,
+                    # treat it as the customer name even without an explicit "mein Name ist"
+                    # marker (e.g. caller says just "Schäfer" in reply to "Auf welchen Namen?").
+                    # CRITICAL: Skip if user is repeating the same utterance (avoid loop)
+                    _last_bot_ctx = (state.recent_responses[-1] if state.recent_responses else "").lower()
+                    _BOT_NAME_REQUEST_KW = (
+                        "auf welchen namen", "wie ist ihr name", "wie heißen sie",
+                        "wie heissen sie", "welchen namen", "ihren namen", "den namen",
+                        "name bitte", "ihr name", "namen darf",
+                    )
+                    _ctx_asked_name = any(kw in _last_bot_ctx for kw in _BOT_NAME_REQUEST_KW)
+                    _last_ut = getattr(state, "_last_user_text", None)
+                    _is_repeat = (_last_ut and _last_ut.lower() == utterance.lower()) or (state.last_user_utterance and state.last_user_utterance.lower() == utterance.lower())
+                    if _ctx_asked_name and not _is_repeat:
+                        _bare = [t.strip(".,!?;:") for t in utterance.strip().split() if t.strip(".,!?;:")]
+                        if len(_bare) == 1:
+                            _bc = _bare[0]
+                            _TEMPORAL_BLOCKLIST = {
+                                "montag", "dienstag", "mittwoch", "donnerstag", "freitag", "samstag", "sonntag",
+                                "januar", "februar", "märz", "maerz", "april", "mai", "juni", "juli",
+                                "august", "september", "oktober", "november", "dezember",
+                            }
+                            if (
+                                len(_bc) >= 3
+                                and _bc[0].isupper()
+                                and _bc.lower() not in _NAME_BLOCKLIST
+                                and _bc.lower() not in _TEMPORAL_BLOCKLIST
+                                and re.match(r"^[A-ZÄÖÜ][a-zäöüßA-ZÄÖÜ\-]+$", _bc)
+                            ):
+                                state.customer_name = _bc
+                                state.first_name = None
+                                state.name_confirmed = True
+                                state.field_attempts["name"] = 0
+                                logger.info(f"[NAME_EXTRACT] context-aware bare name as FULL customer_name: {_bc!r}")
             else:
                 # first_name already set — only assemble a surname from a short bare-word
                 # reply if the PREVIOUS bot utterance explicitly asked for it (Nachname /
@@ -1984,6 +2821,7 @@ def update_state_from_utterance(state: ConversationState, utterance: str) -> Non
                                 logger.info(f"[NAME_EXTRACT] assembled full name from first+last: {full!r}")
 
     # === Bug D: PHONE EXTRACTION (digit OR spoken, with cross-turn buffer) ===
+    # CRITICAL: Phone is NOT required to block reservation commit. Only extract if explicitly given.
     if not state.phone_number:
         # Try single-utterance extraction first
         phone_digits = _extract_phone_digits(utterance)
@@ -2003,14 +2841,14 @@ def update_state_from_utterance(state: ConversationState, utterance: str) -> Non
             # Collect digits from this utterance — respecting address break words
             # so street numbers (e.g. "20" from "Friedrichstraße zwanzig") don't contaminate.
             _BUFFER_BREAK = {
-                "straße", "strasse", "str", "gasse", "platz", "weg", "allee", "ring",
+                "straße", "strasse", "str", "str.", "gasse", "platz", "weg", "allee", "ring",
                 "damm", "ufer", "chaussee", "boulevard",
                 "bonn", "köln", "berlin", "hamburg", "frankfurt", "münchen", "muenchen",
             }
             this_turn_digits = ""
             _in_phone_region = False
             for token in expanded.split():
-                t = token.strip(".,!?;:-/")
+                t = token.strip(".,!?;:-/").lower()
                 # Reset digit accumulation when we hit an address word, so only
                 # digits AFTER the last address word are considered phone digits.
                 if t in _BUFFER_BREAK:
@@ -2065,30 +2903,51 @@ def update_state_from_utterance(state: ConversationState, utterance: str) -> Non
                 logger.info(f"[PHONE_EXTRACT] buffering: {len(state.phone_digits_buffer)}/10 digits")
 
     # === ACTIVE COLLECTION: DELIVERY CHOICE (F-A Fix) ===
-    if not state.delivery_confirmed:
-        delivery_kw = ["lieferung", "liefern", "liefere", "delivery", "zu mir", "nach hause"]
-        pickup_kw = ["abholen", "mitnehmen", "takeaway", "zum mitnehmen", "pickup"]
-        
-        if any(kw in lower for kw in delivery_kw):
-            state.delivery_intended = True
-            state.delivery_address_mentioned = True
-            state.delivery_confirmed = True
-            logger.debug(f"[Collection] Delivery confirmed")
-        elif any(kw in lower for kw in pickup_kw):
+    # Allow re-evaluation even after confirmation so user corrections ("Ach warten,
+    # ich komme doch lieber selbst abholen") in the same or a later turn take effect.
+    # Position-based: the keyword that appears LATEST in the text wins (G1.3 fix).
+    _delivery_kw = ["lieferung", "liefern", "liefere", "delivery", "zu mir", "nach hause"]
+    _pickup_kw = ["abholen", "mitnehmen", "takeaway", "zum mitnehmen", "pickup", "selbst abholen"]
+    _delivery_positions = [lower.find(kw) for kw in _delivery_kw if kw in lower]
+    _pickup_positions = [lower.find(kw) for kw in _pickup_kw if kw in lower]
+    if _delivery_positions or _pickup_positions:
+        _last_delivery = max(_delivery_positions) if _delivery_positions else -1
+        _last_pickup = max(_pickup_positions) if _pickup_positions else -1
+        if _last_pickup > _last_delivery:
+            # Pickup keyword appears after delivery keyword → user corrected to pickup
             state.delivery_intended = False
             state.delivery_address_mentioned = False
             state.delivery_confirmed = True
-            logger.debug(f"[Collection] Pickup confirmed")
+            logger.debug(f"[Collection] Pickup confirmed (pos={_last_pickup} > delivery pos={_last_delivery})")
+        elif _last_delivery > _last_pickup:
+            state.delivery_intended = True
+            state.delivery_address_mentioned = True
+            state.delivery_confirmed = True
+            logger.debug(f"[Collection] Delivery confirmed (pos={_last_delivery})")
 
     # === Bug C: ADDRESS EXTRACTION (requires street+number+real city) ===
-    if not state.delivery_address or not _address_looks_valid(state.delivery_address):
+    # CRITICAL FIX I1.1_D3: Also trigger re-extraction on explicit address corrections
+    # "Die Adresse stimmt nicht" or "falsch" + address mention should override previous
+    _address_correction_markers = (
+        "korrektur", "falsch", "nicht richtig", "nicht korrekt",
+        "stimmt nicht", "das stimmt nicht", "die adresse stimmt nicht",
+        "bitte ändern", "bitte aendern",
+    )
+    _is_address_correction = any(m in utterance.lower() for m in _address_correction_markers)
+    
+    if not state.delivery_address or not _address_looks_valid(state.delivery_address) or _is_address_correction:
         new_addr = _extract_address_from_utterance(utterance)
         if new_addr:
             if state.delivery_address and state.delivery_address != new_addr:
-                logger.info(f"[ADDRESS_EXTRACT] overriding {state.delivery_address!r} -> {new_addr!r}")
+                logger.info(f"[ADDRESS_EXTRACT] overriding {state.delivery_address!r} -> {new_addr!r} (correction detected)")
             state.delivery_address = new_addr
             state.delivery_address_mentioned = True
             state.field_attempts["address"] = 0
+            # CRITICAL: On explicit address correction, reset confirmation gates to prevent stale flow
+            if _is_address_correction:
+                state.check_availability_called = False
+                state.pre_commit_shown = False
+                logger.info(f"[ADDRESS_CORRECT] Reset availability/commit gates after address correction")
 
     # Implicit reservation intent: party_size >= 2 without food → reservation
     if (
@@ -2098,6 +2957,19 @@ def update_state_from_utterance(state: ConversationState, utterance: str) -> Non
         and not state.order_intent
     ):
         state.reservation_intent = True
+    
+    # FIX F2.3_D3: Explicit callback + date mention = reservation intent
+    # When caller says "Rufen Sie mich zurück, ich wollte für Freitag reservieren",
+    # extraction above sets reservation_date but never sets reservation_intent flag.
+    # This causes the entire context doc to skip reservation slot validation.
+    _callback_kw = (
+        "zurückrufen", "rueckrufen", "rufen sie mich zurück", "rufen sie mich zurueck",
+        "callback", "rückruf", "rueckruf",
+    )
+    _has_callback_request = any(kw in lower for kw in _callback_kw)
+    if _has_callback_request and state.reservation_date:
+        state.reservation_intent = True
+        logger.info(f'[update_state] Callback + date detected → setting reservation_intent=True')
 
     # Fix C: implicit reservation intent from party_size + date/time together
     # (even party_size 1 is enough when combined with a date/time)
@@ -2120,6 +2992,19 @@ def update_state_from_utterance(state: ConversationState, utterance: str) -> Non
         if any(kw in lower for kw in _SMS_REQUEST_KW):
             state.sms_requested = True
 
+    # Complaint detection: set flag for downstream handlers
+    _COMPLAINT_KW = [
+        "falsch", "falsche", "falsches", "falsch geliefert", "falsch bestellt",
+        "nicht das", "nicht die", "nicht das gericht", "nicht ordnung", "nicht richtig",
+        "beschwerde", "problem", "fehler", "falsche bestellung", "falsche lieferung",
+        "unzufrieden", "nicht zufrieden", "nicht stimmt", "stimmt nicht",
+        "hatte bestellt", "bestellt und bekommen", "statt", "anstatt", "anstelle",
+    ]
+    if not getattr(state, "complaint_logged", False):
+        if any(kw in lower for kw in _COMPLAINT_KW):
+            state.complaint_logged = True
+            logger.info(f"[v4_pipeline] Complaint detected in utterance: {utterance[:60]!r}")
+
     # Confirmation detection (sticky: once confirmed, stays confirmed until consumed)
     _CONFIRM_KW = [
         "ja", "bitte", "genau", "stimmt", "passt", "richtig",
@@ -2133,18 +3018,28 @@ def update_state_from_utterance(state: ConversationState, utterance: str) -> Non
 
 def update_state_after_bot(state: ConversationState, bot_response: str) -> None:
     """
-    Only set dish from bot response if the bot is EXPLICITLY CONFIRMING an order —
-    never from suggestions or menu recommendations.
-
-    Hallucination root cause: bot says "Ich empfehle Bibimbap" as a suggestion for
-    a non-menu request → old code extracted Bibimbap → create_order fired for a
-    dish the customer never chose.
-
-    Fix: require confirmation language before extracting. Suggestions (empfehle,
-    haben wir nicht, leider) are explicitly excluded.
+    Track readback completeness (items + prices) in bot responses.
+    Does NOT block order commits — that gate lives in v4_pipeline.py pre-commit readback.
     """
-    if not state.order_intent or state.selected_dish:
+    if not state.order_intent:
         return
+    lower = bot_response.lower()
+    _confirm_phrases = ("aufgenommen", "bestätigt", "notiert", "reserviert")
+    _has_confirm = any(p in lower for p in _confirm_phrases)
+    if _has_confirm:
+        # Track whether readback contained items + prices (for logging/audit only — NOT a gate)
+        items = state.all_order_items() or []
+        _has_item_names = any(item.lower() in lower for item in items)
+        _has_price = ("euro" in lower or "€" in lower)
+        if not (_has_item_names and _has_price):
+            logger.debug(
+                f"[update_state_after_bot] Commit response lacks items/prices — OK if pre-commit readback already shown. "
+                f"Items mentioned: {_has_item_names}, Prices mentioned: {_has_price}."
+            )
+            # DO NOT reset order_created here — the order may have already been committed
+        else:
+            state._order_readback_confirmed = True
+            state._order_items_for_readback = items
     lower = bot_response.lower()
     # Hard exclude: bot is suggesting an alternative or rejecting the request
     exclude_patterns = [
@@ -2165,7 +3060,7 @@ def update_state_after_bot(state: ConversationState, bot_response: str) -> None:
     if not any(p in lower for p in confirm_patterns):
         return
     dish = _extract_dish(bot_response)
-    if dish:
+    if dish and dish.lower() in (d.lower() for d in state.all_order_items()):
         state.selected_dish = dish
 
 

@@ -1125,8 +1125,8 @@ class BrowserBrainService(FrameProcessor):
             # Use fixed greeting from tenant config (doboo.yaml)
             greeting_text = None
             try:
-                from server.core.tenant_config import TenantRegistry
-                registry = TenantRegistry()
+                from server.core.tenant_config import get_tenant_registry
+                registry = get_tenant_registry()
                 tenant = registry.load_tenant(self.tenant_id or "doboo")
                 if tenant and hasattr(tenant, 'greeting_line') and tenant.greeting_line:
                     greeting_text = tenant.greeting_line

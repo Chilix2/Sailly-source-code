@@ -27,7 +27,12 @@ logger = logging.getLogger(__name__)
 # ── Restaurant knowledge (loaded once from doboo.yaml) ────────────────────────
 @functools.lru_cache(maxsize=1)
 def _load_doboo_knowledge() -> dict:
-    """Load canonical Doboo restaurant facts for caller-bot verification."""
+    """Load canonical Doboo restaurant facts for caller-bot verification.
+
+    Loads from BOTH doboo.yaml (menu.categories for simplified view) AND from
+    the actual tenant database (via server.core.tenant_config) to get all menu
+    variants. This ensures the caller bot's knowledge matches what get_menu returns.
+    """
     try:
         import yaml
     except ImportError:
@@ -36,27 +41,48 @@ def _load_doboo_knowledge() -> dict:
         path = Path(__file__).parents[2] / "configs" / "tenants" / "doboo.yaml"
         raw = yaml.safe_load(path.read_text())
         hours = raw.get("opening_hours", {})
+
+        # Build menu from ACTUAL tool data (same source as get_menu tool)
         menu_items = []
+        seen_names: set = set()
+        try:
+            import asyncio
+            import sys
+            sys.path.insert(0, str(Path(__file__).parents[2]))
+            from server.core.tenant_config import get_tenant_registry
+            registry = get_tenant_registry()
+            tcfg = registry.load_tenant("doboo")
+            if tcfg and tcfg.tool_data and tcfg.tool_data.menu:
+                for cat_name, cat_items in tcfg.tool_data.menu.items():
+                    if isinstance(cat_items, list):
+                        for item in cat_items:
+                            if isinstance(item, dict):
+                                name = item.get("name", "")
+                                price = item.get("price")
+                                if name and price is not None and name not in seen_names:
+                                    seen_names.add(name)
+                                    menu_items.append(f"{name} {price:.2f}€")
+        except Exception as _menu_err:
+            logger.debug("[doboo_kb] actual menu load failed: %s", _menu_err)
+
+        # Always merge YAML menu.categories as well. The tenant tool-data cache
+        # can lag behind scenario-specific menu additions, and the caller bot
+        # must share the same visible menu as validation scenarios.
         for cat in raw.get("menu", {}).get("categories", []):
             for item in cat.get("items", []):
                 name = item.get("name", "")
                 price = item.get("price", 0)
-                if name and price:
+                if name and price and name not in seen_names:
+                    seen_names.add(name)
                     menu_items.append(f"{name} {price:.2f}€")
-        # Deduplicate while preserving order
-        seen: set = set()
-        unique_menu: list = []
-        for m in menu_items:
-            if m not in seen:
-                seen.add(m)
-                unique_menu.append(m)
+
         return {
             "address":      raw.get("location", {}).get("address", "Friedrich-Ebert-Allee 69, 53113 Bonn"),
             "address_note": raw.get("location", {}).get("address_secondary", "Eingang Adalbert-Stifter-Straße"),
             "parking":      raw.get("location", {}).get("parking", "Parkhaus Friedrichstraße 100m"),
             "hours":        hours.get("formatted", "Mo–Do 11:30–21:30 | Fr 11:30–14:00 und 18:00–21:30 | Sa 18:00–21:30 | So geschlossen"),
             "hours_raw":    {k: v for k, v in hours.items() if k != "formatted"},
-            "menu_summary": ", ".join(unique_menu[:14]),
+            "menu_summary": ", ".join(menu_items),
             "max_party":    raw.get("reservation", {}).get("max_party_size", 20),
             "phone":        raw.get("practice", {}).get("phone", ""),
         }
@@ -68,7 +94,7 @@ def _load_doboo_knowledge() -> dict:
             "parking":      "Parkhaus Friedrichstraße 100m entfernt",
             "hours":        "Mo–Do 11:30–21:30 | Fr 11:30–14:00 und 18:00–21:30 | Sa 18:00–21:30 | So geschlossen",
             "hours_raw":    {"saturday": "18:00–21:30", "sunday": "geschlossen"},
-            "menu_summary": "Bibimbap 14.90€, Bulgogi 16.90€, Kimchi Jjigae 13.90€, Tteokbokki 10.90€, Japchae 13.90€, Mandu 7.90€",
+            "menu_summary": "Bibimbap 14.90€, Bulgogi 16.90€, Kimchi Jjigae 13.90€, Kimchi 4.90€, Tteokbokki 10.90€, Japchae 13.90€, Mandu 7.90€, Tofu Bibimbap 13.90€, Cola 3.00€",
             "max_party":    20,
             "phone":        "",
         }
@@ -163,15 +189,24 @@ class OpenAICallerBot:
 
         # Prefer Grok (xAI) — same OpenAI SDK, just different base_url + key
         xai_key = os.environ.get("XAI_API_KEY")
-        if xai_key:
+        openai_fallback_key = openai_api_key or os.environ.get("OPENAI_API_KEY")
+        force_openai = os.environ.get("CALLER_FORCE_OPENAI", "0") == "1"
+        if xai_key and not force_openai:
             self.client = AsyncOpenAI(api_key=xai_key, base_url="https://api.x.ai/v1")
             self.model = "grok-3-mini"
+            # Store OpenAI fallback client for 403 recovery
+            self._openai_fallback_client = AsyncOpenAI(api_key=openai_fallback_key) if openai_fallback_key else None
+            self._openai_fallback_model = os.environ.get("OPENAI_CALLER_MODEL", "gpt-4o-mini")
+            self._xai_exhausted = False
         else:
-            fallback_key = openai_api_key or os.environ.get("OPENAI_API_KEY")
+            fallback_key = openai_fallback_key
             if not fallback_key:
                 raise RuntimeError("Neither XAI_API_KEY nor OPENAI_API_KEY is set")
             self.client = AsyncOpenAI(api_key=fallback_key)
             self.model = os.environ.get("OPENAI_CALLER_MODEL", "gpt-4o-mini")
+            self._openai_fallback_client = None
+            self._openai_fallback_model = self.model
+            self._xai_exhausted = True
             logger.warning("[caller_bot] XAI_API_KEY not set — falling back to %s", self.model)
 
         logger.info("[caller_bot] using model=%s", self.model)
@@ -214,23 +249,27 @@ class OpenAICallerBot:
         # Build explicit slot-answer block from required_data so the caller bot
         # always provides the exact value Sailly's slot extractor can parse.
         required = self.scenario.required_data or {}
-        slot_label_map = {
-            "party_size":        "Personenzahl",
-            "reservation_date":  "Datum",
-            "reservation_time":  "Uhrzeit",
-            "customer_name":     "Name",
-            "phone_number":      "Telefonnummer",
-            "order_items":       "Bestellung",
-        }
+        slot_groups = [
+            ("Personenzahl", ["party_size"]),
+            ("Datum", ["reservation_date"]),
+            ("Uhrzeit", ["reservation_time"]),
+            ("Name", ["customer_name", "name"]),
+            ("Telefonnummer", ["phone_number"]),
+            ("Lieferadresse", ["delivery_address", "address"]),
+            ("Bestellung", ["order_items", "items", "dish"]),
+            ("Bestellart", ["order_type"]),
+        ]
         answer_lines = []
-        for key, label in slot_label_map.items():
-            val = required.get(key)
+        for label, keys in slot_groups:
+            found_key = next((key for key in keys if required.get(key) not in (None, "")), None)
+            if not found_key:
+                continue
+            val = required.get(found_key)
             if val is not None and val != "":
-                # For phone_number, use the natural German format
-                if key == "phone_number" and caller_phone_natural:
-                    val = caller_phone_natural
-                answer_lines.append(f"  {label:<18} {val}")
-            if val is not None and val != "":
+                # Keep required_data authoritative. Only normalize +49 values
+                # supplied by required_data itself into a German local form.
+                if found_key == "phone_number" and isinstance(val, str) and val.startswith("+49"):
+                    val = "0" + val[3:].replace(" ", "")
                 answer_lines.append(f"  {label:<18} {val}")
         slot_answer_block = ""
         if answer_lines:
@@ -360,8 +399,14 @@ class OpenAICallerBot:
         messages = self._build_messages(final_user_prompt=trigger)
 
         try:
-            response = await self.client.chat.completions.create(
-                model=self.model,
+            _client = self.client
+            _model = self.model
+            # Auto-switch to OpenAI fallback if XAI is exhausted
+            if getattr(self, '_xai_exhausted', False) and self._openai_fallback_client:
+                _client = self._openai_fallback_client
+                _model = self._openai_fallback_model
+            response = await _client.chat.completions.create(
+                model=_model,
                 messages=messages,
                 max_tokens=200,
                 temperature=0.7,
@@ -384,7 +429,34 @@ class OpenAICallerBot:
             await self._check_goal_achieved()
             return next_turn
         except Exception as e:
-            logger.error("[caller_bot] next_turn failed: %s", e)
+            err_str = str(e)
+            # Auto-switch to OpenAI fallback on XAI 403 (credits exhausted)
+            if ("403" in err_str or "spending limit" in err_str) and \
+               not getattr(self, '_xai_exhausted', False) and \
+               self._openai_fallback_client:
+                logger.warning("[caller_bot] XAI 403 — switching to OpenAI fallback (%s)", self._openai_fallback_model)
+                self._xai_exhausted = True
+                self.client = self._openai_fallback_client
+                self.model = self._openai_fallback_model
+                try:
+                    response = await self._openai_fallback_client.chat.completions.create(
+                        model=self._openai_fallback_model,
+                        messages=messages,
+                        max_tokens=200,
+                        temperature=0.7,
+                    )
+                    next_turn = response.choices[0].message.content.strip()
+                    for flag in pre_flags:
+                        if flag.split(" — ")[0].lower() not in next_turn.lower():
+                            next_turn = next_turn.rstrip() + " " + flag
+                    self.turns.append({"role": "user", "content": next_turn})
+                    self._prev_bot_text = agent_response
+                    await self._check_goal_achieved()
+                    return next_turn
+                except Exception as e2:
+                    logger.error("[caller_bot] OpenAI fallback also failed: %s", e2)
+            else:
+                logger.error("[caller_bot] next_turn failed: %s", e)
             return None
 
     def _programmatic_checks(self, agent_response: str) -> List[str]:
@@ -439,8 +511,8 @@ class OpenAICallerBot:
         # ── 3. Order readback check ───────────────────────────────────
         order_confirm_kw = {"bestellung aufgenommen", "bestellt", "bestellung ist"}
         has_order_confirm = any(kw in text_lo for kw in order_confirm_kw)
-        # Readback: at least one price (€) or dish name must appear in the same sentence
-        has_items_listed = bool(re.search(r"\d+[,\.]\d{2}\s*€", agent_response))
+        # Readback: at least one price must appear — accept both "€" symbol and "Euro" word
+        has_items_listed = bool(re.search(r"\d+[,\.]\d{2}\s*(?:€|euro)\b", agent_response, re.IGNORECASE))
         if has_order_confirm and not has_items_listed:
             flags.append(
                 "[Achtung Sailly: KEIN_READBACK — Bestellung bestätigt ohne Artikel oder Preise vorzulesen]"
@@ -463,6 +535,27 @@ class OpenAICallerBot:
             f"{'Anrufer' if t['role'] == 'user' else 'Sailly'}: {t['content']}"
             for t in self.turns[-12:]
         )
+        conversation_lo = conversation.lower()
+        expected_tools = set(self.scenario.expected_tools or [])
+        if expected_tools.intersection({"create_order", "create_reservation"}):
+            # A pre-commit readback ("Stimmt das so?") is not task completion.
+            # The caller must continue until Sailly actually commits the order or
+            # reservation, otherwise commit tools are never exercised.
+            has_commit_text = any(
+                phrase in conversation_lo
+                for phrase in (
+                    "wurde aufgenommen",
+                    "bestellung wurde",
+                    "habe die bestellung",
+                    "ist reserviert",
+                    "habe reserviert",
+                    "reservierung wurde",
+                    "verbindlich reserviert",
+                    "auf wiederhören",
+                )
+            )
+            if not has_commit_text:
+                return
         judge_prompt = (
             f"{date_ctx}\n\n"
             f"Restaurant-Fakten: Adresse: {kb['address']} | Öffnungszeiten: {kb['hours']}\n\n"
@@ -648,13 +741,26 @@ async def run_one_scenario(
                 tools_fired = data.get("tools_fired", [])
                 tools_called_set.update(tools_fired)
                 if bot_text or tools_fired:
+                    previous_bot = last_bot
                     turns.append({
                         "user": "",
                         "bot": bot_text,
                         "tools": tools_fired,
                     })
-                    last_bot = bot_text
                     logger.debug(f"[text_run] scenario={scenario.id} bot: {bot_text!r} tools={tools_fired}")
+
+                    bot_lo = bot_text.lower()
+                    if re.search(r"\b(fehler aufgetreten|technisches problem|bitte rufen sie uns direkt an|versuchen sie es gleich nochmals)\b", bot_lo):
+                        result.failure_tags.append("bot_error_message")
+                    if previous_bot and bot_text and bot_text.strip() == previous_bot.strip():
+                        result.failure_tags.append("bot_loop_exact_repeat")
+                    elif (
+                        previous_bot and bot_text and len(bot_text.strip()) >= 40
+                        and bot_text.strip()[:40] == previous_bot.strip()[:40]
+                        and "stimmt das so" not in bot_lo
+                    ):
+                        result.failure_tags.append("bot_loop_near_repeat")
+                    last_bot = bot_text
 
                     # Stop if the server flagged end_call / should_end
                     if data.get("should_end") or "end_call" in tools_fired:
@@ -691,13 +797,72 @@ async def run_one_scenario(
                 break
 
         result.turns = turns
-        result.tools_called = sorted(tools_called_set)
         result.duration_s = time.monotonic() - t_start
         result.call_sid = call_sid
+
+        # Postgres is the authoritative evidence store. The server may close the
+        # websocket immediately after a final commit message, before the client
+        # observes the last bot_text/tools_fired payload. Reconcile from
+        # google_tool_calls/google_transcripts so the harness does not undercount
+        # successful commits.
+        postgres_transcript_text = ""
+        db_url = os.environ.get("DATABASE_URL")
+        if db_url and call_sid:
+            try:
+                await asyncio.sleep(0.25)
+                import asyncpg
+                conn = await asyncpg.connect(db_url)
+                tool_rows = await conn.fetch(
+                    """
+                    SELECT tool_name, success
+                    FROM google_tool_calls
+                    WHERE call_sid = $1
+                    ORDER BY turn_number ASC
+                    """,
+                    call_sid,
+                )
+                for row in tool_rows:
+                    if row["success"] and row["tool_name"]:
+                        tools_called_set.add(row["tool_name"])
+                transcript_rows = await conn.fetch(
+                    """
+                    SELECT role, content
+                    FROM google_transcripts
+                    WHERE call_sid = $1
+                    ORDER BY turn_number ASC
+                    """,
+                    call_sid,
+                )
+                postgres_transcript_text = " ".join(str(row["content"]) for row in transcript_rows)
+                await conn.close()
+            except Exception as _pg_reconcile_err:
+                logger.debug("[text_run] postgres reconcile failed for %s: %s", call_sid, _pg_reconcile_err)
+
+        result.tools_called = sorted(tools_called_set)
 
         # Determine pass/fail
         result.tools_expected = scenario.expected_tools or []
         result.tools_missing = [t for t in result.tools_expected if t not in result.tools_called]
+
+        transcript_text = (
+            " ".join(str(t.get("bot", "")) for t in turns)
+            + " "
+            + postgres_transcript_text
+        ).lower()
+        if "create_order" in result.tools_expected:
+            order_committed = any(
+                phrase in transcript_text
+                for phrase in ("bestellung wurde", "wurde aufgenommen", "habe die bestellung")
+            ) or bool(re.search(r"\b(ich habe|wir haben).{0,160}\bbestellung\b.{0,80}\b(aufgenommen|bestätigt)\b", transcript_text))
+            if not order_committed:
+                result.failure_tags.append("commit_missing:create_order")
+        if "create_reservation" in result.tools_expected:
+            reservation_committed = any(
+                phrase in transcript_text
+                for phrase in ("ist reserviert", "habe reserviert", "reservierung wurde", "verbindlich reserviert")
+            ) or bool(re.search(r"\b(ich habe|wir haben).{0,160}\breserviert\b", transcript_text))
+            if not reservation_committed:
+                result.failure_tags.append("commit_missing:create_reservation")
 
         # Check for [Achtung Sailly:] markers in the caller bot's turn history
         # (local `turns` dict never stores user text — use caller_bot.turns instead)

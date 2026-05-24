@@ -58,8 +58,8 @@ def get_keyterms_for_tenant(tenant_id: str) -> List[str]:
 
     terms: List[str] = []
     try:
-        from server.core.tenant_config import TenantRegistry
-        tc = TenantRegistry().load_tenant(tenant_id)
+        from server.core.tenant_config import get_tenant_registry
+        tc = get_tenant_registry().load_tenant(tenant_id)
 
         # Primary: menu item names from structured menu data
         menu_names = _extract_menu_names(tc)

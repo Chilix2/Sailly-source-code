@@ -14,6 +14,11 @@ from pathlib import Path
 
 from server.builder.graph_introspect import build_graph, list_tenants
 from server.builder.diagram_generator import build_all_diagrams
+from server.builder.scenario_promotion import (
+    create_run_record,
+    promotion_gates,
+    scenario_requirements,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -137,6 +142,95 @@ async def get_graph(tenant: Optional[str] = Query(None)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/graph/preview")
+async def get_graph_preview(
+    tenant: Optional[str] = Query(None),
+    industry: Optional[str] = Query(None),
+    capability: Optional[list[str]] = Query(None),
+):
+    """Return a read-only hydrated graph preview for Builder UI consumers.
+
+    The live runtime remains code/YAML driven; this endpoint only composes the
+    current introspection graph, config-graph export, and selected capability
+    pack metadata into one read payload.
+    """
+    try:
+        from server.builder.capabilities import load_industry_pack, scenario_templates_response
+        from server.builder.graph_foundation.exporter import export_v4_graph_dict
+
+        graph = build_graph(tenant_id=tenant)
+        config_graph = export_v4_graph_dict(tenant_id=tenant, introspection=graph)
+
+        selected_capabilities = []
+        scenario_templates: list[dict] = []
+        if industry:
+            pack = load_industry_pack(industry)
+            capability_filter = set(capability or [])
+            for cap in pack.capabilities:
+                if capability_filter and cap.id not in capability_filter:
+                    continue
+                selected_capabilities.append(cap.model_dump() if hasattr(cap, "model_dump") else cap.dict())
+            all_templates = scenario_templates_response(industry)["templates"]
+            scenario_templates = [
+                template
+                for template in all_templates
+                if not capability_filter or template.get("capability") in capability_filter
+            ]
+
+        return {
+            "tenant": graph.get("tenant"),
+            "industry": industry,
+            "selected_capability_ids": capability or [],
+            "capabilities": selected_capabilities,
+            "scenario_templates": scenario_templates,
+            "graph": graph,
+            "config_graph": config_graph,
+            "metadata": {
+                "read_only": True,
+                "runtime_behavior": "unchanged",
+                "source": "builder graph introspection + industry capability packs",
+            },
+        }
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.exception(f"Error building graph preview for tenant {tenant}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/graph/validate")
+async def validate_graph_draft(body: dict):
+    """Validate a draft config graph without publishing it to runtime."""
+    try:
+        from server.builder.graph_foundation.hydrator import hydrate_graph_config
+        from server.builder.graph_foundation.schemas import ConfigGraphDocument
+        from server.builder.graph_foundation.validation import validate_graph_document
+
+        if "graph" in body and isinstance(body["graph"], dict):
+            body = body["graph"]
+        document = ConfigGraphDocument.model_validate(body) if hasattr(ConfigGraphDocument, "model_validate") else ConfigGraphDocument(**body)
+        errors = validate_graph_document(document)
+        plan = hydrate_graph_config(document.to_dict()) if not errors else None
+        return {
+            "ok": not errors,
+            "errors": errors,
+            "summary": None
+            if plan is None
+            else {
+                "tenant": plan.tenant,
+                "profiles": len(plan.profile_ids),
+                "workers": len(plan.worker_ids),
+                "tools": len(plan.tool_ids),
+                "guards": len(plan.guard_ids),
+            },
+            "publish_allowed": False,
+            "runtime_behavior": "unchanged",
+        }
+    except Exception as e:
+        logger.exception(f"Error validating graph draft: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @router.get("/providers")
 async def get_providers(kind: Optional[str] = Query(None)):
     """Return supported STT/LLM/TTS provider catalogs and runtime status."""
@@ -153,6 +247,33 @@ async def get_providers(kind: Optional[str] = Query(None)):
         raise
     except Exception as e:
         logger.exception(f"Error listing providers: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/lab/readiness")
+async def get_lab_readiness(tenant: str = Query("builder_lab_doboo")):
+    """Return Builder Lab safety checks for draft execution."""
+    try:
+        from server.builder.lab_readiness import builder_lab_readiness
+
+        return builder_lab_readiness(tenant)
+    except Exception as e:
+        logger.exception(f"Error building lab readiness: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/lab/channels")
+async def get_lab_channels(
+    tenant: str = Query("builder_lab_doboo"),
+    draft: Optional[str] = Query(None),
+):
+    """Return isolated lab channel names for a draft test call."""
+    try:
+        from server.builder.lab_readiness import lab_channel_plan
+
+        return lab_channel_plan(tenant_id=tenant, draft_id=draft)
+    except Exception as e:
+        logger.exception(f"Error building lab channel plan: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -215,6 +336,23 @@ async def get_capabilities(industry: Optional[str] = Query(None)):
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         logger.exception(f"Error listing capabilities: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/scenario-templates")
+async def get_scenario_templates(
+    industry: Optional[str] = Query(None),
+    capability: Optional[str] = Query(None),
+):
+    """Return read-only scenario templates declared by industry capability packs."""
+    try:
+        from server.builder.capabilities import scenario_templates_response
+
+        return scenario_templates_response(industry, capability)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.exception(f"Error listing scenario templates: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -598,6 +736,20 @@ async def get_scenario(scenario_id: str):
     raise HTTPException(status_code=404, detail=f"Scenario not found: {scenario_id}")
 
 
+@router.get("/scenarios/{scenario_id}/requirements")
+async def get_scenario_requirements(scenario_id: str):
+    """Return capability requirements and promotion gates for one scenario."""
+    for scenario in _all_scenarios():
+        if scenario.get("id") == scenario_id:
+            requirements = scenario_requirements(scenario)
+            return {
+                "scenario_id": scenario_id,
+                "requirements": requirements.to_dict(),
+                "promotion_gates": promotion_gates(scenario),
+            }
+    raise HTTPException(status_code=404, detail=f"Scenario not found: {scenario_id}")
+
+
 @router.post("/scenarios")
 async def create_scenario(body: dict):
     """Create a new canonical scenario YAML file."""
@@ -665,18 +817,7 @@ async def run_scenario(scenario_id: str):
     if not scenario:
         raise HTTPException(status_code=404, detail=f"Scenario not found: {scenario_id}")
     run_id = f"run_{uuid.uuid4().hex[:10]}"
-    SCENARIO_RUNS[run_id] = {
-        "run_id": run_id,
-        "scenario_id": scenario_id,
-        "status": "queued",
-        "created_at": datetime.utcnow().isoformat() + "Z",
-        "tenant_id": scenario.get("tenant_id"),
-        "capability": scenario.get("capability"),
-        "expected_tools": scenario.get("expected_tools", []),
-        "turns": [],
-        "result": "not_run",
-        "message": "Run record created. Attach headless runner to execute the scenario.",
-    }
+    SCENARIO_RUNS[run_id] = create_run_record(scenario, run_id, now=datetime.utcnow())
     return SCENARIO_RUNS[run_id]
 
 

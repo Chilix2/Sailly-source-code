@@ -143,6 +143,21 @@ class FixApplier:
 
             # Apply (replace first occurrence only)
             new_content = content.replace(old_code, new_code, 1)
+
+            # ── Syntax validation for Python files ──────────────────────────
+            if full_path.suffix == ".py":
+                import ast as _ast
+                try:
+                    _ast.parse(new_content)
+                except SyntaxError as _syn_err:
+                    logger.error(
+                        "[fix_applier] Fix #%d REJECTED — syntax error in %s after patch: %s",
+                        fix_number, file_rel, _syn_err
+                    )
+                    # Restore backup to clean state
+                    shutil.copy2(bak_path, full_path)
+                    return False, None
+
             full_path.write_text(new_content, encoding="utf-8")
             logger.info("[fix_applier] Fix #%d applied to %s (%+d bytes)",
                         fix_number, file_rel, len(new_content) - len(content))
@@ -187,23 +202,31 @@ class FixApplier:
     async def _restart_service(self) -> bool:
         """
         Stop the running Sailly service, start it fresh, and wait up to 60s for health.
+        Uses sudo pkill to handle cross-user process ownership.
         """
         try:
             logger.info("[fix_applier] Stopping existing service process...")
-            subprocess.run(
-                ["pkill", "-9", "-f", "uvicorn.*server.main"],
+            # Try sudo pkill first (handles cross-user ownership), fall back to plain pkill.
+            kill_result = subprocess.run(
+                ["sudo", "-n", "pkill", "-9", "-f", "uvicorn.*server.main"],
                 capture_output=True, timeout=5,
             )
+            if kill_result.returncode != 0:
+                subprocess.run(
+                    ["pkill", "-9", "-f", "uvicorn.*server.main"],
+                    capture_output=True, timeout=5,
+                )
             await asyncio.sleep(3)
 
             logger.info("[fix_applier] Starting service on port 8080...")
+            venv_python = str(Path(self.repo_root) / "venv" / "bin" / "python3")
             subprocess.Popen(
-                ["python3", "-m", "uvicorn", "server.main:app",
+                [venv_python, "-m", "uvicorn", "server.main:app",
                  "--host", "0.0.0.0", "--port", "8080"],
                 cwd=str(self.repo_root),
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-                env={**os.environ, "PYTHONUNBUFFERED": "1"},
+                env={**os.environ, "PYTHONUNBUFFERED": "1", "SKIP_VERTEX_PREFLIGHT": "1"},
             )
 
             logger.info("[fix_applier] Waiting for service (up to 60s)...")

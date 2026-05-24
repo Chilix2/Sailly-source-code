@@ -35,11 +35,11 @@ async def handle(args: dict, ctx: ToolContext) -> ToolResult:
       time:       str (HH:MM)
       party_size: int
       name:       str
-      phone:      str
+      phone:      str (optional)
       email:      str (optional)
       notes:      str (optional)
     """
-    required = ["date", "time", "party_size", "name", "phone"]
+    required = ["date", "time", "party_size", "name"]
     missing = [f for f in required if not args.get(f)]
     if missing:
         return ToolResult(
@@ -127,8 +127,8 @@ def _safe_int(value: object, default: int = 0) -> int:
 def _is_within_hours(ctx: ToolContext, dt: datetime) -> bool:
     """True if dt is within the tenant's opening hours."""
     try:
-        from server.core.tenant_config import TenantRegistry  # type: ignore
-        tcfg = TenantRegistry().load_tenant(ctx.tenant_id)
+        from server.core.tenant_config import get_tenant_registry  # type: ignore
+        tcfg = get_tenant_registry().load_tenant(ctx.tenant_id)
         return tcfg.is_open_now(at=dt) if tcfg else True
     except Exception:
         return True  # fail open

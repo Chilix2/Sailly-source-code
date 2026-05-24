@@ -608,12 +608,15 @@ async def get_recent_monitoring_calls(
     limit: int = 100,
     *,
     use_redis: bool = True,
+    tenant_id: Optional[str] = None,
 ) -> List[dict]:
     """Recent completed calls (newest first) for dashboard detail tables."""
     now = time.time()
     mem = _rows_from_memory(window_secs, now)
     redis_rows = await _rows_from_redis(window_secs, now) if use_redis and _MONITOR_REDIS_ENABLE else []
     merged = _dedupe_rows_by_callsid(mem + redis_rows)
+    if tenant_id:
+        merged = [r for r in merged if r.get("tenant_id") == tenant_id]
     merged.sort(key=lambda r: float(r.get("ts", 0) or 0), reverse=True)
     return merged[: max(1, min(limit, 500))]
 

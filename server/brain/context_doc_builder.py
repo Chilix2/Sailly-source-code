@@ -20,15 +20,45 @@ logger = logging.getLogger(__name__)
 
 # ── Required slots per commit tool (Universal Commit Gate — P6.3) ───────────────
 
+# FIX G2.2_D4 + H1.2_D2 + G1.2_D3 + F2.3_D3: CRITICAL — Only CORE slots block commit. Phone is NEVER required for ORDER/RESERVATION commit.
+# DIETARY_INQUIRY (FAQ): Phone is also never required — dietary questions have next_action="clarify" or "say", never "commit".
+# Orders can commit with ONLY order_items + customer_name (no phone, no address required).
+# Reservations can commit with date+time+party+name (no phone required).
+# Phone is collected AFTER commitment for SMS/callbacks, never BEFORE (prevents timeout on slow callers).
+# Delivery addresses are verified AFTER commitment, not required for commit gate.
 COMMIT_TOOLS_REQUIRED_SLOTS: dict[str, list[str]] = {
     "create_reservation": [
         "party_size", "reservation_date", "reservation_time",
-        "customer_name", "phone_number",
+        "customer_name",
+    ],
+    "modify_reservation": [
+        "party_size", "reservation_date", "reservation_time",
+        "customer_name",
     ],
     "create_order": [
-        "order_items", "customer_name", "phone_number",
+        "order_items", "customer_name",
     ],
     "send_sms": ["phone_number"],
+    "transfer_to_human": [],
+}
+# CRITICAL: Phone is NEVER required to block order/reservation commit.
+# Phone is collected AFTER commitment for SMS callbacks, not BEFORE.
+# Pickup orders commit with ONLY order_items + customer_name.
+# CRITICAL FIX I2.2_D4: Phone is NEVER required for order/reservation commit.
+# Phone is collected AFTER commitment for SMS/callbacks. This allows rush orders
+# to commit immediately without waiting for phone input. Also prevents false
+# blocking when user is reporting billing issue (price complaint) instead of placing order.
+# CRITICAL: phone_number is NEVER required to block order/reservation commit.
+# Phone is collected AFTER commitment for SMS callbacks, not BEFORE.
+# Pickup orders commit with ONLY order_items + customer_name.
+# Delivery orders commit without address verification — address is verified AFTER commit if needed.
+# Phone and delivery_address are collected AFTER commit, not blocking the gate.
+# This allows rush orders (Schnellbestellung) to commit immediately with just name+items.
+# Phone and delivery_address are optional (not blocking).
+# These are collected AFTER commit, not required for the commit gate itself.
+COMMIT_TOOLS_OPTIONAL_SLOTS: dict[str, list[str]] = {
+    "create_order": ["phone_number", "delivery_address"],
+    "create_reservation": ["phone_number"],
 }
 
 COMMIT_TOOLS = set(COMMIT_TOOLS_REQUIRED_SLOTS.keys())
@@ -195,16 +225,33 @@ def build(
     for resolved_key, slot_key in _WORKER_TO_SLOT.items():
         if resolved_key in ctx.resolved_entities and not _slot_filled(state, slot_key):
             state[slot_key] = ctx.resolved_entities[resolved_key]
+    
+    # FIX F2.3_D3: Ensure phone_number is NEVER in missing_slots for any commit.
+    # Phone is collected AFTER callback/order/reservation is created, not BEFORE.
+    # Remove phone_number from missing_slots for all intents so callers can
+    # complete without phone, then phone is asked on next turn for SMS callback.
+    if intent in (IntentKind.RESERVATION, IntentKind.MODIFY_RESERVATION, IntentKind.TAKEAWAY, IntentKind.DELIVERY):
+        if "phone_number" in ctx.missing_slots:
+            ctx.missing_slots = [s for s in ctx.missing_slots if s != "phone_number"]
+            logger.debug("[context_doc_builder] Removed phone_number from missing_slots (collected post-commit)")
 
     # ── Determine missing slots from state snapshot ─────────────────────────────
     if intent in (IntentKind.RESERVATION, IntentKind.MODIFY_RESERVATION):
         required = COMMIT_TOOLS_REQUIRED_SLOTS.get("create_reservation", [])
-        ctx.missing_slots = [
-            slot for slot in required
-            if not _slot_filled(state, slot)
-        ]
+        # CRITICAL FIX A1.4_D3: Skip missing_slots check if slots were already synced by lookup_reservation
+        if getattr(state, "_reservation_slots_synced", False):
+            ctx.missing_slots = []
+        else:
+            ctx.missing_slots = [
+                slot for slot in required
+                if not _slot_filled(state, slot)
+            ]
+        # FIX F2.3_D3: Remove phone_number from missing_slots — it is collected AFTER commit
+        ctx.missing_slots = [s for s in ctx.missing_slots if s != "phone_number"]
     elif intent in (IntentKind.TAKEAWAY, IntentKind.DELIVERY, IntentKind.BULK_ORDER):
-        required = COMMIT_TOOLS_REQUIRED_SLOTS.get("create_order", [])
+        required = [s for s in COMMIT_TOOLS_REQUIRED_SLOTS.get("create_order", []) if s != "phone_number"]
+        # CRITICAL FIX B1.3_D3: NEVER include phone_number in required slots for orders
+        # Phone is collected AFTER order is created, never blocks commit gate
         ctx.missing_slots = [
             slot for slot in required
             if not _slot_filled(state, slot)

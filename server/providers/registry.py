@@ -124,7 +124,7 @@ def instantiate_stt(
         settings_kwargs["keyterm"] = keyterms
     model_name = settings_kwargs.get("model", "nova-3")
     if is_flux_model(model_name):
-        from pipecat.services.deepgram.stt import DeepgramFluxSTTService
+        from pipecat.services.deepgram.flux.stt import DeepgramFluxSTTService
 
         return DeepgramFluxSTTService(
             api_key=deepgram_api_key,

@@ -90,6 +90,59 @@ class PreOrderSchema(BaseModel):
     kitchen_prep_minutes: int = 30
 
 
+class ProfileOverrideSchema(BaseModel):
+    """Shallow runtime overrides for a worker profile."""
+    scheduled_tools: Optional[List[str]] = None
+    deadline_required_ms: Optional[int] = Field(default=None, ge=100, le=2000)
+    deadline_optional_ms: Optional[int] = Field(default=None, ge=100, le=3000)
+
+
+class PipelineSchema(BaseModel):
+    """Tenant-scoped pipeline overrides with safe defaults."""
+    enabled_profiles: Optional[List[str]] = None
+    intent_overrides: Dict[str, str] = Field(default_factory=dict)
+    profile_overrides: Dict[str, ProfileOverrideSchema] = Field(default_factory=dict)
+
+    @field_validator("enabled_profiles")
+    @classmethod
+    def _non_empty_if_set(cls, v):
+        if v is not None and len(v) == 0:
+            raise ValueError("enabled_profiles cannot be empty")
+        return v
+
+    if _PYDANTIC_V2:
+        @model_validator(mode="after")
+        def _validate_names(self):
+            from server.brain.intent_session import IntentKind
+            from server.brain.worker_router import ALL_PROFILE_NAMES
+
+            known = set(ALL_PROFILE_NAMES)
+            enabled = set(self.enabled_profiles) if self.enabled_profiles else known
+
+            for p in (self.enabled_profiles or []):
+                if p not in known:
+                    raise ValueError(f"unknown profile '{p}'")
+
+            if "greeting" not in enabled:
+                raise ValueError("greeting must remain enabled (fallback profile)")
+
+            valid_intents = {k.value for k in IntentKind}
+            for intent, prof in self.intent_overrides.items():
+                if intent not in valid_intents:
+                    raise ValueError(f"unknown intent '{intent}'")
+                if prof not in known:
+                    raise ValueError(f"intent_overrides.{intent}: unknown profile '{prof}'")
+                if prof not in enabled:
+                    raise ValueError(f"intent_overrides.{intent}: '{prof}' not in enabled_profiles")
+
+            for prof in self.profile_overrides:
+                if prof not in known:
+                    raise ValueError(f"unknown profile_overrides key '{prof}'")
+                if prof not in enabled:
+                    raise ValueError(f"profile_overrides.{prof}: profile not enabled")
+            return self
+
+
 class TenantSchema(BaseModel):
     """
     Full tenant configuration schema.
@@ -116,6 +169,7 @@ class TenantSchema(BaseModel):
 
     # ── Audio ─────────────────────────────────────────────────────────────────
     audio: AudioSchema = Field(default_factory=AudioSchema)
+    pipeline: PipelineSchema = Field(default_factory=PipelineSchema)
 
     # ── LLM / Voice ───────────────────────────────────────────────────────────
     system_prompt: str = ""

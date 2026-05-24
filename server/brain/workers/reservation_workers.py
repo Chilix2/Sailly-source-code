@@ -69,6 +69,14 @@ def _parse_date(text: str) -> Optional[str]:
             days_ahead = 7
         return (today + timedelta(days=days_ahead)).isoformat()
 
+    # Detect "nächste Woche" (+7) and "übernächste Woche" (+14) modifiers.
+    _text_lower = text.lower()
+    _next_week_offset = 0
+    if re.search(r"ü+bernächste\s+woche|übernächste\s+woche|übernaechste\s+woche", _text_lower):
+        _next_week_offset = 14
+    elif re.search(r"nächste\s+woche|naechste\s+woche|kommende\s+woche", _text_lower):
+        _next_week_offset = 7
+
     # Fall back: collect ALL day-name matches and use the LAST one.
     # "Last wins" handles multi-date utterances and correction phrases like
     # "eigentlich Samstag, nicht Freitag" correctly.
@@ -79,7 +87,40 @@ def _parse_date(text: str) -> Optional[str]:
         days_ahead = (target_dow - today.weekday()) % 7
         if days_ahead == 0:
             days_ahead = 7  # next week if same weekday
+        # Apply "nächste/übernächste Woche" offset on top
+        days_ahead += _next_week_offset
         return (today + timedelta(days=days_ahead)).isoformat()
+
+    # Ordinal month pattern: "ersten April", "zweiten Mai", "dritten Juni", etc.
+    _ORDINAL_DE = {
+        "ersten": 1, "zweiten": 2, "dritten": 3, "vierten": 4, "fünften": 5,
+        "sechsten": 6, "siebten": 7, "siebten": 7, "achten": 8, "neunten": 9,
+        "zehnten": 10, "elften": 11, "zwölften": 12, "dreizehnten": 13,
+        "vierzehnten": 14, "fünfzehnten": 15, "sechzehnten": 16,
+        "siebzehnten": 17, "achtzehnten": 18, "neunzehnten": 19,
+        "zwanzigsten": 20, "einundzwanzigsten": 21, "zweiundzwanzigsten": 22,
+        "dreiundzwanzigsten": 23, "vierundzwanzigsten": 24,
+        "fünfundzwanzigsten": 25, "sechsundzwanzigsten": 26,
+        "siebenundzwanzigsten": 27, "achtundzwanzigsten": 28,
+        "neunundzwanzigsten": 29, "dreißigsten": 30, "einunddreißigsten": 31,
+    }
+    _ordinal_month_re = re.compile(
+        r"\b(" + "|".join(_ORDINAL_DE.keys()) + r")\s+"
+        r"(januar|februar|märz|april|mai|juni|juli|august|september|oktober|november|dezember)\b",
+        re.I,
+    )
+    m_ord = _ordinal_month_re.search(text)
+    if m_ord:
+        day = _ORDINAL_DE[m_ord.group(1).lower()]
+        month = _MONTH_NAMES_DE[m_ord.group(2).lower()]
+        year = today.year
+        try:
+            d = date(year, month, day)
+            if d < today:
+                d = date(year + 1, month, day)
+            return d.isoformat()
+        except ValueError:
+            pass
     m = _MONTH_NAME_RE.search(text)
     if m:
         day = int(m.group(1))

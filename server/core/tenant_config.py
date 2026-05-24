@@ -7,6 +7,8 @@ from typing import Optional, Dict, List, Any
 from pydantic import BaseModel, Field
 import yaml
 import os
+import re
+from pathlib import Path
 
 class ToolDeclaration(BaseModel):
     """Tool definition for a tenant."""
@@ -118,6 +120,13 @@ class TenantConfig(BaseModel):
     audio: Optional[Dict[str, Any]] = Field(
         default=None,
         description="Audio pipeline config: stt_model, stt_endpoint, stt_endpointing_ms, smart_format, eot_threshold"
+    )
+
+    # Tenant-scoped pipeline behavior knobs (optional).
+    # Defaults keep current global behavior.
+    pipeline: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Pipeline overrides: enabled_profiles, intent_overrides, profile_overrides"
     )
 
     # C2: Restaurant identity fields — now sourced from YAML; avoid hardcoding in Python
@@ -243,29 +252,86 @@ _TENANT_CONFIG_DIR = os.path.join(
     "..", "..", "configs", "tenants"
 )
 
+_TENANT_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,62}$")
+
+
+def normalize_tenant_id(raw: str) -> str:
+    tid = (raw or "").strip().lower()
+    if not tid or not _TENANT_ID_RE.match(tid):
+        raise ValueError(f"invalid tenant_id: {raw!r}")
+    return tid
+
+
+def tenant_config_dir() -> Path:
+    return Path(os.path.normpath(_TENANT_CONFIG_DIR))
+
+
+def tenant_yaml_path(tenant_id: str) -> Optional[Path]:
+    tid = normalize_tenant_id(tenant_id)
+    root = tenant_config_dir()
+    for ext in (".yaml", ".yml"):
+        candidate = root / f"{tid}{ext}"
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def list_known_tenant_ids() -> List[str]:
+    root = tenant_config_dir()
+    if not root.exists():
+        return []
+    out: List[str] = []
+    for p in root.iterdir():
+        if p.is_file() and p.suffix in (".yaml", ".yml"):
+            out.append(p.stem)
+    return sorted(set(out))
+
 
 class TenantRegistry:
     """Loads and caches TenantConfig objects from the configs/tenants/ directory."""
 
     _cache: Dict[str, TenantConfig] = {}
+    _mtime: Dict[str, float] = {}
 
     def load_tenant(self, tenant_id: str) -> TenantConfig:
-        if tenant_id in self._cache:
-            return self._cache[tenant_id]
+        tid = normalize_tenant_id(tenant_id)
         config_dir = os.path.normpath(_TENANT_CONFIG_DIR)
         for ext in (".yaml", ".yml"):
-            path = os.path.join(config_dir, f"{tenant_id}{ext}")
+            path = os.path.join(config_dir, f"{tid}{ext}")
             if os.path.exists(path):
+                mtime = os.path.getmtime(path)
+                if tid in self._cache and self._mtime.get(tid) == mtime:
+                    return self._cache[tid]
                 tc = TenantConfig.load_from_file(path)
-                self._cache[tenant_id] = tc
+                if normalize_tenant_id(tc.tenant_id) != tid:
+                    raise ValueError(
+                        f"tenant_id mismatch: file {tid}{ext} has tenant_id={tc.tenant_id!r}"
+                    )
+                self._cache[tid] = tc
+                self._mtime[tid] = mtime
                 return tc
         raise FileNotFoundError(
-            f"No tenant config found for '{tenant_id}' in {config_dir}"
+            f"No tenant config found for '{tid}' in {config_dir}"
         )
 
     def load_all(self) -> Dict[str, TenantConfig]:
         config_dir = os.path.normpath(_TENANT_CONFIG_DIR)
         return TenantConfig.load_all_from_directory(config_dir)
+
+    def exists(self, tenant_id: str) -> bool:
+        try:
+            return tenant_yaml_path(tenant_id) is not None
+        except ValueError:
+            return False
+
+    def invalidate_tenant(self, tenant_id: str) -> None:
+        tid = normalize_tenant_id(tenant_id)
+        self._cache.pop(tid, None)
+        self._mtime.pop(tid, None)
+
+    def invalidate_all(self) -> None:
+        self._cache.clear()
+        self._mtime.clear()
 
 
 _registry_singleton: Optional[TenantRegistry] = None
@@ -280,4 +346,9 @@ def get_tenant_registry() -> TenantRegistry:
 
 def load_tenant_config(tenant_id: str) -> TenantConfig:
     """Load a tenant config by ID from the canonical configs/tenants/ directory."""
+    return get_tenant_registry().load_tenant(tenant_id)
+
+
+def require_tenant_config(tenant_id: str) -> TenantConfig:
+    """Strict tenant lookup with normalization + typed config load."""
     return get_tenant_registry().load_tenant(tenant_id)

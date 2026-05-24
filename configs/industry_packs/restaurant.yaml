@@ -1,7 +1,7 @@
 id: restaurant
 name: Restaurant
 description: Maxed-out restaurant voice-agent template based on DOBOO Korean Soulfood.
-version: "1.0"
+version: "1.1"
 language_defaults:
   - de
   - en
@@ -19,6 +19,19 @@ capabilities:
     slots:
       - language
       - caller_intent
+    variables:
+      - restaurant_name
+      - greeting_line
+      - language_defaults
+    guards:
+      - id: ki_disclosure_first_turn
+        description: First audible greeting must identify the assistant as AI-supported.
+        applies_to: [greeting]
+      - id: no_tool_leakage
+        description: Never expose tool calls, JSON, or internal state to callers.
+        forbidden_behaviors:
+          - Say [tool:
+          - Mention validation status.
     prompt_fragments:
       - Always greet warmly and disclose the assistant is AI-supported.
       - Keep the first turn short and invite the caller to state their goal.
@@ -31,6 +44,9 @@ capabilities:
           transcript_assertions:
             - KI
             - wie kann ich
+          guards:
+            - ki_disclosure_first_turn
+            - no_tool_leakage
   - id: business_info
     name: Opening hours, address, parking, and directions
     category: knowledge
@@ -44,6 +60,18 @@ capabilities:
         description: Resolve date-sensitive opening-hour answers.
     slots:
       - topic
+    variables:
+      - opening_hours
+      - address
+      - parking
+      - cuisine_type
+    guards:
+      - id: knowledge_grounding
+        description: Operational facts must come from tenant config, FAQ, or date-aware helpers.
+        applies_to: [faq, get_date_info]
+        forbidden_behaviors:
+          - Invent opening hours.
+          - Invent parking or address details.
     scenarios:
       - id: restaurant_hours_today
         name: Opening hours today
@@ -53,6 +81,8 @@ capabilities:
             - faq
           transcript_assertions:
             - geöffnet
+          guards:
+            - knowledge_grounding
   - id: menu_browsing
     name: Menu browsing and recommendations
     category: knowledge
@@ -64,6 +94,17 @@ capabilities:
     slots:
       - menu_topic
       - dietary_preference
+    variables:
+      - menu_version
+      - menu.categories
+      - cuisine_type
+    guards:
+      - id: menu_grounding
+        description: Menu recommendations, prices, and availability must be grounded in get_menu or tenant menu data.
+        applies_to: [get_menu]
+        forbidden_behaviors:
+          - Hallucinate dishes not present in the menu.
+          - Deny an item that is present in the menu.
     scenarios:
       - id: restaurant_menu_recommendation
         name: Recommendation request
@@ -73,6 +114,8 @@ capabilities:
             - get_menu
           transcript_assertions:
             - empfehle
+          guards:
+            - menu_grounding
   - id: dietary_allergens
     name: Dietary and allergen questions
     category: knowledge
@@ -83,6 +126,15 @@ capabilities:
     slots:
       - allergy
       - dietary_preference
+    variables:
+      - menu.categories.items.allergens
+      - allergen_disclaimer
+    guards:
+      - id: allergen_safety
+        description: Allergen answers must be conservative and avoid guarantees without authoritative allergen data.
+        applies_to: [get_menu]
+        forbidden_behaviors:
+          - Guarantee allergen-free food without a configured allergen source.
     scenarios:
       - id: restaurant_allergy_warning
         name: Allergy warning
@@ -90,6 +142,8 @@ capabilities:
         expected:
           forbidden_behaviors:
             - Guarantee allergen-free food without a configured allergen source.
+          guards:
+            - allergen_safety
   - id: takeaway_order
     name: Takeaway order creation
     category: transaction
@@ -106,6 +160,17 @@ capabilities:
       - order_items
       - customer_name
       - phone_number
+    variables:
+      - pre_order.kitchen_prep_minutes
+      - pickup_policy
+      - payment_options
+    guards:
+      - id: order_readback_before_commit
+        description: Repeat items, fulfillment, price if known, name, and pickup timing before create_order.
+        applies_to: [create_order]
+      - id: order_required_slots
+        description: Do not create takeaway orders before required order items and customer name are collected.
+        applies_to: [create_order]
     scenarios:
       - id: restaurant_takeaway_order
         name: Simple takeaway order
@@ -118,6 +183,9 @@ capabilities:
           tools:
             - create_order
           final_state: confirmed
+          guards:
+            - order_readback_before_commit
+            - order_required_slots
   - id: delivery_order
     name: Delivery order creation
     category: transaction
@@ -138,6 +206,17 @@ capabilities:
       - customer_name
       - phone_number
       - delivery_address
+    variables:
+      - delivery_radius
+      - delivery_fee
+      - address_validation_policy
+    guards:
+      - id: delivery_address_verified
+        description: Delivery orders require address collection and validation before create_order when verification is configured.
+        applies_to: [verify_address, create_order]
+      - id: delivery_order_readback_before_commit
+        description: Repeat items, address, contact data, and delivery timing before create_order.
+        applies_to: [create_order]
     scenarios:
       - id: restaurant_delivery_order
         name: Delivery order with address
@@ -145,6 +224,9 @@ capabilities:
         expected:
           tools:
             - create_order
+          guards:
+            - delivery_address_verified
+            - delivery_order_readback_before_commit
   - id: order_management
     name: Order modification, cancellation, and status
     category: transaction
@@ -160,6 +242,13 @@ capabilities:
       - order_reference
       - customer_name
       - requested_change
+    variables:
+      - order_lookup_policy
+      - cancellation_policy
+    guards:
+      - id: identify_order_before_change
+        description: Order changes, cancellations, and status lookups require an order reference or enough caller/order identity.
+        applies_to: [modify_order, cancel_order, order_status]
     scenarios:
       - id: restaurant_order_status
         name: Order status request
@@ -167,6 +256,8 @@ capabilities:
         expected:
           tools:
             - order_status
+          guards:
+            - identify_order_before_change
   - id: reservation_create
     name: Reservation creation
     category: transaction
@@ -187,6 +278,17 @@ capabilities:
       - reservation_time
       - customer_name
       - phone_number
+    variables:
+      - reservation_capacity
+      - opening_hours
+      - seating_policy
+    guards:
+      - id: reservation_readback_before_commit
+        description: Repeat party size, date, time, name, and contact details before create_reservation.
+        applies_to: [create_reservation]
+      - id: reservation_required_slots
+        description: Do not create reservations before party size, date, time, and name are collected.
+        applies_to: [create_reservation]
     scenarios:
       - id: restaurant_reservation_create
         name: Table reservation
@@ -195,6 +297,9 @@ capabilities:
           tools:
             - create_reservation
           final_state: confirmed
+          guards:
+            - reservation_readback_before_commit
+            - reservation_required_slots
   - id: reservation_management
     name: Reservation modification and cancellation
     category: transaction
@@ -208,6 +313,13 @@ capabilities:
       - reservation_reference
       - customer_name
       - requested_change
+    variables:
+      - reservation_lookup_policy
+      - cancellation_policy
+    guards:
+      - id: identify_reservation_before_change
+        description: Reservation changes and cancellations require a reservation reference or enough caller/reservation identity.
+        applies_to: [modify_reservation, cancel_reservation]
     scenarios:
       - id: restaurant_cancel_reservation
         name: Cancel reservation
@@ -215,6 +327,8 @@ capabilities:
         expected:
           tools:
             - cancel_reservation
+          guards:
+            - identify_reservation_before_change
   - id: group_catering
     name: Large group and catering lead capture
     category: lead
@@ -230,6 +344,16 @@ capabilities:
       - customer_name
       - phone_number
       - notes
+    variables:
+      - catering_minimum_notice
+      - catering_capacity
+      - event_lead_sla
+    guards:
+      - id: catering_lead_not_commit
+        description: Large group and catering requests are leads unless configured for direct booking.
+        applies_to: [capture_catering_lead, transfer_to_human]
+        forbidden_behaviors:
+          - Promise catering availability without staff review.
     scenarios:
       - id: restaurant_catering_lead
         name: Catering lead
@@ -237,6 +361,8 @@ capabilities:
         expected:
           tools:
             - capture_catering_lead
+          guards:
+            - catering_lead_not_commit
   - id: escalation
     name: Complaint, payment issue, lost-and-found, and human handoff
     category: escalation
@@ -249,6 +375,14 @@ capabilities:
       - customer_name
       - phone_number
       - notes
+    variables:
+      - handoff_phone
+      - escalation_hours
+      - complaint_sla
+    guards:
+      - id: sensitive_topic_handoff
+        description: Complaints, payment issues, refund requests, abuse, and out-of-scope topics require human handoff.
+        applies_to: [transfer_to_human]
     scenarios:
       - id: restaurant_complaint_escalation
         name: Complaint escalation
@@ -258,6 +392,8 @@ capabilities:
             - transfer_to_human
           forbidden_behaviors:
             - Refuse to escalate.
+          guards:
+            - sensitive_topic_handoff
   - id: goodbye_close
     name: Goodbye and call close
     category: conversation
@@ -266,6 +402,13 @@ capabilities:
       - name: end_call
         required: false
     slots: []
+    variables:
+      - farewell_text
+      - completion_summary_policy
+    guards:
+      - id: polite_close
+        description: End calls politely after summarizing any completed action and call end_call when available.
+        applies_to: [end_call]
     scenarios:
       - id: restaurant_goodbye
         name: Polite goodbye
@@ -273,3 +416,5 @@ capabilities:
         expected:
           tools:
             - end_call
+          guards:
+            - polite_close

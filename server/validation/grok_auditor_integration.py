@@ -82,6 +82,7 @@ class GrokAuditor:
             batch_metrics = await fetcher.fetch_batch_metrics(call_sids)
 
         transcripts = batch_metrics.get("transcripts", [])
+        tool_calls = batch_metrics.get("tool_calls", [])
         failed_tools = batch_metrics.get("failed_tool_calls", [])
         achtung_flags = batch_metrics.get("achtung_flags", [])
         loop_detections = batch_metrics.get("loop_detections", [])
@@ -97,6 +98,10 @@ class GrokAuditor:
         failed_tools_block = (
             json.dumps(failed_tools[:8], indent=2, ensure_ascii=False)
             if failed_tools else "None"
+        )
+        tool_calls_block = (
+            json.dumps(tool_calls[:20], indent=2, ensure_ascii=False)
+            if tool_calls else "None"
         )
 
         achtung_block = ""
@@ -125,6 +130,9 @@ Audit the following {len(call_sids)} call(s) and score each metric 0-100:
 CALL TRANSCRIPTS:
 {transcript_block}
 
+SUCCESSFUL TOOL CALLS:
+{tool_calls_block}
+
 FAILED TOOL CALLS:
 {failed_tools_block}
 
@@ -140,9 +148,21 @@ Respond with valid JSON only (no markdown fences):
   "tool_analysis": "<details on tool calling: what fired, what should have fired differently>"
 }}"""
 
+        # Choose client: use OpenAI if XAI is known to be exhausted
+        _audit_client = self.client
+        _audit_model = os.environ.get("GROK_AUDIT_MODEL", "grok-4-1-fast-non-reasoning")
+        _xai_exhausted = getattr(self, '_xai_exhausted', False)
+        if _xai_exhausted:
+            _openai_key = os.environ.get("OPENAI_API_KEY")
+            if _openai_key:
+                from openai import AsyncOpenAI as _OAI
+                _audit_client = _OAI(api_key=_openai_key)
+                _audit_model = "gpt-4o-mini"
+                logger.info("[grok] Using OpenAI gpt-4o-mini for audit (XAI exhausted)")
+
         try:
-            response = await self.client.chat.completions.create(
-                model="grok-3-mini",
+            response = await _audit_client.chat.completions.create(
+                model=_audit_model,
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=1000,
                 temperature=0.0,
@@ -189,6 +209,11 @@ Respond with valid JSON only (no markdown fences):
             logger.error("[grok] JSON parse failed (raw=%r): %s", raw[:300], exc)
             return self._default_report(call_sids)
         except Exception as exc:
+            err_str = str(exc)
+            # Auto-switch to OpenAI on XAI 403 credits exhausted
+            if ("403" in err_str or "spending limit" in err_str) and not getattr(self, '_xai_exhausted', False):
+                logger.warning("[grok] XAI 403 — switching to OpenAI gpt-4o-mini for future audits")
+                self._xai_exhausted = True
             logger.error("[grok] audit_scenario_batch failed: %s", exc)
             return self._default_report(call_sids)
 

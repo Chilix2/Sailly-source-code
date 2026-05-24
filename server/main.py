@@ -411,6 +411,11 @@ except Exception as _te:  # pragma: no cover — don't let a telephony import ki
 if os.path.exists("frontend"):
     app.mount("/static", StaticFiles(directory="frontend"), name="static")
 
+# Mount /validation/ to serve demo_availability.json and other validation run files
+validation_dir = "/tmp/validation_runs"
+if os.path.exists(validation_dir):
+    app.mount("/validation", StaticFiles(directory=validation_dir), name="validation")
+
 
 async def _preflight_model_availability():
     """Verify Claude Haiku on Vertex AI (EU) responds before accepting calls.

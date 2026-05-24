@@ -35,15 +35,20 @@ class ToolCall:
 
 
 # ── State-transition tool set ─────────────────────────────────────────────────
+# CRITICAL: transfer_to_human is the canonical escalation tool for manager requests.
+# escalate_to_manager is an alias that maps to transfer_to_human in executor.
 STATE_TRANSITION_TOOLS = frozenset({
     "update_state",
     "create_order",
     "create_reservation",
+    "cancel_reservation",
     "transfer_to_human",
     "send_sms",
     "capture_catering_lead",
     "confirm_order",
     "cancel_order",
+    "log_complaint",
+    "process_refund",
 })
 
 # ── Gemini FunctionDeclaration schemas ────────────────────────────────────────
@@ -134,6 +139,53 @@ _TOOL_SCHEMAS: Dict[str, Dict] = {
                 "reason": {"type": "string"},
             },
             "required": [],
+        },
+    },
+    "cancel_reservation": {
+        "description": "Cancel an existing restaurant reservation.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Customer name"},
+                "date": {"type": "string", "description": "Reservation date (ISO YYYY-MM-DD or 'heute')"},
+                "time": {"type": "string", "description": "Reservation time HH:MM"},
+            },
+            "required": ["name", "date", "time"],
+        },
+    },
+    "escalate_to_manager": {
+        "description": "Escalate an angry or manager-demanding customer to human manager immediately.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "reason": {"type": "string", "description": "Reason for escalation (e.g. 'manager_request', 'frustrated_customer')"},
+            },
+            "required": ["reason"],
+        },
+    },
+    "log_complaint": {
+        "description": "Log a food complaint (wrong dish, missing item, quality issue) for follow-up by restaurant team.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "complaint_type": {"type": "string", "description": "e.g. 'wrong_dish', 'missing_item', 'quality_issue'"},
+                "description": {"type": "string", "description": "Detailed description of the complaint"},
+                "order_id": {"type": "string"},
+                "dish_name": {"type": "string"},
+            },
+            "required": ["complaint_type", "description"],
+        },
+    },
+    "process_refund": {
+        "description": "Process a refund for a complaint or cancelled order.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "order_id": {"type": "string"},
+                "reason": {"type": "string"},
+                "amount": {"type": "number"},
+            },
+            "required": ["reason"],
         },
     },
 }

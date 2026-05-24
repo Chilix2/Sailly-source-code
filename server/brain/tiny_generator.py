@@ -269,23 +269,52 @@ class TinyGenerator:
             return _FALLBACK_RESPONSE, {}
 
     async def _call_llm(self, prompt: str, model: str) -> str:
-        """Thin wrapper around the LLM client with explicit timing to catch cache bypass."""
+        """Thin wrapper around the LLM client with explicit timing to catch cache bypass.
+        Falls back to OpenAI gpt-4o-mini when Anthropic/XAI credits are exhausted.
+        """
         _t0 = time.monotonic()
-        
+
         if hasattr(self._client, "messages"):
-            # Anthropic-style client — measure actual API call time
-            response = await self._client.messages.create(
-                model=model,
-                max_tokens=512,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            _elapsed_ms = int((time.monotonic() - _t0) * 1000)
-            # Phase 5: WARN if latency seems cached (< 15ms typical for API + network)
-            if _elapsed_ms < 15:
-                logger.warning(
-                    f"[Phase5] LLM latency suspiciously low: {_elapsed_ms}ms. "
-                    f"Possible cache hit or template bypass. Verify API is being called."
+            # Anthropic-style client — try first
+            try:
+                response = await self._client.messages.create(
+                    model=model,
+                    max_tokens=512,
+                    messages=[{"role": "user", "content": prompt}],
                 )
-            return response.content[0].text if response.content else ""
-        # Fallback
+                _elapsed_ms = int((time.monotonic() - _t0) * 1000)
+                if _elapsed_ms < 15:
+                    logger.warning(
+                        f"[Phase5] LLM latency suspiciously low: {_elapsed_ms}ms. "
+                        f"Possible cache hit or template bypass. Verify API is being called."
+                    )
+                return response.content[0].text if response.content else ""
+            except Exception as _anthr_err:
+                _err_str = str(_anthr_err)
+                if "credit" in _err_str.lower() or "400" in _err_str or "403" in _err_str:
+                    logger.warning(
+                        "[TinyGenerator] Anthropic API unavailable (%s) — falling back to OpenAI gpt-4o-mini",
+                        _err_str[:120],
+                    )
+                    # Fall through to OpenAI fallback below
+                else:
+                    raise
+
+        # OpenAI fallback (used when Anthropic is unavailable)
+        import os as _os
+        _oai_key = _os.environ.get("OPENAI_API_KEY", "")
+        if _oai_key:
+            try:
+                from openai import AsyncOpenAI as _AsyncOAI
+                _oai_client = _AsyncOAI(api_key=_oai_key)
+                _oai_resp = await _oai_client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    max_tokens=512,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+                _elapsed_ms = int((time.monotonic() - _t0) * 1000)
+                logger.info("[TinyGenerator] OpenAI gpt-4o-mini fallback OK (%dms)", _elapsed_ms)
+                return _oai_resp.choices[0].message.content or ""
+            except Exception as _oai_err:
+                logger.error("[TinyGenerator] OpenAI fallback also failed: %s", _oai_err)
         return ""
