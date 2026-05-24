@@ -1,0 +1,152 @@
+id: hospitality
+name: Hospitality
+description: Voice-agent template for hotels, guest houses, serviced apartments, and hospitality front desks.
+version: "1.0"
+language_defaults: [de, en]
+compliance_checklist:
+  - AI disclosure is spoken in the first audible greeting.
+  - Human fallback is available for emergencies, payment disputes, complaints, and guest-data requests.
+  - Booking creation and changes require identity/contact verification and readback confirmation.
+  - Never disclose guest data without verification.
+capabilities:
+  - id: hospitality_greeting
+    name: Front desk greeting and routing
+    category: conversation
+    description: Welcome callers, disclose AI usage, and route to reservations, guest services, events, billing, or staff.
+    tools: []
+    slots: [language, caller_intent, guest_status]
+    variables: [property_name, city, opening_hours, front_desk_hours]
+    guards:
+      - id: ki_disclosure_first_turn
+        description: First audible greeting must identify the assistant as AI-supported.
+        applies_to: [greeting]
+      - id: no_guest_data_disclosure
+        description: Do not disclose booking or guest details before verification.
+        forbidden_behaviors: ["Reveal room number without verification.", "Confirm another guest's stay."]
+    scenarios:
+      - id: hospitality_greeting_basic
+        name: Basic front desk greeting
+        caller_goal: Caller asks whether this is the hotel front desk.
+        mandatory: true
+        expected:
+          transcript_assertions: [KI, Hotel]
+          guards: [ki_disclosure_first_turn, no_guest_data_disclosure]
+  - id: room_availability
+    name: Room availability and rates
+    category: sales
+    description: Collect stay dates, guest count, room type, and rate constraints to answer availability questions.
+    tools:
+      - name: check_room_availability
+        required: false
+        description: Ground availability and rate answers in the property booking source.
+    slots: [arrival_date, departure_date, guest_count, room_type, rate_plan]
+    variables: [booking_engine, tax_fee_disclaimer, cancellation_policy]
+    guards:
+      - id: availability_grounding
+        description: Availability and prices must be sourced or clearly qualified as subject to confirmation.
+        applies_to: [check_room_availability]
+    scenarios:
+      - id: hospitality_weekend_availability
+        name: Weekend availability
+        caller_goal: Caller asks if a double room is available this weekend.
+        mandatory: true
+        expected:
+          tools: [check_room_availability]
+          guards: [availability_grounding]
+  - id: booking_create
+    name: Booking creation
+    category: transaction
+    description: Create or request a booking after collecting stay, guest, and contact details with readback.
+    tools:
+      - name: create_booking
+        required: true
+        required_slots: [arrival_date, departure_date, guest_count, customer_name, phone_number]
+        optional_slots: [room_type, email, notes]
+    slots: [arrival_date, departure_date, guest_count, room_type, customer_name, phone_number, email, notes]
+    variables: [booking_confirmation_mode, deposit_policy, cancellation_policy]
+    guards:
+      - id: booking_readback_before_commit
+        description: Repeat dates, nights, room type, guest count, and contact data before booking commit.
+        applies_to: [create_booking]
+      - id: payment_handoff
+        description: Payment collection, card changes, refunds, and charge disputes require secure staff workflow.
+        applies_to: [transfer_to_human]
+    scenarios:
+      - id: hospitality_booking_create
+        name: Booking request
+        caller_goal: Caller books a room for two guests from Friday to Sunday and confirms the readback.
+        mandatory: true
+        expected:
+          tools: [create_booking]
+          final_state: confirmed
+          guards: [booking_readback_before_commit]
+  - id: booking_management
+    name: Booking changes and cancellation
+    category: transaction
+    description: Modify or cancel reservations after verifying the guest and booking reference.
+    tools:
+      - name: modify_booking
+        required: false
+        required_slots: [booking_reference, customer_name, requested_change]
+      - name: cancel_booking
+        required: false
+        required_slots: [booking_reference, customer_name]
+    slots: [booking_reference, customer_name, phone_number, arrival_date, requested_change]
+    variables: [identity_verification_fields, cancellation_policy, change_policy]
+    guards:
+      - id: verify_guest_before_change
+        description: Verify guest identity or booking reference before modifying or cancelling.
+        applies_to: [modify_booking, cancel_booking]
+    scenarios:
+      - id: hospitality_booking_cancel
+        name: Cancel booking
+        caller_goal: Caller wants to cancel a booking and provides the booking number.
+        mandatory: true
+        expected:
+          tools: [cancel_booking]
+          guards: [verify_guest_before_change]
+  - id: guest_services
+    name: Amenities, parking, breakfast, check-in, and local info
+    category: knowledge
+    description: Answer operational guest questions from configured property knowledge.
+    tools:
+      - name: faq
+        required: false
+        description: Ground amenity, parking, breakfast, pet, check-in, and accessibility answers.
+    slots: [topic, date]
+    variables: [amenities, parking_policy, breakfast_hours, check_in_policy]
+    guards:
+      - id: knowledge_grounding
+        description: If the property knowledge does not contain the answer, offer staff follow-up.
+        forbidden_behaviors: ["Invent an amenity.", "Guarantee late checkout without source."]
+    scenarios:
+      - id: hospitality_parking_question
+        name: Parking question
+        caller_goal: Caller asks whether parking is available and what it costs.
+        mandatory: true
+        expected:
+          tools: [faq]
+          guards: [knowledge_grounding]
+  - id: hospitality_escalation
+    name: Emergency, complaint, payment issue, and human handoff
+    category: escalation
+    description: Route urgent, sensitive, payment, safety, complaint, and guest-data cases to staff.
+    tools:
+      - name: transfer_to_human
+        required: false
+        required_slots: [issue_type]
+        optional_slots: [customer_name, phone_number, room_number, notes]
+    slots: [issue_type, customer_name, phone_number, room_number, notes]
+    variables: [handoff_phone, night_manager_policy, emergency_instruction]
+    guards:
+      - id: urgent_hospitality_handoff
+        description: Safety, emergency, payment, privacy, and angry complaint cases require staff handoff.
+        applies_to: [transfer_to_human]
+    scenarios:
+      - id: hospitality_complaint_handoff
+        name: Complaint handoff
+        caller_goal: Caller says their room has no heating and wants to speak to someone now.
+        mandatory: true
+        expected:
+          tools: [transfer_to_human]
+          guards: [urgent_hospitality_handoff]

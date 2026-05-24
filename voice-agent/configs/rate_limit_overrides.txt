@@ -1,0 +1,25 @@
+# Rate-limit override list for Phase 9 B4.
+#
+# Phone numbers listed here bypass the per-caller rate limit
+# (default: 3 calls per hour). One phone number per line, in E.164
+# format. Lines starting with '#' are comments. Blank lines OK.
+#
+# Use cases:
+#   - Beta testers and internal QA numbers
+#   - Tenant operators for staging walkthroughs
+#   - Demo accounts for sales team calls
+#
+# DO NOT add real customer numbers here. The rate limit exists to
+# prevent abuse — overrides should be a small, reviewed list.
+#
+# To add a number:
+#   1. Append a line below in E.164 format (e.g. +491793456789)
+#   2. Commit and push (no deploy needed — file is hot-reloaded
+#      on next caller-rate-limit check)
+#   3. Note the requester and reason in the commit message
+#
+# To remove a number: delete the line, commit, push.
+#
+# Sample (commented out — not active):
+# +491793456789  # John QA, beta access since 2026-01-01
+# +4915123456789 # Sales demo line

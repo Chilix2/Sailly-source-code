@@ -1,0 +1,148 @@
+id: hotel
+name: Hotel
+description: Backward-compatible hotel pack aligned with the richer hospitality capability model.
+version: "1.1"
+language_defaults: [de, en]
+compliance_checklist:
+  - AI disclosure is spoken in the first audible greeting.
+  - Human fallback for payment, emergency, privacy, and complaint cases.
+  - Reservation creation and changes require identity/contact verification and readback.
+  - Never disclose guest data without verification.
+capabilities:
+  - id: hotel_greeting
+    name: Front desk greeting
+    category: conversation
+    description: Welcome callers, disclose AI usage, and classify the request.
+    tools: []
+    slots: [language, caller_intent, guest_status]
+    variables: [property_name, front_desk_hours, opening_hours]
+    guards:
+      - id: ki_disclosure_first_turn
+        description: First audible greeting must identify the assistant as AI-supported.
+        applies_to: [greeting]
+      - id: no_guest_data_disclosure
+        description: Do not disclose booking or guest details before verification.
+        forbidden_behaviors: ["Reveal room number without verification."]
+    scenarios:
+      - id: hotel_greeting_basic
+        name: Basic hotel greeting
+        caller_goal: The caller asks whether this is the hotel front desk.
+        mandatory: true
+        expected:
+          transcript_assertions: [KI, Hotel]
+          guards: [ki_disclosure_first_turn, no_guest_data_disclosure]
+  - id: room_availability
+    name: Room availability and rates
+    category: sales
+    description: Collect date range, guests, room type, and answer availability/rate questions.
+    tools:
+      - name: check_room_availability
+        required: false
+        description: Ground availability and rate answers in the booking source.
+    slots: [arrival_date, departure_date, guest_count, room_type, rate_plan]
+    variables: [booking_engine, tax_fee_disclaimer, cancellation_policy]
+    guards:
+      - id: availability_grounding
+        description: Availability and prices must be sourced or qualified as subject to confirmation.
+        applies_to: [check_room_availability]
+    scenarios:
+      - id: hotel_room_availability
+        name: Weekend availability
+        caller_goal: The caller asks if a double room is available this weekend.
+        mandatory: true
+        expected:
+          tools: [check_room_availability]
+          guards: [availability_grounding]
+  - id: booking_create
+    name: Booking creation
+    category: transaction
+    description: Create a booking after collecting stay details and readback confirmation.
+    tools:
+      - name: create_booking
+        required: true
+        required_slots: [arrival_date, departure_date, guest_count, customer_name, phone_number]
+        optional_slots: [room_type, email, notes]
+    slots: [arrival_date, departure_date, guest_count, room_type, customer_name, phone_number, email, notes]
+    variables: [booking_confirmation_mode, deposit_policy, cancellation_policy]
+    guards:
+      - id: booking_readback_before_commit
+        description: Repeat dates, room type, guest count, and contact data before booking commit.
+        applies_to: [create_booking]
+    scenarios:
+      - id: hotel_booking_create
+        name: Booking request
+        caller_goal: Caller books a double room from Friday to Sunday and confirms the readback.
+        mandatory: true
+        expected:
+          tools: [create_booking]
+          final_state: confirmed
+          guards: [booking_readback_before_commit]
+  - id: booking_management
+    name: Booking changes and cancellation
+    category: transaction
+    description: Modify or cancel reservations after guest verification.
+    tools:
+      - name: modify_booking
+        required: false
+        required_slots: [booking_reference, customer_name, requested_change]
+      - name: cancel_booking
+        required: false
+        required_slots: [booking_reference, customer_name]
+    slots: [booking_reference, customer_name, phone_number, arrival_date, requested_change]
+    variables: [identity_verification_fields, cancellation_policy, change_policy]
+    guards:
+      - id: verify_guest_before_change
+        description: Verify guest identity or booking reference before modifying or cancelling.
+        applies_to: [modify_booking, cancel_booking]
+    scenarios:
+      - id: hotel_cancel_booking
+        name: Cancel booking
+        caller_goal: Caller wants to cancel a booking and provides the booking number.
+        mandatory: true
+        expected:
+          tools: [cancel_booking]
+          guards: [verify_guest_before_change]
+  - id: guest_services
+    name: Amenities, parking, breakfast, and check-in
+    category: knowledge
+    description: Answer common guest service questions.
+    tools:
+      - name: faq
+        required: false
+    slots: [topic, date]
+    variables: [amenities, parking_policy, breakfast_hours, check_in_policy]
+    guards:
+      - id: knowledge_grounding
+        description: If the property knowledge does not contain the answer, offer staff follow-up.
+        forbidden_behaviors: ["Invent an amenity."]
+    scenarios:
+      - id: hotel_breakfast_question
+        name: Breakfast question
+        caller_goal: Caller asks when breakfast starts.
+        mandatory: true
+        expected:
+          tools: [faq]
+          guards: [knowledge_grounding]
+  - id: hotel_escalation
+    name: Emergency, complaint, and human handoff
+    category: escalation
+    description: Route urgent or sensitive cases to staff.
+    tools:
+      - name: transfer_to_human
+        required: false
+        required_slots: [issue_type]
+        optional_slots: [customer_name, phone_number, room_number, notes]
+    slots: [issue_type, customer_name, phone_number, room_number, notes]
+    variables: [handoff_phone, night_manager_policy, emergency_instruction]
+    guards:
+      - id: urgent_handoff
+        description: Safety, emergency, payment, privacy, and angry complaint cases require staff handoff.
+        applies_to: [transfer_to_human]
+    scenarios:
+      - id: hotel_complaint_handoff
+        name: Complaint handoff
+        caller_goal: Caller says their room has no heating and wants to speak to someone now.
+        mandatory: true
+        expected:
+          tools: [transfer_to_human]
+          guards: [urgent_handoff]

@@ -1,0 +1,30 @@
+# Secrets
+.env
+.env.local
+.env.production
+configs/env/.env*
+*.pem
+*.key
+**/BedrockAPIKey*.csv
+scripts/gsm-aws-bedrock-templates/*.value
+
+# Python
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Node
+node_modules/
+
+# Runtime output
+logs/
+call_reports/
+reports/
+*.log
+calls.db
+
+# Dev
+.cursor/
+.vscode/
+.git/

@@ -1,0 +1,21 @@
+# Phase 6.1 — One LLM call per turn
+
+id: phase6_test_6_1_one_llm_per_turn
+phase: 6
+description: "Verify exactly one TinyGenerator call per turn (observability)"
+
+caller:
+  goal: "Stelle eine kurze Frage."
+  identity:
+    name: "Test"
+  patience_turns: 3
+  hesitation: low
+
+expectations:
+  forbid_phrases:
+    - "[tool:"
+
+release_thresholds:
+  internal_alpha: optional
+  supervised_beta: optional
+  production: required

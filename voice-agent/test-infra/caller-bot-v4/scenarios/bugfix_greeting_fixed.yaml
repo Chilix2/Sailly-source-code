@@ -1,0 +1,39 @@
+# Bug Fix 4: Greeting is fixed and identical across all calls
+# Three consecutive calls should all receive the exact same greeting text
+# Expectation: greeting_line from tenant config is used, not TinyGenerator
+
+id: bugfix_greeting_fixed
+phase: bugfix
+description: "Greeting is fixed from tenant config, identical across all calls"
+
+caller:
+  goal: "Rufe dreimal an und verifiziere dass die Begrüßung immer identisch ist."
+  multi_call_test: true
+  repeat_calls: 3
+  identity:
+    name: "Test Caller"
+    phone: "+4915900000000"
+  patience_turns: 1
+  hesitation: low
+
+expectations:
+  # Exact greeting as specified in doboo.yaml
+  must_contain_all_of:
+    - "Sailly"
+    - "KI-Assistentin"
+    - "DOBOO"
+    - "Korean Soulfood"
+    - "Bonn"
+    - "behilflich"
+  # Should NOT vary each call
+  greeting_consistency: "exact_match_all_calls"
+  # Should not have filler variations
+  must_not_contain:
+    - "kann ich ihnen helfen"
+    - "kann ich für sie tun"
+    - "was wünschen"
+
+release_thresholds:
+  internal_alpha: required
+  supervised_beta: required
+  production: required

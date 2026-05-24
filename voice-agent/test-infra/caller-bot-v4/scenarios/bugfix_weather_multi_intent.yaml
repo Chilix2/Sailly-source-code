@@ -1,0 +1,45 @@
+# Bug Fix 1: Weather intent should not be silently dropped in multi-intent scenario
+# Caller asks both "wie ist das wetter" and mentions reservation in same utterance
+# Expectation: weather information is spoken before asking for reservation details
+
+id: bugfix_weather_multi_intent
+phase: bugfix
+description: "Weather intent honored when combined with reservation intent in same utterance"
+
+caller:
+  goal: "Frage nach dem Wetter und reserviere einen Tisch in einem Satz."
+  utterance_sequence:
+    - "Wie ist das Wetter heute und ich möchte einen Tisch für vier Personen reservieren."
+    - "Samstag um 19 Uhr."
+    - "Markus Müller."
+    - "0179 345 6789"
+  identity:
+    name: "Markus Müller"
+    phone: "+4915900000000"
+  patience_turns: 10
+  hesitation: low
+
+expectations:
+  # Weather must be mentioned somewhere in the bot's responses (any turn)
+  must_contain_one_of:
+    - "wetter"
+    - "temperatur"
+    - "°c"
+    - "grad"
+    - "bewölkt"
+    - "sonnig"
+    - "regn"
+  # Reservation flow must also proceed
+  must_contain_one_of_secondary:
+    - "tisch"
+    - "personen"
+    - "reservier"
+  must_not_contain:
+    - "verstehe nicht"
+    - "technisches problem"
+    - "[tool:"
+
+release_thresholds:
+  internal_alpha: required
+  supervised_beta: required
+  production: required

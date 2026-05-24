@@ -1,0 +1,18 @@
+{
+  "rateLimits": {
+    "maxDemosPerIp": 1,
+    "cookieMaxAgeDays": 30,
+    "cooldownMinutes": 5
+  },
+  "twilio": {
+    "fromNumberEnvVar": "TWILIO_PHONE_NUMBER",
+    "statusCallbackPath": "/api/demo/call-status",
+    "twimlPath": "/api/demo/twiml"
+  },
+  "postCall": {
+    "whatsappNumber": "+491634549834",
+    "whatsappMessage": "Hallo! Ich habe gerade die Sailly Demo getestet und bin interessiert.",
+    "smsNumber": "+491634549834"
+  },
+  "scenarios": ["restaurant", "hotel", "medical", "other"]
+}

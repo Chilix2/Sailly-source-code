@@ -1,0 +1,297 @@
+{
+  "report": {
+    "generated_at": "2026-05-06T12:25:00Z",
+    "system": "Sailly Voice Agent - Stress Test Phase A",
+    "status": "CRITICAL",
+    "summary": {
+      "average_composite_score": 49.6,
+      "threshold": 80,
+      "total_scenarios": 21,
+      "passed_scenarios": 7,
+      "pass_rate": 0.325,
+      "batches_completed": 3
+    },
+    "batch_results": [
+      {
+        "batch_id": "A1.1_D1",
+        "difficulty": "D1",
+        "status": "COMPLETE",
+        "attempts": {
+          "current": 3,
+          "max": 3
+        },
+        "pass_rate": {
+          "passed": 2,
+          "total": 7,
+          "percentage": 28.6
+        },
+        "composite_score": 65.7,
+        "metrics": {
+          "tool_accuracy": 70,
+          "flow": 55,
+          "linguistic": 93,
+          "deterministic": 48
+        },
+        "error_flags": {
+          "total": 6,
+          "types": ["BOT_LOOP", "NAME_LOOP", "SLOT_STATE_LOST"]
+        },
+        "fixes_applied": true,
+        "improvement": "MINIMAL"
+      },
+      {
+        "batch_id": "A1.2_D2",
+        "difficulty": "D2",
+        "status": "COMPLETE",
+        "attempts": {
+          "current": 2,
+          "max": 3
+        },
+        "pass_rate": {
+          "passed": 2,
+          "total": 7,
+          "percentage": 28.6
+        },
+        "composite_score": 40.0,
+        "regression": {
+          "detected": true,
+          "reason": "Fixes applied but score worsened"
+        },
+        "metrics": {
+          "tool_accuracy": 40,
+          "flow": 20,
+          "linguistic": 90,
+          "deterministic": 30
+        },
+        "error_flags": {
+          "total": 16,
+          "types": ["BOT_LOOP", "FLOW_BROKEN", "NO_TOOL_CALLED", "AVAILABILITY_CHECK_FAILED", "NAME_LOOP", "DETERMINISTIC_FAILED"]
+        },
+        "fixes_applied": true,
+        "improvement": "REGRESSION"
+      },
+      {
+        "batch_id": "A1.3_D3",
+        "difficulty": "D3",
+        "status": "COMPLETE",
+        "attempts": {
+          "current": 3,
+          "max": 3
+        },
+        "pass_rate": {
+          "passed": 3,
+          "total": 7,
+          "percentage": 42.9
+        },
+        "composite_score": 43.2,
+        "metrics": {
+          "tool_accuracy": 50,
+          "flow": 20,
+          "linguistic": 85,
+          "deterministic": 30
+        },
+        "error_flags": {
+          "total": 11,
+          "types": ["UHRZEIT_FALSCH", "BOT_LOOP", "SLOT_STATE_LOST", "FLOW_BROKEN"]
+        },
+        "fixes_applied": true,
+        "improvement": "MINIMAL"
+      }
+    ],
+    "root_causes": {
+      "tool_calling": {
+        "severity": "CRITICAL",
+        "average_score": 53,
+        "issues": [
+          {
+            "name": "Policy Gate Malfunction",
+            "file": "adk_turn_processor.py",
+            "lines": "86-108",
+            "function": "_validate_tool_call",
+            "problem": "create_reservation blocked because check_availability not in all_tools list",
+            "status": "BROKEN"
+          },
+          {
+            "name": "Slot State Not Committed Before Tool Validation",
+            "file": "v4_pipeline.py",
+            "lines": "620-660",
+            "problem": "all_tools list reflects only previous turns, not current turn",
+            "status": "BROKEN"
+          },
+          {
+            "name": "Tool Execution Loop",
+            "file": "adk_turn_processor.py",
+            "lines": "1150+",
+            "problem": "Tool results not propagated back to state",
+            "status": "BROKEN"
+          }
+        ]
+      },
+      "flow": {
+        "severity": "CRITICAL",
+        "average_score": 32,
+        "issues": [
+          {
+            "name": "Deterministic Clarify Not Triggering",
+            "file": "v4_pipeline.py",
+            "lines": "712-740",
+            "problem": "ctx_doc.missing_slots computed incorrectly or next_action set wrong",
+            "status": "FAILING"
+          },
+          {
+            "name": "Missing Slot Computation Bug",
+            "file": "context_doc_builder.py",
+            "problem": "Slots marked as missing even after extraction from user",
+            "status": "BROKEN"
+          },
+          {
+            "name": "State Machine Stuck in Wrong Node",
+            "file": "v4_pipeline.py",
+            "lines": "651,671",
+            "problem": "end_call_stage not transitioning correctly after tool execution",
+            "status": "FAILING"
+          }
+        ]
+      },
+      "deterministic_logic": {
+        "severity": "CRITICAL",
+        "average_score": 36,
+        "issues": [
+          {
+            "name": "Deterministic Path Bypass",
+            "file": "v4_pipeline.py",
+            "lines": "712-740",
+            "problem": "Code falls through to LLM even when deterministic path should trigger",
+            "status": "BROKEN"
+          },
+          {
+            "name": "LLM System Prompt Degradation",
+            "file": "layer2/system_prompt.py",
+            "problem": "Previous prompt stuffing attempts causing verbose responses",
+            "status": "DEGRADED"
+          },
+          {
+            "name": "No Fallback to Deterministic When LLM Fails",
+            "file": "v4_pipeline.py",
+            "problem": "Returns error instead of falling back to hardcoded question",
+            "status": "MISSING"
+          }
+        ]
+      }
+    },
+    "fixes_applied": [
+      {
+        "fix_id": 1,
+        "target": "v4_pipeline.py",
+        "line": 648,
+        "change": "Reset check_availability_called on unavailable",
+        "intent": "Prevent skip of availability check on next turn",
+        "result": "FAILED",
+        "reason": "Fix applied too late in flow, all_tools list already computed"
+      },
+      {
+        "fix_id": 2,
+        "target": "haiku_fix_generator.py",
+        "line": 20,
+        "change": "Upgrade model from Claude 3.5 Sonnet to Claude Sonnet 4.6",
+        "intent": "Larger context window for better code reasoning",
+        "result": "PARTIALLY_EFFECTIVE",
+        "reason": "Model loaded but fixes still ineffective - wrong fix strategy"
+      },
+      {
+        "fix_id": 3,
+        "target": "haiku_fix_generator.py",
+        "line": 262,
+        "change": "Increase max_tokens from 4096 to 16384",
+        "intent": "Prevent Haiku response truncation",
+        "result": "INEFFECTIVE",
+        "reason": "No truncation but fixes are wrong type (prompt rewrites not surgical)"
+      }
+    ],
+    "broken_processes": [
+      {
+        "name": "Tool Calling Policy Gate",
+        "file": "adk_turn_processor.py",
+        "lines": "86-108",
+        "status": "BROKEN",
+        "impact": "Tools blocked unfairly",
+        "priority": "CRITICAL",
+        "fix_required": "Refactor to check state.check_availability_called FIRST before checking all_tools"
+      },
+      {
+        "name": "Missing Slot Detection",
+        "file": "context_doc_builder.py",
+        "status": "BROKEN",
+        "impact": "Slots appear missing when filled",
+        "priority": "CRITICAL",
+        "fix_required": "Sync OrderSlots status with extracted values from current turn"
+      },
+      {
+        "name": "Deterministic Clarify Gate",
+        "file": "v4_pipeline.py",
+        "lines": "712-740",
+        "status": "CONDITIONAL_FAILURE",
+        "impact": "LLM over-used, bot verbose",
+        "priority": "CRITICAL",
+        "fix_required": "Ensure ctx_doc.missing_slots is non-empty when entering block"
+      },
+      {
+        "name": "State Transition Logic",
+        "file": "v4_pipeline.py",
+        "lines": "651,671",
+        "status": "PARTIAL_FAILURE",
+        "impact": "State not persisting/resetting",
+        "priority": "CRITICAL",
+        "fix_required": "Verify Redis persistence of state object"
+      },
+      {
+        "name": "Fix Generation Strategy",
+        "file": "haiku_fix_generator.py",
+        "lines": "171-257",
+        "status": "WRONG_STRATEGY",
+        "impact": "Fixes regress scores",
+        "priority": "HIGH",
+        "fix_required": "Implement issue-gated strategy instead of score-based"
+      },
+      {
+        "name": "Regression Circuit Breaker",
+        "file": "scenario_based_loop.py",
+        "status": "NOT_TRIGGERED",
+        "impact": "Doesn't catch all regressions",
+        "priority": "HIGH",
+        "fix_required": "Ensure baseline is captured and comparison works"
+      }
+    ],
+    "error_distribution": {
+      "A1.1_D1": {
+        "total_flags": 6,
+        "breakdown": {
+          "BOT_LOOP": 1,
+          "NAME_LOOP": 2,
+          "SLOT_STATE_LOST": 1,
+          "OTHER": 2
+        }
+      },
+      "A1.2_D2": {
+        "total_flags": 16,
+        "breakdown": {
+          "BOT_LOOP": 2,
+          "FLOW_BROKEN": 2,
+          "NO_TOOL_CALLED": 3,
+          "AVAILABILITY_CHECK_FAILED": 3,
+          "NAME_LOOP": 3,
+          "DETERMINISTIC_FAILED": 3
+        }
+      },
+      "A1.3_D3": {
+        "total_flags": 11,
+        "breakdown": {
+          "UHRZEIT_FALSCH": 1,
+          "BOT_LOOP": 2,
+          "SLOT_STATE_LOST": 2,
+          "FLOW_BROKEN": 6
+        }
+      }
+    }
+  }
+}

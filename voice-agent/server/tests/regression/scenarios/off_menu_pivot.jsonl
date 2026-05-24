@@ -1,0 +1,8 @@
+{"meta": {"name": "off_menu_pivot", "description": "Caller asks for Pizza (off-menu). Bot must NOT repeat denial more than once.", "fix_history": ["2026-04-26: removed turn:last, added placeholder forbid (Sprint 1 PR-B)", "2026-05-08: re-applied after regression — pizza not in menu, bot suggests Korean alt"]}}
+{"role": "user", "text": "Ich möchte eine Pizza Margherita bestellen."}
+{"role": "assert", "type": "forbid", "text": "technisches problem"}
+{"role": "assert", "type": "forbid", "text": "(keine details erfasst)"}
+{"role": "user", "text": "Gibt es wirklich keine Pizza bei euch?"}
+{"role": "user", "text": "Okay dann hätte ich gerne einen Bulgogi."}
+{"role": "assert", "type": "contains", "text": "bulgogi"}
+{"role": "assert", "type": "forbid", "text": "pizza haben wir nicht"}

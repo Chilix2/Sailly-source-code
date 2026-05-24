@@ -1,0 +1,306 @@
+/* Sailly Browser Demo CSS */
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: linear-gradient(135deg, #0f172b 0%, #324258 100%);
+    color: #000;
+    min-height: 100vh;
+}
+
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 30px 20px;
+}
+
+.header {
+    text-align: center;
+    color: #f5e9e4;
+    margin-bottom: 40px;
+}
+
+.header h1 {
+    font-size: 2.5rem;
+    margin-bottom: 10px;
+    color: #f5e9e4;
+}
+
+.header p {
+    font-size: 1.1rem;
+    color: #e0d5ca;
+}
+
+.demo-content {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 30px;
+}
+
+@media (max-width: 900px) {
+    .demo-content {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* Phone Mockup */
+.phone-mockup {
+    position: relative;
+    width: 100%;
+    max-width: 400px;
+    margin: 0 auto;
+    background: #1a1a1a;
+    border-radius: 40px;
+    padding: 12px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+}
+
+.phone-notch {
+    position: absolute;
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 200px;
+    height: 28px;
+    background: #1a1a1a;
+    border-radius: 0 0 30px 30px;
+    z-index: 10;
+}
+
+.phone-screen {
+    background: white;
+    border-radius: 30px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    height: 600px;
+    box-shadow: inset 0 0 20px rgba(0, 0, 0, 0.1);
+}
+
+.call-header {
+    background: linear-gradient(135deg, #e60076 0%, #a020f0 100%);
+    color: white;
+    padding: 16px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 500;
+    font-size: 0.95rem;
+    min-height: 50px;
+}
+
+.status-indicator {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: white;
+    animation: pulse 1s infinite;
+}
+
+.status-indicator.active {
+    background: #00d084;
+    animation: none;
+}
+
+@keyframes pulse {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.5;
+    }
+}
+
+#call-status {
+    flex: 1;
+}
+
+/* Transcript */
+.transcript {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    background: #f9f9f9;
+}
+
+.transcript-empty {
+    text-align: center;
+    color: #999;
+    margin-top: auto;
+    margin-bottom: auto;
+    font-size: 0.9rem;
+}
+
+.transcript-message {
+    display: flex;
+    gap: 8px;
+    align-items: flex-end;
+}
+
+.transcript-message.user {
+    justify-content: flex-end;
+}
+
+.transcript-bubble {
+    max-width: 80%;
+    padding: 12px 16px;
+    border-radius: 18px;
+    word-wrap: break-word;
+    font-size: 0.95rem;
+    line-height: 1.4;
+}
+
+.transcript-message.user .transcript-bubble {
+    background: linear-gradient(135deg, #e60076 0%, #a020f0 100%);
+    color: white;
+    border-bottom-right-radius: 4px;
+}
+
+.transcript-message.bot .transcript-bubble {
+    background: #e0e0e0;
+    color: #000;
+    border-bottom-left-radius: 4px;
+}
+
+.transcript-label {
+    font-size: 0.75rem;
+    color: #666;
+    margin-top: 4px;
+}
+
+.transcript-message.user .transcript-label {
+    text-align: right;
+    color: #999;
+}
+
+/* Call Controls */
+.call-controls {
+    padding: 16px;
+    background: white;
+    border-top: 1px solid #e0e0e0;
+    display: flex;
+    justify-content: center;
+}
+
+.call-btn {
+    width: 80px;
+    height: 80px;
+    border-radius: 50%;
+    border: none;
+    font-size: 1.8rem;
+    font-weight: bold;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.call-btn.start {
+    background: #00d084;
+    color: white;
+}
+
+.call-btn.start:hover:not(:disabled) {
+    background: #00bf73;
+    transform: scale(1.05);
+}
+
+.call-btn.end {
+    background: #ff3b30;
+    color: white;
+}
+
+.call-btn.end:hover:not(:disabled) {
+    background: #e50000;
+    transform: scale(1.05);
+}
+
+.call-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.btn-icon {
+    font-size: 2rem;
+}
+
+.btn-text {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+/* Info Panel */
+.info-panel {
+    color: #f5e9e4;
+}
+
+.info-panel h2 {
+    font-size: 1.3rem;
+    margin-top: 20px;
+    margin-bottom: 10px;
+    color: #f5e9e4;
+}
+
+.info-panel ul {
+    list-style: none;
+    margin-bottom: 20px;
+}
+
+.info-panel li {
+    padding: 8px 0;
+    font-size: 0.95rem;
+    color: #e0d5ca;
+}
+
+.examples li {
+    padding: 10px 12px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    margin-bottom: 6px;
+    font-size: 0.9rem;
+    font-style: italic;
+}
+
+/* Error Box */
+.error-box {
+    background: #ff3b30;
+    color: white;
+    padding: 12px 16px;
+    border-radius: 8px;
+    margin-top: 20px;
+    font-size: 0.9rem;
+    border-left: 4px solid white;
+}
+
+/* Scrollbar Styling */
+.transcript::-webkit-scrollbar {
+    width: 6px;
+}
+
+.transcript::-webkit-scrollbar-track {
+    background: #f0f0f0;
+    border-radius: 3px;
+}
+
+.transcript::-webkit-scrollbar-thumb {
+    background: #c0c0c0;
+    border-radius: 3px;
+}
+
+.transcript::-webkit-scrollbar-thumb:hover {
+    background: #a0a0a0;
+}

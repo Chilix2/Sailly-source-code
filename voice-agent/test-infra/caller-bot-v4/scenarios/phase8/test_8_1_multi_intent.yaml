@@ -1,0 +1,21 @@
+# Phase 8.1 — Multi-intent handling
+
+id: phase8_test_8_1_multi_intent
+phase: 8
+description: "Bot handles multiple intents in one call"
+
+caller:
+  goal: "Frage nach Öffnungszeiten und reserviere dann einen Tisch."
+  identity:
+    name: "Test"
+  patience_turns: 8
+  hesitation: low
+
+expectations:
+  forbid_phrases:
+    - "[tool:"
+
+release_thresholds:
+  internal_alpha: optional
+  supervised_beta: optional
+  production: optional

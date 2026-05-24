@@ -1,0 +1,18 @@
+{
+  "scenario": "philipp_stress_test",
+  "phase": 2,
+  "recorded_at": "2026-04-22",
+  "note": "Phase 2 baseline. 3-intent scenario not yet fully handled by state machine. Expected to fail. Phase 3 target: all checks pass.",
+  "pass_rate": 0.0,
+  "checks_passed": 0,
+  "checks_total": 6,
+  "known_failures": [
+    "tool:create_order — not fired (multi-intent state machine not wired to live tool dispatch)",
+    "tool:create_reservation — not fired (same reason)",
+    "contains:bulgogi — bot may not read back all 3 intents in one turn"
+  ],
+  "phase3_target": {
+    "pass_rate": 1.0,
+    "description": "All 6 assertion checks pass: 3-intent monologue parsed, all tools fired, no forbidden phrases"
+  }
+}

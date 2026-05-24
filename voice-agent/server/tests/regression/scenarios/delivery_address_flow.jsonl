@@ -1,0 +1,8 @@
+{"meta": {"name": "delivery_address_flow", "description": "Delivery order with address verification — verify_address must fire, create_order at end"}}
+{"role": "user", "text": "Ich möchte Bulgogi liefern lassen. Adresse ist Hauptstraße elf in Bonn."}
+{"role": "assert", "type": "forbid", "text": "technisches problem"}
+{"role": "user", "text": "Ja, die Adresse stimmt. Ich bin Thomas Müller."}
+{"role": "user", "text": "Null eins sieben null null zwei drei vier fünf sechs sieben."}
+{"role": "user", "text": "Ja, alles korrekt."}
+{"role": "assert", "type": "tool", "name": "verify_address", "at_end": true}
+{"role": "assert", "type": "tool", "name": "create_order", "at_end": true}
