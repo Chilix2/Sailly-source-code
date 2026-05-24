@@ -35,8 +35,13 @@ async def handle(args: dict, ctx: ToolContext) -> ToolResult:
         from tools.executor import _get_date_info as _legacy  # type: ignore
         date_result = await _legacy(args, ctx.call_sid, ctx.tenant_id)
     except ImportError:
-        from datetime import datetime, date
-        today = date.today()
+        from datetime import datetime
+        try:
+            import pytz
+            today = datetime.now(pytz.timezone("Europe/Berlin")).date()
+        except ImportError:
+            from zoneinfo import ZoneInfo
+            today = datetime.now(ZoneInfo("Europe/Berlin")).date()
         date_result = {
             "date": today.isoformat(),
             "weekday": today.strftime("%A"),
