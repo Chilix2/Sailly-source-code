@@ -368,6 +368,79 @@ def _item_quantity(item, state, fallback_qty: int, idx: int) -> int:
     return fallback_qty if (idx == 0 and fallback_qty > 1) else 1
 
 
+def _join_german_list(parts: list[str]) -> str:
+    if len(parts) <= 1:
+        return parts[0] if parts else ""
+    return ", ".join(parts[:-1]) + " und " + parts[-1]
+
+
+def _build_order_overview_v4(state, *, final: bool = False) -> dict:
+    """Build a priced order overview or a concrete blocker when prices are missing."""
+    from server.brain.conversation_state import resolve_dish_canonical
+
+    raw_items = getattr(state, "selected_items", None) or []
+    if not raw_items:
+        selected = getattr(state, "selected_dish", None)
+        raw_items = [selected] if selected else []
+    items = _dedupe_order_items(raw_items)
+    if not items:
+        return {"ok": False, "text": "Welche Gerichte möchten Sie bestellen?", "missing": ["Bestellung"]}
+
+    fallback_qty = getattr(state, "order_quantity", 1) or 1
+    canonical_items: list[str] = []
+    lines: list[str] = []
+    missing_prices: list[str] = []
+    total = 0.0
+
+    for idx, item in enumerate(items):
+        canonical, price = resolve_dish_canonical(state, item)
+        canonical = canonical or str(item)
+        qty = _item_quantity(item, state, fallback_qty, idx)
+        canonical_items.append(canonical)
+        if price is None:
+            missing_prices.append(canonical)
+            continue
+        line_total = float(price) * qty
+        total += line_total
+        lines.append(f"{qty}× {canonical} für {line_total:.2f} Euro")
+
+    if missing_prices:
+        missing = _join_german_list(missing_prices)
+        return {
+            "ok": False,
+            "missing": missing_prices,
+            "text": (
+                f"Für {missing} finde ich gerade keinen eindeutigen Menüpreis. "
+                "Bitte wählen Sie ein eindeutig verfügbares Gericht aus der Speisekarte."
+            ),
+        }
+
+    if canonical_items:
+        state.selected_dish = canonical_items[0]
+        state.selected_items = canonical_items
+        state.order_items_extras = canonical_items[1:]
+    state.order_summary = _join_german_list(lines)
+    state.order_total = f"{total:.2f}"
+
+    name = getattr(state, "customer_name", None) or getattr(state, "first_name", None) or ""
+    address = getattr(state, "delivery_address", None)
+    name_clause = f" auf den Namen {name}" if name else ""
+    fulfillment_clause = f", Lieferung an {address}" if address else " zur Abholung"
+    total_clause = f" Gesamtbetrag: {total:.2f} Euro."
+
+    if final:
+        text = (
+            f"Ihre Bestellung wurde aufgenommen: {state.order_summary}"
+            f"{fulfillment_clause}{name_clause}.{total_clause} Auf Wiederhören!"
+        )
+    else:
+        text = (
+            f"Sie haben bestellt: {state.order_summary}{fulfillment_clause}"
+            f"{name_clause}.{total_clause} Stimmt das so?"
+        )
+    return {"ok": True, "text": text, "items": canonical_items, "total": total}
+
+
 # ── Tools telemetry resolver ─────────────────────────────────────────────────────
 
 def _resolve_tools_for_profile(
@@ -1579,6 +1652,8 @@ async def process_turn_v4(
         elif _semantic_confirms_v4(state) or _is_confirmation_v4(user_text):
             # User confirmed — mark stage as idle and fall through to commit gate
             _order_readback_confirmed_now = end_call_stage == "order_pre_commit_readback"
+            if _order_readback_confirmed_now:
+                state._order_readback_confirmed = True
             state.end_call_stage = "idle"
             end_call_stage = "idle"
             logger.info(f"[v4_pipeline] T{turn_idx} pre-commit summary confirmed → proceeding to commit")
@@ -1803,7 +1878,7 @@ async def process_turn_v4(
         )
     _order_not_committed = not getattr(state, "order_created", False)
     _order_slots_ok = (
-        end_call_stage == "idle"
+        (end_call_stage == "idle" or _order_readback_confirmed_now or getattr(state, "_order_readback_confirmed", False))
         and _all_slots_present(state, "create_order")
     )
     _delivery_order_without_address = (
@@ -1951,7 +2026,10 @@ async def process_turn_v4(
         )
         and (
             _delivery_address_pending
-            or getattr(state, "verify_address_failed", False) is True
+            or (
+                getattr(state, "verify_address_failed", False) is True
+                and not getattr(state, "address_verified", False)
+            )
             or (
                 bool(getattr(state, "delivery_address", None))
                 and not getattr(state, "address_verified", False)
@@ -2012,34 +2090,22 @@ async def process_turn_v4(
         # CRITICAL: Once readback is shown, only show it again if user explicitly asks for correction
         if not getattr(state, '_readback_already_shown', False):
             # Show readback with items+prices this turn, return immediately
-            items = getattr(state, "selected_items", None) or []
-            if not items:
-                sd = getattr(state, "selected_dish", None)
-                items = [sd] if sd else []
-            items = _dedupe_order_items(items)
-            _order_qty = getattr(state, "order_quantity", 1) or 1
-            from server.brain.conversation_state import resolve_dish_canonical
-            price_lines = []
-            for idx, item in enumerate(items):
-                canonical, price = resolve_dish_canonical(state, item)
-                if canonical != item and item == getattr(state, "selected_dish", None):
-                    state.selected_dish = canonical
-                if canonical != item and isinstance(getattr(state, "selected_items", None), list):
-                    state.selected_items[idx] = canonical
-                effective_qty = _item_quantity(item, state, _order_qty, idx)
-                qty_prefix = f"{effective_qty}× "
-                if price:
-                    total = price * effective_qty
-                    price_lines.append(f"{qty_prefix}{canonical} für {total:.2f} Euro")
-                else:
-                    price_lines.append(f"{qty_prefix}{canonical}")
-            items_str = ", ".join(price_lines) if price_lines else ""
-            _rb_name = getattr(state, "customer_name", None)
-            _rb_addr = getattr(state, "delivery_address", None)
-            _name_clause = f" auf den Namen {_rb_name}" if _rb_name else ""
-            _addr_clause = f", Lieferung an {_rb_addr}" if _rb_addr else ""
-            _pickup_clause = " zur Abholung" if not _rb_addr else ""
-            summary = _with_name_ack(f"Sie haben bestellt: {items_str}{_pickup_clause}{_addr_clause}{_name_clause}. Stimmt das so?")
+            overview = _build_order_overview_v4(state)
+            summary = _with_name_ack(overview["text"])
+            if not overview["ok"]:
+                state._readback_already_shown = False
+                state.end_call_stage = "idle"
+                state._pending_bot_response = summary
+                logger.info("[v4_pipeline] T%d order readback blocked: %s", turn_idx, summary)
+                if tts_callback:
+                    try:
+                        await tts_callback(summary)
+                    except Exception as _cb_err:
+                        logger.warning(f"[v4_pipeline] tts_callback raised: {_cb_err}")
+                return _quick_return(
+                    summary, "order_start", intent_result, t0,
+                    tools=scheduled_run, next_action="clarify", should_end=False,
+                )
             state._readback_already_shown = True
             state.end_call_stage = "order_pre_commit_readback"
             state._pending_bot_response = summary
@@ -2058,6 +2124,7 @@ async def process_turn_v4(
         if state.end_call_stage == "order_pre_commit_readback" and getattr(state, '_readback_already_shown', False):
             if _semantic_confirms_v4(state) or _is_confirmation_v4(user_text):
                 # User confirmed readback → proceed to commit
+                state._order_readback_confirmed = True
                 state.end_call_stage = "idle"
                 logger.info(f"[v4_pipeline] T{turn_idx} order readback CONFIRMED → executing create_order")
                 # Immediately execute create_order below WITHOUT returning early
@@ -2130,29 +2197,22 @@ async def process_turn_v4(
             # Readback not yet shown—show it now and return (don't execute tool yet)
             state.order_pre_commit_shown = True
             state.end_call_stage = 'order_pre_commit_readback'
-            items = getattr(state, 'selected_items', None) or []
-            if not items:
-                sd = getattr(state, 'selected_dish', None)
-                items = [sd] if sd else []
-            items = _dedupe_order_items(items)
-            from server.brain.conversation_state import resolve_dish_canonical
-            price_lines = []
-            _order_qty_rb2 = getattr(state, "order_quantity", 1) or 1
-            for idx, item in enumerate(items):
-                canonical, price = resolve_dish_canonical(state, item)
-                effective_qty = _item_quantity(item, state, _order_qty_rb2, idx)
-                qty_prefix = f"{effective_qty}× "
-                if price:
-                    price_lines.append(f"{qty_prefix}{canonical} für {price * effective_qty:.2f} Euro")
-                else:
-                    price_lines.append(f"{qty_prefix}{canonical}")
-            items_str = ", ".join(price_lines) if price_lines else ""
-            _rb_name2 = getattr(state, "customer_name", None)
-            _rb_addr2 = getattr(state, "delivery_address", None)
-            _name_clause2 = f" auf den Namen {_rb_name2}" if _rb_name2 else ""
-            _addr_clause2 = f", Lieferung an {_rb_addr2}" if _rb_addr2 else ""
-            _pickup_clause2 = " zur Abholung" if not _rb_addr2 else ""
-            summary = f"Sie haben bestellt: {items_str}{_pickup_clause2}{_addr_clause2}{_name_clause2}. Stimmt das so?"
+            overview = _build_order_overview_v4(state)
+            summary = overview["text"]
+            if not overview["ok"]:
+                state._readback_already_shown = False
+                state.end_call_stage = "idle"
+                state._pending_bot_response = summary
+                logger.info("[v4_pipeline] T%d order readback blocked: %s", turn_idx, summary)
+                if tts_callback:
+                    try:
+                        await tts_callback(summary)
+                    except Exception as _cb_err:
+                        logger.warning(f"[v4_pipeline] tts_callback raised: {_cb_err}")
+                return _quick_return(
+                    summary, "order_start", intent_result, t0,
+                    tools=scheduled_run, next_action="clarify", should_end=False,
+                )
             state._readback_already_shown = True
             if tts_callback:
                 try:
@@ -2259,28 +2319,8 @@ async def process_turn_v4(
                 logger.info(f"[v4_pipeline] T{turn_idx} ORDER COMMITTED (multi-intent, reservation pending) → readback: {readback!r}")
             else:
                 # Build order commit confirmation WITH items+prices so the caller bot sees them
-                from server.brain.conversation_state import resolve_dish_canonical as _rdc_commit
-                _items_commit = getattr(state, "selected_items", None) or []
-                if not _items_commit:
-                    sd = getattr(state, "selected_dish", None)
-                    _items_commit = [sd] if sd else []
-                _items_commit = _dedupe_order_items(_items_commit)
-                _price_lines_commit = []
-                for idx, _ci in enumerate(_items_commit):
-                    _cname, _cprice = _rdc_commit(state, _ci)
-                    _eff_qty = _item_quantity(_ci, state, _order_qty, idx)
-                    _qty_pfx = f"{_eff_qty}× "
-                    if _cprice:
-                        _price_lines_commit.append(f"{_qty_pfx}{_cname} für {_cprice * _eff_qty:.2f} Euro")
-                    else:
-                        _price_lines_commit.append(f"{_qty_pfx}{_cname}")
-                _order_name_commit = getattr(state, "customer_name", None) or getattr(state, "first_name", None) or ""
-                _items_str_commit = ", ".join(_price_lines_commit) if _price_lines_commit else "Ihre Bestellung"
-                _name_clause = f" auf den Namen {_order_name_commit}" if _order_name_commit else ""
-                _commit_addr = getattr(state, "delivery_address", None)
-                _addr_suffix = f", Lieferung an {_commit_addr}" if _commit_addr else ""
-                _pickup_suffix = " zur Abholung" if not _commit_addr else ""
-                readback = f"Ihre Bestellung wurde aufgenommen: {_items_str_commit}{_pickup_suffix}{_addr_suffix}{_name_clause}. Auf Wiederhören!"
+                overview = _build_order_overview_v4(state, final=True)
+                readback = overview["text"]
                 logger.info(f"[v4_pipeline] T{turn_idx} ORDER COMMITTED → readback: {readback!r}")
 
             if tts_callback:
