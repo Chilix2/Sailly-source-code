@@ -2023,7 +2023,7 @@ def get_cached_dish_price(state: "ConversationState", dish_name: str) -> Optiona
             if not item_name:
                 continue
             # Substring match: track candidates sorted by preference
-            if target in item_name or item_name in target:
+            if (len(target) > 4 and target in item_name) or item_name in target:
                 ratio = SequenceMatcher(None, target, item_name).ratio()
                 # Boost vegetarian/simple variants to prefer them over meat/fish
                 _veg_boost = 0.05 if any(v in item_name for v in _VEGETARIAN_PREF) else 0.0
@@ -2106,7 +2106,7 @@ def resolve_dish_canonical(state: "ConversationState", dish_name: str) -> tuple:
             item_name = item_name_raw.lower().strip()
             if not item_name:
                 continue
-            if target in item_name or item_name in target:
+            if (len(target) > 4 and target in item_name) or item_name in target:
                 ratio = _SM(None, target, item_name).ratio()
                 if ratio > best_substring_ratio:
                     best_substring_ratio = ratio

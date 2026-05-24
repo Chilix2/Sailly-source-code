@@ -1392,9 +1392,9 @@ async def process_turn_v4(
                             for _item in _cat_items:
                                 if isinstance(_item, dict):
                                     _iname = _item.get("name", "")
-                                    _iprice = _item.get("price")
-                                    if _iname and _iprice is not None:
-                                        _menu_lines.append(f"{_iname}: {_iprice:.2f}€")
+                                    _iprice, _ilabel = _default_menu_price_label(_item)
+                                    if _ilabel and _iprice is not None:
+                                        _menu_lines.append(f"{_ilabel}: {_iprice:.2f}€")
                     if _menu_lines:
                         ctx_doc.resolved_entities["menu_data"] = "Speisekarte: " + " | ".join(_menu_lines[:15])
                         logger.info("[v4_pipeline] Menu loaded for dish validation (B2.3_D3)")
@@ -1505,10 +1505,10 @@ async def process_turn_v4(
                                     for _item in _cat_items:
                                         if isinstance(_item, dict):
                                             _iname = _item.get("name", "")
-                                            _iprice = _item.get("price")
+                                            _iprice, _ilabel = _default_menu_price_label(_item)
                                             _idesc = _item.get("description", "")
-                                            if _iname and _iprice is not None:
-                                                _menu_lines.append(f"{_iname}: {_iprice:.2f}€ — {_idesc}" if _idesc else f"{_iname}: {_iprice:.2f}€")
+                                            if _ilabel and _iprice is not None:
+                                                _menu_lines.append(f"{_ilabel}: {_iprice:.2f}€ — {_idesc}" if _idesc else f"{_ilabel}: {_iprice:.2f}€")
                             if _menu_lines:
                                 ctx_doc.resolved_entities["menu_data"] = "Speisekarte: " + " | ".join(_menu_lines[:20])
                             else:
@@ -2175,6 +2175,46 @@ async def process_turn_v4(
             address_prompt, "order_start", intent_result, t0,
             tools=scheduled_run, next_action="clarify", should_end=False,
         )
+
+    if _is_order_intent and any(marker in _text_lo for marker in ("statt", "anstelle", "ersatz")):
+        current_items = list(getattr(state, "selected_items", None) or [])
+        if current_items:
+            try:
+                from server.brain.conversation_state import _extract_all_dishes, resolve_dish_canonical
+
+                replacement_items = _extract_all_dishes(user_text, items=getattr(state, "known_items", None))
+                if not replacement_items:
+                    replacement_match = re.search(
+                        r"(?:statt|anstelle|ersatz)\s+(?:\S+\s+)?([A-Za-zÄÖÜäöüß][A-Za-zÄÖÜäöüß\-/ ]{1,40})",
+                        user_text,
+                        flags=re.IGNORECASE,
+                    )
+                    if replacement_match:
+                        raw_replacement = replacement_match.group(1).strip(" .,!?:;")
+                        if raw_replacement:
+                            replacement_items = [raw_replacement]
+
+                if replacement_items:
+                    unresolved_idx = None
+                    for idx, existing_item in enumerate(current_items):
+                        _, existing_price = resolve_dish_canonical(state, existing_item)
+                        if existing_price is None:
+                            unresolved_idx = idx
+                            break
+                    if unresolved_idx is not None:
+                        current_items[unresolved_idx:unresolved_idx + 1] = replacement_items
+                        state.selected_dish = current_items[0]
+                        state.selected_items = _dedupe_order_items(current_items)
+                        state.order_items_extras = state.selected_items[1:]
+                        state._readback_already_shown = False
+                        state._order_readback_confirmed = False
+                        logger.info(
+                            "[v4_pipeline] T%d substitution replaced unresolved order item with %s",
+                            turn_idx,
+                            replacement_items,
+                        )
+            except Exception as _sub_err:
+                logger.debug("[v4_pipeline] substitution handling failed (non-fatal): %s", _sub_err)
 
     if _is_order_intent and _order_not_committed and _order_slots_ok:
         # CRITICAL FIX H2.2_D3: Mandatory readback with items+prices BEFORE any user confirmation
