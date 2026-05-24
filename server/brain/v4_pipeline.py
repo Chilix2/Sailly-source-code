@@ -1844,6 +1844,69 @@ async def process_turn_v4(
             state.verify_address_failed = True
             logger.warning(f"[v4_pipeline] T{turn_idx} early verify_address failed (non-fatal): {_early_va_err}")
 
+    _delivery_address_pending = (
+        isinstance(getattr(state, "pending_readback_slots", None), dict)
+        and "delivery_address" in getattr(state, "pending_readback_slots", {})
+    )
+    _delivery_order_needs_address_confirmation = (
+        _is_order_intent
+        and _order_not_committed
+        and _order_slots_ok
+        and (
+            intent_result.intent == IntentKind.DELIVERY
+            or getattr(state, "delivery_intended", False) is True
+            or getattr(state, "delivery_address_mentioned", False) is True
+        )
+        and (
+            _delivery_address_pending
+            or getattr(state, "verify_address_failed", False) is True
+            or (
+                bool(getattr(state, "delivery_address", None))
+                and not getattr(state, "address_verified", False)
+                and not getattr(state, "address_confirmed", False)
+            )
+        )
+    )
+    if _delivery_order_needs_address_confirmation:
+        pending_addr = None
+        if _delivery_address_pending:
+            pending_raw = getattr(state, "pending_readback_slots", {}).get("delivery_address") or {}
+            if isinstance(pending_raw, dict):
+                pending_addr = pending_raw.get("value")
+        if pending_addr:
+            address_prompt = f"Ich habe als Lieferadresse {pending_addr} verstanden. Stimmt das so?"
+        elif getattr(state, "delivery_address", None) and not getattr(state, "verify_address_failed", False):
+            state.pending_readback_slots["delivery_address"] = {
+                "value": getattr(state, "delivery_address"),
+                "confidence": 0.75,
+                "source": "state_readback",
+            }
+            address_prompt = f"Ich habe als Lieferadresse {state.delivery_address} verstanden. Stimmt das so?"
+        else:
+            state.delivery_address = None
+            state.address_verified = False
+            state.address_confirmed = False
+            state.verify_address_called = False
+            state.verify_address_failed = False
+            address_prompt = (
+                "Die Adresse konnte ich nicht sicher finden. Können Sie Straße, "
+                "Hausnummer und Stadt bitte noch einmal nennen?"
+            )
+        state._readback_already_shown = False
+        state._order_readback_confirmed = False
+        state.end_call_stage = "idle"
+        state._pending_bot_response = address_prompt
+        logger.info("[v4_pipeline] T%d delivery order blocked until address confirmation", turn_idx)
+        if tts_callback:
+            try:
+                await tts_callback(address_prompt)
+            except Exception as _cb_err:
+                logger.warning(f"[v4_pipeline] tts_callback raised: {_cb_err}")
+        return _quick_return(
+            address_prompt, "order_start", intent_result, t0,
+            tools=scheduled_run, next_action="clarify", should_end=False,
+        )
+
     if _is_order_intent and _order_not_committed and _order_slots_ok:
         # CRITICAL FIX H2.2_D3: Mandatory readback with items+prices BEFORE any user confirmation
         # Initialize readback tracking on first access

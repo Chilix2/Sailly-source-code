@@ -240,13 +240,18 @@ class V4TurnProcessor:
         self._last_slot_extraction_latency_ms = int((time.monotonic() - started) * 1000)
 
         validators = {
-            "delivery_address": AddressValidator(call_sid=self.call_sid, tenant_id=self.tenant_id or "doboo"),
+            "delivery_address": AddressValidator(
+                call_sid=self.call_sid,
+                tenant_id=self.tenant_id or "doboo",
+                city="Bonn",
+            ),
             "phone": PhoneValidator(),
             "order_items": OrderItemValidator(self.state),
             "delivery_date": DateValidator(),
             "party_size": PartySizeValidator(),
         }
         validation_passes: list[dict] = []
+        address_reprompt: Optional[str] = None
         for candidate in candidates.all():
             validator = validators.get(candidate.slot_name)
             if validator is None:
@@ -255,10 +260,20 @@ class V4TurnProcessor:
             candidate.validator_feedback = result.feedback
             candidate.validator_valid = result.is_valid
             candidate.confidence = max(0.0, min(1.0, candidate.confidence + result.confidence_adjustment))
-            candidate.needs_readback = candidate.confidence < 0.85
+            candidate.needs_readback = (
+                candidate.confidence < 0.85
+                or (candidate.slot_name == "delivery_address" and not result.is_valid)
+            )
             if result.corrected_value is not None:
                 candidate.value = result.corrected_value
                 candidate.source = "validator_corrected"
+            if candidate.slot_name == "delivery_address" and not result.is_valid and result.corrected_value is None:
+                candidate.confidence = 0.0
+                self._clear_delivery_address_state()
+                address_reprompt = (
+                    "Die Adresse konnte ich nicht sicher finden. "
+                    "Können Sie Straße, Hausnummer und Stadt bitte noch einmal nennen?"
+                )
             if result.tool_called:
                 self._semantic_tools_called_this_turn.append(result.tool_called)
             validation_passes.append({
@@ -274,6 +289,13 @@ class V4TurnProcessor:
             self._apply_pending_semantic_slots()
             self.state.pending_readback_slots = {}
         elif pending and confirmation and str(confirmation.value).lower() == "no":
+            if "delivery_address" in pending:
+                self._clear_delivery_address_state()
+                self.state.pending_readback_slots = {}
+                return (
+                    "Alles klar, bitte nennen Sie die vollständige Lieferadresse "
+                    "mit Straße, Hausnummer und Stadt noch einmal."
+                )
             self.state.pending_readback_slots = {}
             return "Alles klar, was soll ich ändern?"
 
@@ -285,10 +307,25 @@ class V4TurnProcessor:
         }
         self._last_validation_passes = validation_passes
 
+        if address_reprompt:
+            return address_reprompt
+
         pending = getattr(self.state, "pending_readback_slots", {}) or {}
         if pending and not applied:
             return self._build_semantic_readback(pending)
         return None
+
+    def _clear_delivery_address_state(self) -> None:
+        self.state.delivery_address = None
+        self.state.address_verified = False
+        self.state.address_confirmed = False
+        self.state.verify_address_called = False
+        self.state.verify_address_failed = False
+        self.state.pending_readback_slots.pop("delivery_address", None)
+        self.state.semantic_slot_values.pop("delivery_address", None)
+        self.state._readback_already_shown = False
+        self.state._order_readback_confirmed = False
+        self.state.end_call_stage = "idle"
 
     def _apply_pending_semantic_slots(self) -> None:
         from server.brain.slot_extraction_layer import SlotCandidate, SlotCandidates

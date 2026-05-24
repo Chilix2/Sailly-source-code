@@ -1429,10 +1429,20 @@ class ConversationState:
             value = getattr(candidate, "value", None)
             if value in (None, "", [], {}):
                 continue
+            if confidence < 0.6:
+                continue
             should_apply = confidence >= 0.85 and not needs_readback
             if apply_medium_confidence and confidence >= 0.6:
                 should_apply = True
             if not should_apply:
+                if slot_name == "delivery_address":
+                    self.delivery_address = None
+                    self.address_verified = False
+                    self.address_confirmed = False
+                    self.verify_address_called = False
+                    self.verify_address_failed = False
+                    self._readback_already_shown = False
+                    self._order_readback_confirmed = False
                 pending[slot_name] = (
                     candidate.to_metric()
                     if hasattr(candidate, "to_metric")
@@ -1445,12 +1455,22 @@ class ConversationState:
                 self.name_confirmed = confidence >= 0.9
                 applied.append(slot_name)
             elif slot_name == "delivery_address":
+                if self.delivery_address and self.delivery_address != str(value).strip():
+                    self.address_verified = False
+                    self.address_confirmed = False
+                    self.verify_address_called = False
+                    self.verify_address_failed = False
+                    self._readback_already_shown = False
+                    self._order_readback_confirmed = False
                 self.delivery_address = str(value).strip()
                 self.delivery_address_mentioned = True
                 self.delivery_intended = True
                 if getattr(candidate, "validator_valid", None) is True:
                     self.address_verified = True
+                    self.address_confirmed = True
                     self.verify_address_failed = False
+                elif apply_medium_confidence:
+                    self.address_confirmed = True
                 applied.append(slot_name)
             elif slot_name == "phone":
                 self.phone_number = str(value).strip()

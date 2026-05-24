@@ -31,9 +31,10 @@ class SlotValidator:
 
 
 class AddressValidator(SlotValidator):
-    def __init__(self, *, call_sid: str, tenant_id: str):
+    def __init__(self, *, call_sid: str, tenant_id: str, city: str = "Bonn"):
         self.call_sid = call_sid
         self.tenant_id = tenant_id
+        self.city = city or "Bonn"
 
     async def validate(self, candidate: SlotCandidate) -> SlotValidationResult:
         address = str(candidate.value or "").strip()
@@ -44,7 +45,7 @@ class AddressValidator(SlotValidator):
 
             result = await execute_tool(
                 "verify_address",
-                {"address": address},
+                {"address": address, "city": self.city, "country": "Deutschland"},
                 self.call_sid,
                 self.tenant_id,
             )
@@ -57,23 +58,52 @@ class AddressValidator(SlotValidator):
                 tool_called="verify_address",
             )
 
-        valid = bool(
-            result.get("valid")
+        if not isinstance(result, dict):
+            return SlotValidationResult(
+                is_valid=False,
+                confidence_adjustment=-1.0,
+                feedback="Adresse konnte nicht validiert werden.",
+                tool_called="verify_address",
+            )
+
+        success = bool(
+            result.get("success")
+            or result.get("valid")
             or result.get("ok")
             or result.get("status") in {"valid", "ok", "success"}
-        ) if isinstance(result, dict) else False
-        normalized = None
-        if isinstance(result, dict):
-            normalized = (
-                result.get("normalized_address")
-                or result.get("formatted_address")
-                or result.get("address")
+        )
+        normalized = (
+            result.get("canonical_address")
+            or result.get("normalized_address")
+            or result.get("formatted_address")
+            or result.get("address")
+        )
+        confidence = float(result.get("confidence") or (1.0 if success else 0.0))
+        needs_confirm = bool(result.get("needs_caller_confirm"))
+
+        if success and normalized and (needs_confirm or confidence < 0.9):
+            return SlotValidationResult(
+                is_valid=False,
+                confidence_adjustment=max(0.0, 0.75 - candidate.confidence),
+                feedback=result.get("readback_text") or "Adresse bitte bestätigen lassen.",
+                corrected_value=normalized,
+                tool_called="verify_address",
             )
+
+        if not success:
+            return SlotValidationResult(
+                is_valid=False,
+                confidence_adjustment=-1.0,
+                feedback=result.get("error") or "Adresse konnte nicht validiert werden.",
+                corrected_value=normalized if normalized and normalized != address else None,
+                tool_called="verify_address",
+            )
+
         return SlotValidationResult(
-            is_valid=valid,
-            confidence_adjustment=0.15 if valid else -0.3,
-            feedback="Adresse validiert." if valid else "Adresse konnte nicht validiert werden.",
-            corrected_value=normalized if valid and normalized else None,
+            is_valid=True,
+            confidence_adjustment=0.15,
+            feedback="Adresse validiert.",
+            corrected_value=normalized if normalized else None,
             tool_called="verify_address",
         )
 

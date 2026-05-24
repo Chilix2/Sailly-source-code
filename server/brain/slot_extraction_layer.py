@@ -408,7 +408,15 @@ def slots_for_current_turn(state: Any, user_text: str = "") -> list[str]:
     slots: set[str] = {"confirmation_intent"}
     if getattr(state, "order_intent", False) or any(word in lower for word in ("bestell", "liefer", "abhol", "essen")):
         slots.update({"order_items", "customer_name", "phone"})
-        if getattr(state, "delivery_intended", False) or "liefer" in lower:
+        if (
+            getattr(state, "delivery_intended", False)
+            or "liefer" in lower
+            or "adresse" in lower
+            or " in bonn" in lower
+            or "bogen" in lower
+            or "straße" in lower
+            or "strasse" in lower
+        ):
             slots.add("delivery_address")
     if getattr(state, "reservation_intent", False) or any(word in lower for word in ("reserv", "tisch", "person")):
         slots.update({"customer_name", "party_size", "delivery_date", "phone"})
