@@ -69,6 +69,32 @@ def _int_to_de(n: int) -> str:
     return f"{ones_word}und{tens_word}"
 
 
+_QUANTITY_WORDS_DE: dict[int, str] = {
+    1: "einmal",
+    2: "zweimal",
+    3: "dreimal",
+    4: "viermal",
+    5: "fünfmal",
+    6: "sechsmal",
+    7: "siebenmal",
+    8: "achtmal",
+    9: "neunmal",
+    10: "zehnmal",
+}
+
+
+def normalize_item_quantities(text: str) -> str:
+    """Convert item quantity prefixes like '1×' to natural German speech."""
+    def _replace_quantity(match: re.Match) -> str:
+        try:
+            qty = int(match.group(1))
+        except ValueError:
+            return match.group(0)
+        return _QUANTITY_WORDS_DE.get(qty, f"{_int_to_de(qty)}mal") + " "
+
+    return re.sub(r"\b(\d{1,2})\s*[×x]\s+(?=\S)", _replace_quantity, text)
+
+
 def normalize_prices(text: str) -> str:
     """Convert price patterns to natural German speech.
 
@@ -217,8 +243,9 @@ class SaillyGeminiTTSService(GeminiTTSService):
         import re as _re_emotion
         text = _re_emotion.sub(r"^\s*\[[a-z]+\]\s*", "", text).strip()
         
-        # Normalize prices ("14,50" → "vierzehn Euro fünfzig") and ranges ("30-60" → "30 bis 60")
+        # Normalize quantities, prices ("14,50" → "vierzehn Euro fünfzig") and ranges ("30-60" → "30 bis 60")
         # before digit-group spelling, so the sub-patterns are handled correctly.
+        text = normalize_item_quantities(text)
         text = normalize_prices(text)
         text = normalize_ranges(text)
         # Spell out 5+ digit strings digit-by-digit so postcodes/phone numbers

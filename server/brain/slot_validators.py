@@ -82,9 +82,10 @@ class AddressValidator(SlotValidator):
         needs_confirm = bool(result.get("needs_caller_confirm"))
 
         if success and normalized and (needs_confirm or confidence < 0.9):
+            target_confidence = 0.84
             return SlotValidationResult(
-                is_valid=False,
-                confidence_adjustment=max(0.0, 0.75 - candidate.confidence),
+                is_valid=True,
+                confidence_adjustment=target_confidence - candidate.confidence,
                 feedback=result.get("readback_text") or "Adresse bitte bestätigen lassen.",
                 corrected_value=normalized,
                 tool_called="verify_address",
@@ -153,10 +154,10 @@ class OrderItemValidator(SlotValidator):
                 missing.append(item)
         if missing:
             return SlotValidationResult(
-                False,
-                -0.2,
+                True,
+                -0.05,
                 f"Nicht auf Menü gematcht: {', '.join(missing)}",
-                corrected_value=matched or None,
+                corrected_value=requested,
             )
         return SlotValidationResult(
             True,
@@ -172,6 +173,14 @@ class OrderItemValidator(SlotValidator):
             items = cached_menu.get("items") or cached_menu.get("menu") or []
             if isinstance(items, list):
                 for item in items:
+                    if isinstance(item, dict) and item.get("name"):
+                        names.append(str(item["name"]))
+                    elif isinstance(item, str):
+                        names.append(item)
+            for category_items in cached_menu.values():
+                if not isinstance(category_items, list):
+                    continue
+                for item in category_items:
                     if isinstance(item, dict) and item.get("name"):
                         names.append(str(item["name"]))
                     elif isinstance(item, str):

@@ -640,8 +640,19 @@ def _wire_flux_eot_handlers(stt, brain: BrowserBrainService, label: str) -> None
             try:
                 se = brain._get_speculative_executor()
                 if se is not None:
+                    final_text = _text_from_event(transcript)
                     turn_idx = getattr(getattr(brain, "turn_processor", None), "turn_idx", 0)
-                    await se.on_end_of_turn(_text_from_event(transcript), turn_idx)
+                    try:
+                        from server.brain.intent_classifier import classify as _classify
+                        final_profile = _classify(final_text, turn_idx=turn_idx).worker_profile
+                    except Exception:
+                        final_profile = None
+                    reusable = await se.on_end_of_turn(
+                        final_text,
+                        turn_idx,
+                        final_profile=final_profile,
+                    )
+                    brain._last_speculative_reused_count = len(reusable)
             except Exception as exc:
                 logger.debug("[%s] Flux speculative cleanup failed: %s", label, exc)
 
