@@ -418,6 +418,58 @@ if os.path.exists(validation_dir):
     app.mount("/validation", StaticFiles(directory=validation_dir), name="validation")
 
 
+@app.get("/api/call-reports/{call_sid}")
+async def get_call_report(call_sid: str, format: str = Query("json")):
+    """Serve generated call report artifacts or explain why none exists yet."""
+    from pathlib import Path
+
+    if not re.fullmatch(r"[A-Za-z0-9_-]{3,80}", call_sid):
+        return JSONResponse({"error": "invalid_call_sid"}, status_code=400)
+
+    normalized_format = (format or "json").lower()
+    if normalized_format not in {"json", "md", "markdown"}:
+        return JSONResponse({"error": "unsupported_format", "supported": ["json", "md"]}, status_code=400)
+
+    ext = "md" if normalized_format in {"md", "markdown"} else "json"
+    report_path = Path(os.environ.get("CALL_REPORTS_DIR", "call_reports")) / f"{call_sid}.{ext}"
+    if report_path.exists():
+        media_type = "text/markdown; charset=utf-8" if ext == "md" else "application/json"
+        return FileResponse(report_path, media_type=media_type, filename=report_path.name)
+
+    reason = "report_not_generated"
+    details = {"found": False}
+    try:
+        from server.call_report.builder import fetch_call_report_bundle
+
+        bundle = await fetch_call_report_bundle(call_sid)
+        details = {
+            "found": bool(bundle.get("found")),
+            "transcripts": len(bundle.get("transcripts") or []),
+            "turn_metrics": len(bundle.get("turn_metrics") or []),
+            "tool_calls": len(bundle.get("tool_calls") or []),
+        }
+        if not bundle.get("found"):
+            reason = "missing_google_calls_row"
+        elif not details["transcripts"]:
+            reason = "missing_google_transcripts_rows"
+        elif not details["turn_metrics"]:
+            reason = "missing_google_turn_metrics_rows"
+    except Exception as exc:
+        reason = "db_lookup_failed"
+        details = {"error": str(exc)}
+
+    return JSONResponse(
+        {
+            "error": "not_found",
+            "call_sid": call_sid,
+            "format": ext,
+            "reason": reason,
+            "details": details,
+        },
+        status_code=404,
+    )
+
+
 async def _preflight_model_availability():
     """Verify Claude Haiku on Vertex AI (EU) responds before accepting calls.
 

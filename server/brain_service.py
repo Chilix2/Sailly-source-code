@@ -31,7 +31,12 @@ from pipecat.frames.frames import (
 
 import re as _re
 
-from server.sailly_gemini_tts import _CHARS_PER_SEC_DE
+from server.sailly_gemini_tts import (
+    _CHARS_PER_SEC_DE,
+    normalize_digit_groups,
+    normalize_prices,
+    normalize_ranges,
+)
 
 
 class LatencyTimer:
@@ -1103,14 +1108,17 @@ class BrowserBrainService(FrameProcessor):
                     # Use streamed chars if available, else result.clean_text.
                     _spoken = "".join(_streamed_chunks) if _streamed_chunks else _sanitize_for_tts(result.clean_text) or ""
                     if _spoken:
+                        _normalized_spoken = normalize_digit_groups(
+                            normalize_ranges(normalize_prices(_spoken))
+                        )
                         # Minimum 5s (user-requested floor) + generous +3s buffer to cover:
                         # - TTS synthesis delay (~0.5–1s)
                         # - Network / playback jitter (~0.5–1s)
                         # - Slower speech rate for numbers/names in confirmations
-                        _farewell_secs = max(5.0, len(_spoken) / _CHARS_PER_SEC_DE + 3.0)
+                        _farewell_secs = max(6.0, len(_normalized_spoken) / _CHARS_PER_SEC_DE + 4.0)
                         logger.info(
                             f"[Phase6] Waiting {_farewell_secs:.1f}s for farewell TTS before EndFrame "
-                            f"({len(_spoken)} chars at ~{_CHARS_PER_SEC_DE} chars/sec)"
+                            f"({len(_normalized_spoken)} normalized chars at ~{_CHARS_PER_SEC_DE} chars/sec)"
                         )
                         await asyncio.sleep(_farewell_secs)
                     else:
@@ -1263,10 +1271,18 @@ class BrowserBrainService(FrameProcessor):
                 logger.warning(f"[BRAIN] Monitoring failed: {me}")
 
             # ── Write to PostgreSQL so Call History page shows demo calls ──────
+            postgres_written = False
             try:
                 await self._write_call_to_postgres(session_data, reason)
+                postgres_written = True
             except Exception as pe:
                 logger.warning(f"[BRAIN] PostgreSQL write failed (non-fatal): {pe}")
+
+            if postgres_written:
+                try:
+                    await self._generate_call_reports()
+                except Exception as re:
+                    logger.warning(f"[BRAIN] Call report generation failed (non-fatal): {re}")
 
             # ── Capture failed calls as new validation scenarios ──────────────
             try:
@@ -1288,6 +1304,31 @@ class BrowserBrainService(FrameProcessor):
 
         except Exception as e:
             logger.warning(f"[BRAIN] Session finalize failed: {e}")
+
+    async def _generate_call_reports(self) -> None:
+        """Best-effort JSON/Markdown report generation for completed demo calls."""
+        from pathlib import Path
+
+        from server.call_report.builder import (
+            build_call_report_markdown,
+            fetch_call_report_bundle,
+        )
+
+        reports_dir = Path(os.environ.get("CALL_REPORTS_DIR", "call_reports"))
+        reports_dir.mkdir(parents=True, exist_ok=True)
+
+        bundle = await fetch_call_report_bundle(self.call_sid)
+        md_text = await build_call_report_markdown(self.call_sid)
+
+        json_path = reports_dir / f"{self.call_sid}.json"
+        md_path = reports_dir / f"{self.call_sid}.md"
+        json_path.write_text(json.dumps(bundle, indent=2, default=str), encoding="utf-8")
+        md_path.write_text(md_text, encoding="utf-8")
+        logger.info(
+            f"[BRAIN] Generated call reports for {self.call_sid}: "
+            f"{json_path} ({json_path.stat().st_size} bytes), "
+            f"{md_path} ({md_path.stat().st_size} bytes)"
+        )
 
     async def _persist_turn_metric_live(self, tm: dict) -> None:
         """Best-effort live write for the Call Analysis turn view."""

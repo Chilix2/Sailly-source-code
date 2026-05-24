@@ -1287,6 +1287,12 @@ async def process_turn_v4(
     # ── POST-COMMIT READBACK STATE MACHINE ──────────────────────────────────────
     end_call_stage = getattr(state, "end_call_stage", "idle")
 
+    def _with_name_ack(text: str) -> str:
+        ack = getattr(state, "_name_correction_ack_text", "") if getattr(state, "_name_corrected_this_turn", False) else ""
+        if ack and text and not text.startswith(ack):
+            return f"{ack} {text}"
+        return text
+
     # Handle correction pending: reset to idle, let workers update slots, re-evaluate
     if end_call_stage == "correction_pending":
         # If user says "ja" / confirms during correction_pending, they meant "nothing to change"
@@ -1387,6 +1393,8 @@ async def process_turn_v4(
         ):
             state.customer_name = _precommit_name
             state.first_name = _precommit_name.split()[0]
+            state._name_corrected_this_turn = True
+            state._name_correction_ack_text = f"Verstanden, ich habe den Namen auf {_precommit_name} geändert."
             state.pre_commit_shown = False
             state.order_pre_commit_shown = False
             state._readback_already_shown = False
@@ -1718,7 +1726,7 @@ async def process_turn_v4(
             _name_clause = f" auf den Namen {_rb_name}" if _rb_name else ""
             _addr_clause = f", Lieferung an {_rb_addr}" if _rb_addr else ""
             _pickup_clause = " zur Abholung" if not _rb_addr else ""
-            summary = f"Sie haben bestellt: {items_str}{_pickup_clause}{_addr_clause}{_name_clause}. Stimmt das so?"
+            summary = _with_name_ack(f"Sie haben bestellt: {items_str}{_pickup_clause}{_addr_clause}{_name_clause}. Stimmt das so?")
             state._readback_already_shown = True
             state.end_call_stage = "order_pre_commit_readback"
             state._pending_bot_response = summary
@@ -2085,7 +2093,7 @@ async def process_turn_v4(
         if not getattr(state, "pre_commit_shown", False) and end_call_stage != "pre_commit_readback":
             state.pre_commit_shown = True
             state.end_call_stage = "pre_commit_readback"
-            summary = _build_pre_commit_summary_v4(state) + " Stimmt das so?"
+            summary = _with_name_ack(_build_pre_commit_summary_v4(state) + " Stimmt das so?")
             logger.info(f"[v4_pipeline] T{turn_idx} pre-commit summary: {summary!r}")
             if tts_callback:
                 try:
@@ -2355,6 +2363,7 @@ async def process_turn_v4(
                 else "Unter welchem Namen darf ich reservieren?"
             )
         if clarify_text:
+            clarify_text = _with_name_ack(clarify_text)
             logger.info(
                 f"[v4_pipeline] T{turn_idx} deterministic clarify for slot={first_missing}"
             )
@@ -2404,6 +2413,11 @@ async def process_turn_v4(
                 ctx_doc.response_constraints.must_include.append(_alt_constraint)
 
     # ── TINY GENERATOR (ensure Anthropic client for Claude models) ─────────────
+    if getattr(state, "_name_corrected_this_turn", False) and getattr(state, "customer_name", None):
+        ctx_doc.response_constraints.must_include.append(
+            f"Bestätige explizit: {getattr(state, '_name_correction_ack_text', f'Name geändert auf {state.customer_name}')}"
+        )
+
     # Rule: Only Gemini allowed in the system is TTS (gemini-2.5-flash-tts).
     # All generation uses Claude Haiku 4.5 via direct Anthropic API.
     if llm_client is None or not hasattr(llm_client, "messages"):

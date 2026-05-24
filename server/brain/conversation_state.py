@@ -310,6 +310,47 @@ def _extract_name_from_utterance(utterance: str, reservation_context: bool = Fal
     return None
 
 
+_NAME_CORRECTION_MARKERS = (
+    "falsch", "falsch verstanden", "falsch geschrieben", "stimmt nicht",
+    "nicht", "sondern", "eigentlich", "korrektur", "korrigieren", "ändern",
+    "aendern", "ich meinte", "meinte",
+)
+
+
+def _is_name_correction_context(text: str) -> bool:
+    lower = (text or "").lower()
+    has_marker = any(marker in lower for marker in _NAME_CORRECTION_MARKERS)
+    has_name_context = any(
+        marker in lower
+        for marker in ("name", "namen", "heiße", "heisse", "sondern")
+    )
+    return has_marker and has_name_context
+
+
+def _extract_name_correction(utterance: str) -> Optional[str]:
+    """Extract authoritative name corrections like 'nicht Müller, sondern Schmidt'."""
+    if not utterance:
+        return None
+    name_token = r"[A-ZÄÖÜ][a-zäöüßA-ZÄÖÜ\-]{2,}"
+    patterns = [
+        rf"(?:nicht|nein|nee)[^.!?]{{0,80}}\bsondern\s+(?:auf\s+den\s+namen\s+)?({name_token})(?:\s+({name_token}))?",
+        rf"(?:mein\s+name\s+ist\s+eigentlich|der\s+name\s+ist\s+eigentlich|name\s+ist\s+eigentlich|ich\s+heiße\s+eigentlich|ich\s+heisse\s+eigentlich)\s+({name_token})(?:\s+({name_token}))?",
+        rf"(?:sie\s+haben\s+(?:meinen\s+)?namen\s+falsch\s+verstanden[^.!?]{{0,40}}(?:ich\s+heiße|ich\s+heisse|name\s+ist)\s+)\s*({name_token})(?:\s+({name_token}))?",
+    ]
+    for pattern in patterns:
+        m = re.search(pattern, utterance, re.IGNORECASE)
+        if not m:
+            continue
+        first_raw = m.group(1)
+        last_raw = m.group(2)
+        if not first_raw or not first_raw[0].isupper():
+            continue
+        candidate = first_raw if not last_raw else f"{first_raw} {last_raw}"
+        if _is_valid_name_candidate(candidate):
+            return candidate
+    return None
+
+
 def _extract_first_name_from_utterance(utterance: str) -> Optional[str]:
     """Extract a single first name when a strong identity marker precedes it.
 
@@ -2144,6 +2185,7 @@ def update_state_from_utterance(state: ConversationState, utterance: str) -> Non
     if not hasattr(state, '_readback_already_shown'):
         state._readback_already_shown = False
     lower = utterance.lower()
+    state._name_corrected_this_turn = False
     
     # Initialize transient tracking fields before any reads
     if not hasattr(state, "_last_user_text"):
@@ -2701,16 +2743,25 @@ def update_state_from_utterance(state: ConversationState, utterance: str) -> Non
     # === Bug B: NAME EXTRACTION (strict, blocklist-based) ===
     # CRITICAL FIX: During cancellation, accept the name ONCE and never re-ask
     _cancel_in_progress = getattr(state, "_cancel_in_progress", False)
-    new_name = _extract_name_from_utterance(utterance)
+    current = state.customer_name or ""
+    current_valid = _is_valid_name_candidate(current)
+    _name_correction_context = _is_name_correction_context(utterance)
+    new_name = _extract_name_correction(utterance) or _extract_name_from_utterance(utterance)
     if new_name:
-        current = state.customer_name or ""
-        current_valid = _is_valid_name_candidate(current)
-        if not current_valid or (new_name != current and len(new_name) > len(current)):
+        _changed_name = current_valid and new_name.lower() != current.lower()
+        if not current_valid or (
+            _changed_name
+            and (_name_correction_context or len(new_name) > len(current))
+        ):
             if current and current != new_name:
                 logger.info(f"[NAME_EXTRACT] overriding {current!r} -> {new_name!r}")
             state.customer_name = new_name
+            state.first_name = None if " " in new_name else state.first_name
             state.name_confirmed = True
             state.field_attempts["name"] = 0
+            state._name_corrected_this_turn = bool(_changed_name and _name_correction_context)
+            if state._name_corrected_this_turn:
+                state._name_correction_ack_text = f"Verstanden, ich habe den Namen auf {new_name} geändert."
             # CRITICAL FIX H2.2_D3: Immediately remove from recent_responses so deterministic clarify doesn't re-ask
             state.recent_responses = [r for r in getattr(state, "recent_responses", []) if "welchen namen" not in r.lower()]
             logger.debug(f"[NAME_EXTRACT] name set to {new_name!r}, attempt reset to 0")
