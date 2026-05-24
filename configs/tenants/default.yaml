@@ -1,4 +1,4 @@
-tenant_id: doboo
+tenant_id: default
 industry: restaurant
 menu_version: 1  # bump when menu changes to invalidate system-prompt cache
 
@@ -7,7 +7,7 @@ greeting_line: "Hallo, hier ist Sailly, die KI-Assistentin von DOBOO Korean Soul
 farewell_text: "Vielen Dank für Ihren Anruf! Wir freuen uns auf Sie bei DOBOO!"
 
 # ── Vertical identity ──────────────────────────────────────────────────────────
-restaurant_name: "DOBOO Korean Soulfood"
+restaurant_name: "Default Restaurant"
 cuisine_type: "Koreanisch & Japanisch (Sushi, Bibimbap, Bulgogi, Mandu)"
 
 location:

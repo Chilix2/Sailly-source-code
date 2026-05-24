@@ -473,7 +473,10 @@ async def _startup_background_tasks():
     Registered as a startup hook rather than at import time so tests that
     import the module don't kick off background DB traffic.
     """
-    await _preflight_model_availability()
+    if os.environ.get("SKIP_VERTEX_PREFLIGHT", "0") in ("1", "true", "yes"):
+        logger.info("[PREFLIGHT] SKIP_VERTEX_PREFLIGHT=1 — skipping model availability check")
+    else:
+        await _preflight_model_availability()
 
     # Best-effort schema migrations — ``ensure_turn_metrics_table`` contains
     # idempotent ``ADD COLUMN IF NOT EXISTS`` statements for the tenant_id /
@@ -533,7 +536,8 @@ async def websocket_demo(websocket: WebSocket):
     try:
         try:
             handshake = await websocket.receive_json()
-            tenant_id = handshake.get("tenant", "doboo")
+            from server.core.tenant_guard import resolve_tenant_id
+            tenant_id = resolve_tenant_id(handshake.get("tenant", ""), default="doboo")
             logger.info(f"[DEMO] Handshake: tenant={tenant_id}")
         except Exception as e:
             logger.error(f"[DEMO] Handshake error: {e}")
@@ -589,8 +593,8 @@ async def websocket_demo(websocket: WebSocket):
         _stt_keywords: list = []
         _tc = None
         try:
-            from server.core.tenant_config import TenantRegistry
-            _tc = TenantRegistry().load_tenant(tenant_id)
+            from server.core.tenant_config import get_tenant_registry
+            _tc = get_tenant_registry().load_tenant(tenant_id)
             _stt_lang = _tc.stt_language or "de"
             from server.brain.stt.keyterm_loader import get_keyterms_for_tenant
             _stt_keywords = get_keyterms_for_tenant(tenant_id)
@@ -600,19 +604,10 @@ async def websocket_demo(websocket: WebSocket):
             f"[DEMO] STT language={_stt_lang} keywords=({len(_stt_keywords)}): "
             f"{_stt_keywords[:10]}{'…' if len(_stt_keywords) > 10 else ''}"
         )
-        from server.brain.stt.deepgram_client import build_stt_settings, get_stt_endpoint
-        _dg_settings_kwargs: dict = build_stt_settings(_tc) if _tc is not None else dict(
-            model="nova-3", language=_stt_lang, endpointing=1200,
-            interim_results=True, punctuate=True, smart_format=True,
-        )
-        if _stt_keywords:
-            _dg_settings_kwargs["keyterm"] = _stt_keywords
-        _stt_endpoint = get_stt_endpoint(_tc) if _tc is not None else None
-        _dg_kwargs: dict = dict(api_key=deepgram_api_key, settings=DeepgramSTTService.Settings(**_dg_settings_kwargs))
-        if _stt_endpoint:
-            _dg_kwargs["base_url"] = _stt_endpoint
-        stt = DeepgramSTTService(**_dg_kwargs)
-        logger.info(f"[DEMO] STT service created (model={_dg_settings_kwargs.get('model')}, endpoint={_stt_endpoint or 'default'})")
+        from server.providers.registry import instantiate_stt
+
+        stt = instantiate_stt(_tc, deepgram_api_key, keyterms=_stt_keywords)
+        logger.info(f"[DEMO] STT service created via provider registry ({type(stt).__name__})")
 
         brain = BrowserBrainService(tenant_id=tenant_id)
         # Sync the early caller recorder to use the brain's actual call_sid
@@ -629,18 +624,12 @@ async def websocket_demo(websocket: WebSocket):
         except Exception as e:
             logger.warning(f"[DEMO] Failed to send session_init: {e}")
 
-        # TTS — global Vertex AI endpoint (no location): regional endpoints do not resolve
-        # named Gemini voices like "Kore" and return 404.
-        tts = SaillyGeminiTTSService(
+        from server.providers.registry import instantiate_tts
+
+        tts = instantiate_tts(
+            _tc,
             credentials_path=google_credentials_path,
             project_id=google_project_id,
-            cascade_speaking_rate=DEFAULT_GEMINI_TTS_SPEAKING_RATE,
-            settings=GeminiTTSService.Settings(
-                model="gemini-2.5-flash-tts",
-                language="de-DE",
-                voice="Kore",
-                prompt=CASCADE_TTS_STYLE_PROMPT,
-            ),
         )
         # Give brain a direct reference to TTS so it can call update_for_turn()
         # before each LLM turn (adaptive style conditioning).
@@ -826,7 +815,8 @@ async def websocket_demo_text(websocket: WebSocket):
         # Handshake (same as /ws/demo)
         try:
             handshake = await websocket.receive_json()
-            tenant_id = handshake.get("tenant", "doboo")
+            from server.core.tenant_guard import resolve_tenant_id
+            tenant_id = resolve_tenant_id(handshake.get("tenant", ""), default="doboo")
             logger.info(f"[DEMO_TEXT] Handshake: tenant={tenant_id}")
         except Exception as e:
             logger.error(f"[DEMO_TEXT] Handshake error: {e}")
@@ -923,8 +913,8 @@ async def websocket_demo_text(websocket: WebSocket):
 
         _stt_lang = "de"
         try:
-            from server.core.tenant_config import TenantRegistry
-            _tc = TenantRegistry().load_tenant(tenant_id)
+            from server.core.tenant_config import get_tenant_registry
+            _tc = get_tenant_registry().load_tenant(tenant_id)
             _stt_lang = _tc.stt_language or "de"
         except Exception as _tl_err:
             logger.warning(f"[DEMO_TEXT] could not resolve tenant={tenant_id}: {_tl_err!r}")
@@ -933,25 +923,16 @@ async def websocket_demo_text(websocket: WebSocket):
         _tc_text = None
         _stt_keywords_text: list = []
         try:
-            from server.core.tenant_config import TenantRegistry as _TR2
-            _tc_text = _TR2().load_tenant(tenant_id)
+            from server.core.tenant_config import get_tenant_registry
+            _tc_text = get_tenant_registry().load_tenant(tenant_id)
             from server.brain.stt.keyterm_loader import get_keyterms_for_tenant as _gkt
             _stt_keywords_text = _gkt(tenant_id)
         except Exception as _tl_err2:
             logger.warning(f"[DEMO_TEXT] could not resolve tenant={tenant_id}: {_tl_err2!r}")
-        from server.brain.stt.deepgram_client import build_stt_settings as _bss, get_stt_endpoint as _gse
-        _dg_text_kwargs: dict = _bss(_tc_text) if _tc_text is not None else dict(
-            model="nova-3", language=_stt_lang, endpointing=700,
-            interim_results=True, punctuate=True, smart_format=True,
-        )
-        if _stt_keywords_text:
-            _dg_text_kwargs["keyterm"] = _stt_keywords_text
-        _stt_endpoint_text = _gse(_tc_text) if _tc_text is not None else None
-        _dg_svc_kwargs: dict = dict(api_key=deepgram_api_key, settings=DeepgramSTTService.Settings(**_dg_text_kwargs))
-        if _stt_endpoint_text:
-            _dg_svc_kwargs["base_url"] = _stt_endpoint_text
-        stt = DeepgramSTTService(**_dg_svc_kwargs)
-        logger.info(f"[DEMO_TEXT] STT service created (model={_dg_text_kwargs.get('model')}, endpoint={_stt_endpoint_text or 'default'})")
+        from server.providers.registry import instantiate_stt
+
+        stt = instantiate_stt(_tc_text, deepgram_api_key, keyterms=_stt_keywords_text)
+        logger.info(f"[DEMO_TEXT] STT service created via provider registry ({type(stt).__name__})")
 
         brain = BrowserBrainService(tenant_id=tenant_id)
         logger.info("[DEMO_TEXT] Brain service created")
@@ -966,16 +947,12 @@ async def websocket_demo_text(websocket: WebSocket):
         except Exception as e:
             logger.warning(f"[DEMO_TEXT] Failed to send session_init: {e}")
 
-        tts = SaillyGeminiTTSService(
+        from server.providers.registry import instantiate_tts
+
+        tts = instantiate_tts(
+            _tc_text,
             credentials_path=google_credentials_path,
             project_id=google_project_id,
-            cascade_speaking_rate=DEFAULT_GEMINI_TTS_SPEAKING_RATE,
-            settings=GeminiTTSService.Settings(
-                model="gemini-2.5-flash-tts",
-                language="de-DE",
-                voice="Kore",
-                prompt=CASCADE_TTS_STYLE_PROMPT,
-            ),
         )
         brain.tts_service = tts
         logger.info("[DEMO_TEXT] TTS service created")
@@ -1083,6 +1060,8 @@ async def websocket_headless(websocket: WebSocket, tenant: str = "doboo"):
     TEST ONLY — disable in production via firewall/nginx.
     """
     await websocket.accept()
+    from server.core.tenant_guard import resolve_tenant_id
+    tenant = resolve_tenant_id(tenant, default="doboo")
     conn_id = id(websocket)
     _active_ws_connections.add(conn_id)
     logger.info(f"[HEADLESS] New connection (tenant={tenant})")
@@ -1123,11 +1102,16 @@ async def demo_monitor_overview(window: Optional[int] = Query(None)):
 async def demo_monitor_calls(
     window: int = Query(86400, ge=60, le=86400 * 14),
     limit: int = Query(100, ge=1, le=500),
+    tenant: Optional[str] = Query(None),
 ):
     """Recent completed calls from Redis (includes browser demo calls)."""
     try:
         from server.monitoring import get_recent_monitoring_calls
-        rows = await get_recent_monitoring_calls(window_secs=window, limit=limit)
+        tenant_id = None
+        if tenant:
+            from server.core.tenant_guard import resolve_tenant_id
+            tenant_id = resolve_tenant_id(tenant)
+        rows = await get_recent_monitoring_calls(window_secs=window, limit=limit, tenant_id=tenant_id)
         return JSONResponse(content={"calls": rows, "count": len(rows)})
     except Exception as e:
         logger.error(f"[DEMO] monitor calls error: {e}")
@@ -1147,6 +1131,9 @@ async def demo_live_call_trace(
         redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379")
         r = await get_redis(redis_url)
         resolved_tenant = tenant if tenant and tenant != "_" else None
+        if resolved_tenant:
+            from server.core.tenant_guard import resolve_tenant_id
+            resolved_tenant = resolve_tenant_id(resolved_tenant)
         events = await fetch_live_trace(r, resolved_tenant, call_sid)
         return JSONResponse(content={"events": events, "call_sid": call_sid})
     except Exception as e:
@@ -1210,6 +1197,23 @@ try:
     app.include_router(health_router)
 except Exception as _he:
     logger.warning(f"[DEMO] health_router mount failed: {_he!r}")
+
+
+# Flow Builder routes — graph introspection API (read-only, no brain runtime changes)
+try:
+    from server.builder.routes import router as builder_router
+    app.include_router(builder_router)
+    logger.info("[BUILDER] Flow Builder routes registered (/api/builder/*)")
+except Exception as _be:
+    logger.warning(f"[BUILDER] builder_router mount failed: {_be!r}")
+
+# Tenant provisioning routes
+try:
+    from server.tenants.routes import router as tenants_router
+    app.include_router(tenants_router)
+    logger.info("[TENANTS] Tenant routes registered (/api/tenants)")
+except Exception as _te:
+    logger.warning(f"[TENANTS] tenants_router mount failed: {_te!r}")
 
 
 @app.get("/healthz")
@@ -1295,12 +1299,15 @@ async def _get_redis():
 
 
 @app.get("/api/admin/menu/86/{tenant_id}")
-async def list_86_items(tenant_id: str):
+async def list_86_items(tenant_id: str, request: Request):
     """Return the current set of 86'd dishes for a tenant.
 
-    Read-only — no auth required (dashboards may poll this to show a banner
-    like "3 items out of stock").
+    Read-only list, but still requires admin token to avoid cross-tenant leakage.
     """
+    if not _check_admin_token(request.headers.get("x-admin-token")):
+        return JSONResponse(status_code=401, content={"error": "unauthorized"})
+    from server.core.tenant_guard import resolve_tenant_id
+    tenant_id = resolve_tenant_id(tenant_id)
     key = f"menu_unavailable:{tenant_id}"
     try:
         r = await _get_redis()
@@ -1323,6 +1330,8 @@ async def mark_dish_unavailable(tenant_id: str, dish_name: str, request: Request
     """
     if not _check_admin_token(request.headers.get("x-admin-token")):
         return JSONResponse(status_code=401, content={"error": "unauthorized"})
+    from server.core.tenant_guard import resolve_tenant_id
+    tenant_id = resolve_tenant_id(tenant_id)
     key = f"menu_unavailable:{tenant_id}"
     import datetime as _dt
     ts = _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds")
@@ -1362,6 +1371,8 @@ async def restore_dish_available(tenant_id: str, dish_name: str, request: Reques
     """Restore a previously 86'd dish (kitchen got restocked)."""
     if not _check_admin_token(request.headers.get("x-admin-token")):
         return JSONResponse(status_code=401, content={"error": "unauthorized"})
+    from server.core.tenant_guard import resolve_tenant_id
+    tenant_id = resolve_tenant_id(tenant_id)
     key = f"menu_unavailable:{tenant_id}"
     try:
         r = await _get_redis()
@@ -1415,6 +1426,10 @@ async def delete_subject_data(request: Request):
     tenant_id = (request.query_params.get("tenant_id") or "").strip() or None
     if not phone:
         return JSONResponse(status_code=400, content={"error": "phone_required"})
+    if not tenant_id:
+        return JSONResponse(status_code=400, content={"error": "tenant_id_required"})
+    from server.core.tenant_guard import resolve_tenant_id
+    tenant_id = resolve_tenant_id(tenant_id)
 
     deleted = {"postgres_calls": 0, "redis_keys": 0}
 
@@ -1423,8 +1438,8 @@ async def delete_subject_data(request: Request):
         pool = await get_pool()
         async with pool.acquire() as conn:
             res = await conn.execute(
-                "DELETE FROM google_calls WHERE caller = $1 OR from_number = $1",
-                phone,
+                "DELETE FROM google_calls WHERE (caller = $1 OR from_number = $1) AND tenant_id = $2",
+                phone, tenant_id,
             )
             try:
                 deleted["postgres_calls"] = int(res.split()[-1])
@@ -1484,7 +1499,7 @@ async def get_transfer_context(call_sid: str):
 
 
 @app.get("/api/admin/call/{call_sid}/turns")
-async def get_call_turns(call_sid: str):
+async def get_call_turns(call_sid: str, tenant: str = Query(...)):
     """JSON: per-turn metrics for a specific call.  Powers the turn-viewer UI.
 
     Joins ``google_turn_metrics`` with ``google_transcripts`` so each row
@@ -1492,6 +1507,9 @@ async def get_call_turns(call_sid: str):
     + build_sha that produced it.
     """
     try:
+        from server.core.tenant_guard import resolve_tenant_id, assert_call_belongs_to_tenant
+        tenant_id = resolve_tenant_id(tenant)
+        await assert_call_belongs_to_tenant(call_sid, tenant_id)
         from server.database import get_pool
         pool = await get_pool()
         async with pool.acquire() as conn:
@@ -1545,11 +1563,14 @@ async def get_call_turns(call_sid: str):
 
 
 @app.get("/admin/call/{call_sid}", response_class=HTMLResponse)
-async def render_call_viewer(call_sid: str):
+async def render_call_viewer(call_sid: str, tenant: str = Query(...)):
     """Minimal HTML per-turn viewer for one call — the "open a call, see every
     turn with ASR / LLM / tools / latency" page.  Read-only.
     """
     try:
+        from server.core.tenant_guard import resolve_tenant_id, assert_call_belongs_to_tenant
+        tenant_id = resolve_tenant_id(tenant)
+        await assert_call_belongs_to_tenant(call_sid, tenant_id)
         from server.database import get_pool
         pool = await get_pool()
         async with pool.acquire() as conn:

@@ -1,0 +1,118 @@
+kind: tts
+providers:
+  - id: google
+    label: Google / Gemini TTS
+    configured_by:
+      - GOOGLE_APPLICATION_CREDENTIALS
+    models:
+      - id: gemini-2.5-flash-tts
+        label: Gemini 2.5 Flash TTS
+        latency_class: realtime
+        streaming: true
+        voice_agent_ready: true
+        recommended: true
+      - id: gemini-live-native-audio
+        label: Gemini Live Native Audio
+        latency_class: realtime
+        streaming: true
+        voice_agent_ready: true
+        recommended: true
+  - id: elevenlabs
+    label: ElevenLabs
+    configured_by:
+      - ELEVENLABS_API_KEY
+    models:
+      - id: eleven_turbo_v2_5
+        label: Eleven Turbo v2.5
+        latency_class: realtime
+        streaming: true
+        voice_agent_ready: true
+        recommended: false
+  - id: fish
+    label: Fish Audio
+    configured_by:
+      - FISH_API_KEY
+    models:
+      - id: speech-1.5
+        label: Speech 1.5
+        latency_class: realtime
+        streaming: true
+        voice_agent_ready: true
+        recommended: false
+  - id: cartesia
+    label: Cartesia
+    configured_by:
+      - CARTESIA_API_KEY
+    models:
+      - id: sonic-2
+        label: Sonic 2
+        latency_class: realtime
+        streaming: true
+        voice_agent_ready: true
+        recommended: false
+  - id: deepgram
+    label: Deepgram TTS
+    configured_by:
+      - DEEPGRAM_API_KEY
+    models:
+      - id: aura-2
+        label: Aura 2
+        latency_class: realtime
+        streaming: true
+        voice_agent_ready: true
+        recommended: false
+  - id: openai
+    label: OpenAI TTS
+    configured_by:
+      - OPENAI_API_KEY
+    models:
+      - id: gpt-4o-mini-tts
+        label: GPT-4o Mini TTS
+        latency_class: fast
+        streaming: true
+        voice_agent_ready: true
+        recommended: false
+  - id: hume
+    label: Hume
+    configured_by:
+      - HUME_API_KEY
+    models:
+      - id: octave
+        label: Octave
+        latency_class: realtime
+        streaming: true
+        voice_agent_ready: true
+        recommended: false
+  - id: rime
+    label: Rime
+    configured_by:
+      - RIME_API_KEY
+    models:
+      - id: arcana
+        label: Arcana
+        latency_class: realtime
+        streaming: true
+        voice_agent_ready: true
+        recommended: false
+  - id: minimax
+    label: MiniMax
+    configured_by:
+      - MINIMAX_API_KEY
+    models:
+      - id: speech-02
+        label: Speech 02
+        latency_class: realtime
+        streaming: true
+        voice_agent_ready: true
+        recommended: false
+  - id: piper
+    label: Piper / Kokoro Local
+    configured_by:
+      - PIPER_MODEL_PATH
+    models:
+      - id: local
+        label: Local Voice
+        latency_class: local
+        streaming: false
+        voice_agent_ready: false
+        recommended: false

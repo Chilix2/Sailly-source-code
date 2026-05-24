@@ -1,0 +1,61 @@
+id: hotel
+name: Hotel
+description: Voice-agent template for hotels, guest services, reservations, and front-desk calls.
+version: "1.0"
+language_defaults: [de, en]
+compliance_checklist:
+  - Human fallback for payment, emergency, and complaint cases.
+  - Reservation changes require identity confirmation.
+  - Never disclose guest data without verification.
+capabilities:
+  - id: hotel_greeting
+    name: Front desk greeting
+    category: conversation
+    description: Welcome callers, disclose AI usage, and classify the request.
+    slots: [language, caller_intent]
+    scenarios:
+      - id: hotel_greeting_basic
+        name: Basic hotel greeting
+        caller_goal: The caller asks whether this is the hotel front desk.
+  - id: room_availability
+    name: Room availability and rates
+    category: sales
+    description: Collect date range, guests, room type, and answer availability/rate questions.
+    tools:
+      - name: check_room_availability
+        required: false
+    slots: [arrival_date, departure_date, guest_count, room_type]
+    scenarios:
+      - id: hotel_room_availability
+        name: Weekend availability
+        caller_goal: The caller asks if a double room is available this weekend.
+  - id: booking_create
+    name: Booking creation
+    category: transaction
+    description: Create a booking after readback confirmation.
+    tools:
+      - name: create_booking
+        required: true
+    slots: [arrival_date, departure_date, guest_count, customer_name, phone_number]
+  - id: booking_management
+    name: Booking changes and cancellation
+    category: transaction
+    description: Modify or cancel reservations after guest verification.
+    tools:
+      - name: modify_booking
+      - name: cancel_booking
+    slots: [booking_reference, customer_name, requested_change]
+  - id: guest_services
+    name: Amenities, parking, breakfast, and check-in
+    category: knowledge
+    description: Answer common guest service questions.
+    tools:
+      - name: faq
+    slots: [topic]
+  - id: hotel_escalation
+    name: Emergency, complaint, and human handoff
+    category: escalation
+    description: Route urgent or sensitive cases to staff.
+    tools:
+      - name: transfer_to_human
+    slots: [issue_type, customer_name, phone_number, notes]

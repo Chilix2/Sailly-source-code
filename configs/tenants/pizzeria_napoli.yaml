@@ -21,7 +21,7 @@ voice: Kore
 model: gemini-2.5-flash
 
 audio:
-  stt_model: "nova-3"
+  stt_model: "flux-general-multi"
   stt_endpointing_ms: 600
   eot_threshold: 0.7
   eager_eot_threshold: 0.5

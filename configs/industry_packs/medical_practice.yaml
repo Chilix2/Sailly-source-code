@@ -1,0 +1,53 @@
+id: medical_practice
+name: Medical practice
+description: Voice-agent template for appointment routing, practice info, prescription requests, and safe triage handoff.
+version: "1.0"
+language_defaults: [de, en]
+compliance_checklist:
+  - Emergency symptoms must trigger immediate emergency-care guidance and human handoff.
+  - Do not provide diagnosis or medical advice.
+  - Patient data requires verification and privacy-safe handling.
+  - Prescription and lab-result requests require staff workflow.
+capabilities:
+  - id: practice_greeting
+    name: Practice greeting and triage boundary
+    category: conversation
+    description: Greet callers, disclose AI usage, and set medical safety boundaries.
+    slots: [caller_intent, urgency]
+  - id: appointment_booking
+    name: Appointment booking
+    category: transaction
+    description: Collect appointment reason, date preference, patient identity, and contact data.
+    tools:
+      - name: create_appointment_request
+        required: true
+    slots: [patient_name, date_of_birth, appointment_reason, preferred_date, phone_number]
+  - id: appointment_management
+    name: Appointment cancellation and changes
+    category: transaction
+    description: Modify or cancel appointments after identity verification.
+    tools:
+      - name: modify_appointment
+      - name: cancel_appointment
+    slots: [patient_name, date_of_birth, appointment_reference, requested_change]
+  - id: prescription_request
+    name: Prescription repeat request
+    category: workflow
+    description: Capture repeat prescription requests for staff review.
+    tools:
+      - name: capture_prescription_request
+    slots: [patient_name, date_of_birth, medication_name, phone_number]
+  - id: practice_info
+    name: Opening hours, location, documents
+    category: knowledge
+    description: Answer non-medical operational questions from configured knowledge.
+    tools:
+      - name: faq
+    slots: [topic]
+  - id: medical_escalation
+    name: Emergency, symptoms, lab results, and human handoff
+    category: escalation
+    description: Escalate urgent, sensitive, or clinical topics.
+    tools:
+      - name: transfer_to_human
+    slots: [issue_type, patient_name, phone_number, notes]

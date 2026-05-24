@@ -21,6 +21,11 @@ _DEFAULTS: Dict[str, Any] = {
 }
 
 
+def is_flux_model(model_name: str) -> bool:
+    """Check if a model name refers to Deepgram Flux (vs Nova)."""
+    return model_name.lower().startswith("flux-")
+
+
 def build_stt_settings(tenant_cfg) -> Dict[str, Any]:
     """Return a kwargs dict suitable for ``DeepgramSTTService.Settings(**kwargs)``.
 

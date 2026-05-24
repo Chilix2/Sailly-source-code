@@ -1,0 +1,51 @@
+id: smb_support
+name: SMB support
+description: Voice-agent template for small and medium businesses handling support, sales, scheduling, and lead intake.
+version: "1.0"
+language_defaults: [de, en]
+compliance_checklist:
+  - Human fallback for complaints, contracts, legal, and payment issues.
+  - Ticket creation requires contact data and issue summary readback.
+  - Do not promise delivery dates or pricing unless configured.
+capabilities:
+  - id: smb_greeting
+    name: Business greeting and intent routing
+    category: conversation
+    description: Welcome callers and route to support, sales, booking, billing, or handoff.
+    slots: [caller_intent]
+  - id: faq_support
+    name: FAQ and company info
+    category: knowledge
+    description: Answer questions from configured docs, opening hours, policies, and service descriptions.
+    tools:
+      - name: faq
+    slots: [topic]
+  - id: ticket_create
+    name: Support ticket creation
+    category: transaction
+    description: Capture support requests and create a ticket after readback.
+    tools:
+      - name: create_support_ticket
+        required: true
+    slots: [customer_name, phone_number, issue_summary, priority]
+  - id: appointment_booking
+    name: Appointment or callback booking
+    category: transaction
+    description: Book callbacks, consultations, or service appointments.
+    tools:
+      - name: create_callback
+    slots: [customer_name, phone_number, preferred_date, preferred_time, reason]
+  - id: sales_lead
+    name: Sales lead capture
+    category: lead
+    description: Capture lead details and route to sales.
+    tools:
+      - name: capture_sales_lead
+    slots: [customer_name, company_name, phone_number, interest, notes]
+  - id: smb_escalation
+    name: Complaint, billing, contract, and human handoff
+    category: escalation
+    description: Route sensitive or high-value calls to staff.
+    tools:
+      - name: transfer_to_human
+    slots: [issue_type, customer_name, phone_number, notes]

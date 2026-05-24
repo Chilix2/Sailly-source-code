@@ -1,0 +1,52 @@
+id: car_dealership
+name: Car dealership
+description: Voice-agent template for test drives, service appointments, inventory, and lead capture.
+version: "1.0"
+language_defaults: [de, en]
+compliance_checklist:
+  - Do not make binding financing or trade-in promises.
+  - Escalate legal, warranty disputes, and accident-related questions.
+  - Confirm appointment details before commit.
+capabilities:
+  - id: dealership_greeting
+    name: Reception greeting
+    category: conversation
+    description: Greet callers and route between sales, service, parts, and support.
+    slots: [caller_intent]
+  - id: inventory_lookup
+    name: Vehicle inventory lookup
+    category: sales
+    description: Answer availability questions by make, model, budget, fuel type, and body style.
+    tools:
+      - name: search_inventory
+    slots: [make, model, budget, fuel_type, body_style]
+  - id: test_drive_booking
+    name: Test drive booking
+    category: transaction
+    description: Collect vehicle, date/time, contact data, and confirm a test-drive request.
+    tools:
+      - name: create_test_drive
+        required: true
+    slots: [vehicle_id, customer_name, phone_number, appointment_date, appointment_time]
+  - id: service_appointment
+    name: Service appointment
+    category: transaction
+    description: Book workshop appointments for maintenance, repairs, inspections, and tires.
+    tools:
+      - name: create_service_appointment
+        required: true
+    slots: [vehicle_model, license_plate, service_reason, appointment_date, customer_name, phone_number]
+  - id: trade_in_lead
+    name: Trade-in lead capture
+    category: lead
+    description: Capture trade-in vehicle details and route to sales.
+    tools:
+      - name: capture_trade_in_lead
+    slots: [make, model, year, mileage, customer_name, phone_number]
+  - id: dealership_escalation
+    name: Financing, complaints, and human handoff
+    category: escalation
+    description: Escalate sensitive commercial or complaint topics.
+    tools:
+      - name: transfer_to_human
+    slots: [issue_type, customer_name, phone_number, notes]
