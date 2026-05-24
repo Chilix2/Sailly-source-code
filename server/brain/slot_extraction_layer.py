@@ -1,0 +1,424 @@
+"""Semantic slot extraction layer for the v4 voice pipeline.
+
+The layer turns a user utterance plus short conversation context into typed slot
+candidates. It intentionally keeps orchestration in Python: the LLM proposes
+values, validators and readback gates decide what can enter durable state.
+"""
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import re
+import time
+from dataclasses import asdict, dataclass, field
+from typing import Any, Iterable, Optional
+
+logger = logging.getLogger(__name__)
+
+SEMANTIC_SLOT_NAMES = {
+    "customer_name",
+    "delivery_address",
+    "phone",
+    "order_items",
+    "delivery_date",
+    "party_size",
+    "confirmation_intent",
+}
+
+_SYSTEM_PROMPT = (
+    "Du bist ein präziser Slot-Extraktor für einen deutschsprachigen "
+    "Restaurant-Sprachagenten. Extrahiere nur Informationen, die der Anrufer "
+    "wirklich gesagt hat oder aus der direkten Gesprächssituation eindeutig "
+    "gemeint sind. Antworte ausschließlich mit validem JSON."
+)
+
+_CONFIRMATION_YES = {
+    "ja", "genau", "stimmt", "richtig", "passt", "okay", "ok", "korrekt",
+    "einverstanden", "so ist es", "so passt es",
+}
+_CONFIRMATION_NO = {
+    "nein", "nee", "nicht", "falsch", "stimmt nicht", "ändern", "aendern",
+    "korrektur", "sondern", "anders",
+}
+
+_PHONE_RE = re.compile(r"(?:\+?\d[\d\s\-/()]{6,}\d)")
+_BARE_INT_RE = re.compile(r"\b([1-9]|1[0-9]|20)\b")
+
+
+@dataclass
+class SlotCandidate:
+    slot_name: str
+    value: Any
+    confidence: float
+    evidence_span: str = ""
+    source: str = "unknown"
+    needs_readback: bool = False
+    validator_feedback: Optional[str] = None
+    validator_valid: Optional[bool] = None
+    correction: bool = False
+
+    def to_metric(self) -> dict[str, Any]:
+        data = asdict(self)
+        if isinstance(data.get("value"), list):
+            data["value_count"] = len(data["value"])
+        return data
+
+
+@dataclass
+class SlotCandidates:
+    customer_name: Optional[SlotCandidate] = None
+    delivery_address: Optional[SlotCandidate] = None
+    phone: Optional[SlotCandidate] = None
+    order_items: list[SlotCandidate] = field(default_factory=list)
+    delivery_date: Optional[SlotCandidate] = None
+    party_size: Optional[SlotCandidate] = None
+    confirmation_intent: Optional[SlotCandidate] = None
+
+    def by_name(self, slot_name: str) -> Optional[SlotCandidate]:
+        if slot_name == "order_items":
+            return self.order_items[0] if self.order_items else None
+        return getattr(self, slot_name, None)
+
+    def all(self) -> list[SlotCandidate]:
+        result: list[SlotCandidate] = []
+        for name in SEMANTIC_SLOT_NAMES:
+            value = getattr(self, name, None)
+            if isinstance(value, list):
+                result.extend(value)
+            elif value is not None:
+                result.append(value)
+        return result
+
+    def to_metric(self) -> dict[str, Any]:
+        return {
+            "candidates": [candidate.to_metric() for candidate in self.all()],
+            "candidate_count": len(self.all()),
+        }
+
+
+class SlotExtractionLayer:
+    """Contextual extraction with deterministic fallback and latency budget."""
+
+    def __init__(self, slot_extractor: Any = None, *, timeout_s: float = 1.5):
+        self.extractor = slot_extractor
+        self.timeout_s = timeout_s
+
+    async def extract(
+        self,
+        *,
+        user_utterance: str,
+        conversation_history: list[dict[str, str]] | list[tuple[str, str]],
+        current_state: Any,
+        slots_to_extract: Iterable[str],
+    ) -> SlotCandidates:
+        started = time.monotonic()
+        slots = [slot for slot in slots_to_extract if slot in SEMANTIC_SLOT_NAMES]
+        deterministic = self._extract_deterministic(user_utterance, current_state, slots)
+        llm_candidates: dict[str, Any] = {}
+        llm_timed_out = False
+
+        if slots and self.extractor is not None:
+            try:
+                llm_candidates = await asyncio.wait_for(
+                    self._extract_via_llm(
+                        user_utterance=user_utterance,
+                        conversation_history=conversation_history,
+                        current_state=current_state,
+                        slots_to_extract=slots,
+                    ),
+                    timeout=self.timeout_s,
+                )
+            except asyncio.TimeoutError:
+                llm_timed_out = True
+                logger.warning("[semantic_slots] LLM extractor timed out after %.2fs", self.timeout_s)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[semantic_slots] LLM extractor failed: %s", exc)
+
+        merged = self._merge_candidates(deterministic, llm_candidates)
+        candidates = self._score_and_gate(merged)
+        latency_ms = int((time.monotonic() - started) * 1000)
+        self._stamp_metrics(current_state, candidates, latency_ms, llm_timed_out)
+        return candidates
+
+    def _extract_deterministic(self, utterance: str, state: Any, slots: list[str]) -> dict[str, dict[str, Any]]:
+        text = (utterance or "").strip()
+        lower = text.lower()
+        candidates: dict[str, dict[str, Any]] = {}
+
+        if "phone" in slots:
+            match = _PHONE_RE.search(text)
+            if match:
+                candidates["phone"] = self._raw_candidate(
+                    match.group(0),
+                    0.75,
+                    match.group(0),
+                    "deterministic",
+                )
+
+        if "confirmation_intent" in slots:
+            yes_hits = sum(1 for token in _CONFIRMATION_YES if token in lower)
+            no_hits = sum(1 for token in _CONFIRMATION_NO if token in lower)
+            if yes_hits and not no_hits:
+                candidates["confirmation_intent"] = self._raw_candidate("yes", 0.9, text, "deterministic")
+            elif no_hits and not yes_hits:
+                candidates["confirmation_intent"] = self._raw_candidate("no", 0.9, text, "deterministic")
+
+        if "party_size" in slots and not getattr(state, "party_size", None):
+            has_reservation_context = any(word in lower for word in ("person", "personen", "tisch", "reserv"))
+            if has_reservation_context:
+                match = _BARE_INT_RE.search(text)
+                if match:
+                    candidates["party_size"] = self._raw_candidate(int(match.group(1)), 0.85, match.group(1), "deterministic")
+
+        return candidates
+
+    async def _extract_via_llm(
+        self,
+        *,
+        user_utterance: str,
+        conversation_history: list[dict[str, str]] | list[tuple[str, str]],
+        current_state: Any,
+        slots_to_extract: list[str],
+    ) -> dict[str, Any]:
+        client = getattr(self.extractor, "_client", None)
+        model = getattr(self.extractor, "_model", "claude-haiku-4-5-20251001")
+        if client is None:
+            return {}
+
+        prompt = self._build_prompt(
+            user_utterance=user_utterance,
+            conversation_history=conversation_history,
+            current_state=current_state,
+            slots_to_extract=slots_to_extract,
+        )
+        response = await client.messages.create(
+            model=model,
+            max_tokens=900,
+            system=_SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.0,
+        )
+        usage = getattr(response, "usage", None)
+        if usage is not None:
+            self.extractor._last_usage_metadata = getattr(  # noqa: SLF001
+                self.extractor,
+                "_last_usage_metadata",
+                None,
+            )
+        text = (response.content[0].text if response.content else "{}").strip()
+        if text.startswith("```"):
+            text = text.split("```")[1].lstrip("json").strip()
+        parsed = json.loads(text)
+        return self._normalize_llm_response(parsed)
+
+    def _build_prompt(
+        self,
+        *,
+        user_utterance: str,
+        conversation_history: list[dict[str, str]] | list[tuple[str, str]],
+        current_state: Any,
+        slots_to_extract: list[str],
+    ) -> str:
+        context = self._format_history(conversation_history[-8:])
+        state_snapshot = {
+            "order_intent": bool(getattr(current_state, "order_intent", False)),
+            "reservation_intent": bool(getattr(current_state, "reservation_intent", False)),
+            "delivery_intended": getattr(current_state, "delivery_intended", None),
+            "existing_customer_name": getattr(current_state, "customer_name", None),
+            "existing_delivery_address": getattr(current_state, "delivery_address", None),
+            "existing_phone": getattr(current_state, "phone_number", None),
+            "existing_order_items": getattr(current_state, "selected_items", None)
+            or getattr(current_state, "all_order_items", lambda: [])(),
+            "existing_reservation_date": getattr(current_state, "reservation_date", None),
+            "existing_party_size": getattr(current_state, "party_size", None),
+            "end_call_stage": getattr(current_state, "end_call_stage", "idle"),
+        }
+        schema = self._build_extraction_schema(slots_to_extract)
+        return (
+            "Extrahiere nur die angeforderten Slots aus der aktuellen Aussage und dem Gesprächskontext.\n"
+            "Nutze keine Listen von Straßentypen, Namensformen oder Beispielen. Entscheide semantisch aus Kontext, "
+            "welche Angabe der Anrufer gerade liefert oder korrigiert.\n"
+            "Wenn ein Wert unsicher ist, gib niedrigere confidence zurück. Wenn nichts erkennbar ist, lass den Slot weg.\n"
+            "Antwortformat:\n"
+            "{\n"
+            '  "slots": {\n'
+            '    "<slot_name>": {"value": <string|number|array>, "confidence": 0.0-1.0, '
+            '"evidence_span": "<Originaltext>", "correction": true|false}\n'
+            "  }\n"
+            "}\n\n"
+            f"Angeforderte Slots als JSON-Schema:\n{json.dumps(schema, ensure_ascii=False)}\n\n"
+            f"Aktueller Zustand:\n{json.dumps(state_snapshot, ensure_ascii=False)}\n\n"
+            f"Letzte Gesprächszüge:\n{context}\n\n"
+            f"Aktuelle Anruferaussage:\n{user_utterance.strip()!r}"
+        )
+
+    def _build_extraction_schema(self, slots: list[str]) -> dict[str, Any]:
+        full_schema: dict[str, Any] = {
+            "customer_name": {
+                "type": "string",
+                "description": "Name der anrufenden Person oder korrigierter Name.",
+            },
+            "delivery_address": {
+                "type": "string",
+                "description": "Lieferadresse mit Ortsangaben, sofern der Kontext eine Adresse verlangt.",
+            },
+            "phone": {
+                "type": "string",
+                "description": "Telefonnummer, möglichst als Ziffernfolge mit Landesvorwahl falls genannt.",
+            },
+            "order_items": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Bestellte Speisen, Getränke, Mengen und Varianten.",
+            },
+            "delivery_date": {
+                "type": "string",
+                "description": "Gewünschtes Datum im ISO-Format, wenn eindeutig auflösbar.",
+            },
+            "party_size": {
+                "type": "integer",
+                "description": "Personenzahl für eine Reservierung.",
+            },
+            "confirmation_intent": {
+                "type": "string",
+                "enum": ["yes", "no", "unclear"],
+                "description": "Bestätigt, verneint oder korrigiert die Person den aktuellen Readback-Schritt.",
+            },
+        }
+        return {slot: full_schema[slot] for slot in slots if slot in full_schema}
+
+    def _normalize_llm_response(self, parsed: Any) -> dict[str, dict[str, Any]]:
+        if not isinstance(parsed, dict):
+            return {}
+        raw_slots = parsed.get("slots", parsed)
+        if not isinstance(raw_slots, dict):
+            return {}
+
+        normalized: dict[str, dict[str, Any]] = {}
+        for slot_name, raw in raw_slots.items():
+            if slot_name not in SEMANTIC_SLOT_NAMES:
+                continue
+            if isinstance(raw, dict):
+                value = raw.get("value")
+                confidence = self._confidence_to_float(raw.get("confidence", 0.7))
+                evidence = str(raw.get("evidence_span") or raw.get("evidence") or "")
+                correction = bool(raw.get("correction", False))
+            else:
+                value = raw
+                confidence = 0.7
+                evidence = ""
+                correction = False
+            if value in (None, "", [], {}):
+                continue
+            normalized[slot_name] = self._raw_candidate(
+                value=value,
+                confidence=confidence,
+                evidence_span=evidence,
+                source="llm",
+                correction=correction,
+            )
+        return normalized
+
+    def _merge_candidates(self, deterministic: dict[str, Any], llm: dict[str, Any]) -> dict[str, Any]:
+        merged = dict(llm)
+        for slot_name, candidate in deterministic.items():
+            if candidate.get("confidence", 0.0) >= 0.85 or slot_name not in merged:
+                merged[slot_name] = candidate
+        return merged
+
+    def _score_and_gate(self, candidates: dict[str, dict[str, Any]]) -> SlotCandidates:
+        result = SlotCandidates()
+        for slot_name, raw in candidates.items():
+            confidence = max(0.0, min(1.0, self._confidence_to_float(raw.get("confidence", 0.0))))
+            if confidence < 0.6:
+                continue
+            candidate = SlotCandidate(
+                slot_name=slot_name,
+                value=raw.get("value"),
+                confidence=confidence,
+                evidence_span=str(raw.get("evidence_span") or ""),
+                source=str(raw.get("source") or "unknown"),
+                needs_readback=confidence < 0.85,
+                correction=bool(raw.get("correction", False)),
+            )
+            if slot_name == "order_items":
+                items = candidate.value if isinstance(candidate.value, list) else [candidate.value]
+                cleaned_items = [str(item).strip() for item in items if str(item).strip()]
+                if cleaned_items:
+                    candidate.value = cleaned_items
+                    result.order_items.append(candidate)
+            elif hasattr(result, slot_name):
+                setattr(result, slot_name, candidate)
+        return result
+
+    def _stamp_metrics(self, state: Any, candidates: SlotCandidates, latency_ms: int, timed_out: bool) -> None:
+        metric = {
+            "latency_ms": latency_ms,
+            "timed_out": timed_out,
+            **candidates.to_metric(),
+        }
+        try:
+            state._last_semantic_slot_metrics = metric
+            state.last_extraction = metric
+            state.last_extraction_timed_out = timed_out
+        except Exception:
+            pass
+
+    def _format_history(self, turns: list[dict[str, str]] | list[tuple[str, str]]) -> str:
+        formatted: list[dict[str, str]] = []
+        for turn in turns:
+            if isinstance(turn, tuple) and len(turn) >= 2:
+                formatted.append({"role": str(turn[0]), "content": str(turn[1])})
+            elif isinstance(turn, dict):
+                formatted.append({
+                    "role": str(turn.get("role", "")),
+                    "content": str(turn.get("content", "")),
+                })
+        return json.dumps(formatted, ensure_ascii=False)
+
+    def _raw_candidate(
+        self,
+        value: Any,
+        confidence: float,
+        evidence_span: str,
+        source: str,
+        *,
+        correction: bool = False,
+    ) -> dict[str, Any]:
+        return {
+            "value": value,
+            "confidence": confidence,
+            "evidence_span": evidence_span,
+            "source": source,
+            "correction": correction,
+        }
+
+    def _confidence_to_float(self, confidence: Any) -> float:
+        if isinstance(confidence, (int, float)):
+            return float(confidence)
+        if isinstance(confidence, str):
+            return {"high": 0.9, "medium": 0.7, "low": 0.4}.get(confidence.lower(), 0.7)
+        return 0.0
+
+
+def slots_for_current_turn(state: Any, user_text: str = "") -> list[str]:
+    """Return the semantic slots that matter for this turn."""
+    lower = (user_text or "").lower()
+    slots: set[str] = {"confirmation_intent"}
+    if getattr(state, "order_intent", False) or any(word in lower for word in ("bestell", "liefer", "abhol", "essen")):
+        slots.update({"order_items", "customer_name", "phone"})
+        if getattr(state, "delivery_intended", False) or "liefer" in lower:
+            slots.add("delivery_address")
+    if getattr(state, "reservation_intent", False) or any(word in lower for word in ("reserv", "tisch", "person")):
+        slots.update({"customer_name", "party_size", "delivery_date", "phone"})
+    if getattr(state, "end_call_stage", "idle") in {
+        "pre_commit_readback",
+        "order_pre_commit_readback",
+        "readback_pending",
+        "correction_pending",
+    }:
+        slots.update({"customer_name", "delivery_address", "order_items", "phone", "delivery_date", "party_size"})
+    if not slots - {"confirmation_intent"}:
+        slots.update({"customer_name", "phone"})
+    return sorted(slots)

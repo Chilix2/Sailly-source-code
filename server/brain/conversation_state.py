@@ -6,7 +6,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional, List
+from typing import Any, Optional, List
 
 logger = logging.getLogger(__name__)
 
@@ -453,7 +453,7 @@ def _address_looks_valid(addr: str) -> bool:
     if not re.search(r"\d", addr):
         return False
     if not re.search(
-        r"(?:straße|strasse|str\.?|allee|ring|gasse|damm|weg|platz|ufer|chaussee)",
+        r"(?:straße|strasse|str\.?|allee|ring|gasse|damm|weg|platz|ufer|chaussee|bogen)",
         addr.lower(),
     ):
         return False
@@ -472,7 +472,7 @@ def _extract_address_from_utterance(utterance: str) -> Optional[str]:
         return None
     normalized = _convert_number_words(utterance)
     street_suffix = (
-        r"(?:straße|strasse|str\.?|allee|ring|gasse|damm|weg|platz|ufer|chaussee|feld|berg|heim)"
+        r"(?:straße|strasse|str\.?|allee|ring|gasse|damm|weg|platz|ufer|chaussee|feld|berg|heim|bogen)"
     )
     def _clean_street_name(raw: str) -> str:
         street = raw.strip()
@@ -487,7 +487,7 @@ def _extract_address_from_utterance(utterance: str) -> Optional[str]:
             street = street[prep_matches[-1].end():].strip()
         for _ in range(2):
             street = re.sub(
-                r"^(?:bitte\s+)?(?:lieferung\s+)?(?:zur|zum|zu|nach|an|in|die|der|den)\s+",
+                r"^(?:bitte\s+)?(?:lieferung\s+)?(?:zur|zum|zu|nach|an|am|im|in|die|der|den)\s+",
                 "",
                 street,
                 flags=re.IGNORECASE,
@@ -1209,6 +1209,10 @@ class ConversationState:
     customer_name: Optional[str] = None  # full name: first + last (confirmed)
     first_name: Optional[str] = None      # partial: first name only, set before full name confirmed
     delivery_address: Optional[str] = None
+    selected_items: Optional[List[str]] = None
+    semantic_slot_values: dict = field(default_factory=dict)
+    pending_readback_slots: dict = field(default_factory=dict)
+    semantic_slot_metrics: dict = field(default_factory=dict)
     
     # Training: known items list (dishes, services, etc.) from tenant config
     known_items: List[str] = field(default_factory=lambda: list(_KNOWN_ITEMS))
@@ -1404,6 +1408,88 @@ class ConversationState:
         self.order_items_extras.append(dish)
         return True
 
+    def update_state_from_extracted_slots(
+        self,
+        candidates: Any,
+        *,
+        apply_medium_confidence: bool = False,
+    ) -> list[str]:
+        """Apply validated semantic slot candidates to durable state.
+
+        The LLM only proposes candidates. This method promotes high-confidence
+        candidates and stages medium-confidence ones for readback.
+        """
+        applied: list[str] = []
+        pending: dict[str, dict[str, Any]] = {}
+
+        for candidate in getattr(candidates, "all", lambda: [])():
+            slot_name = getattr(candidate, "slot_name", "")
+            confidence = float(getattr(candidate, "confidence", 0.0) or 0.0)
+            needs_readback = bool(getattr(candidate, "needs_readback", False))
+            value = getattr(candidate, "value", None)
+            if value in (None, "", [], {}):
+                continue
+            should_apply = confidence >= 0.85 and not needs_readback
+            if apply_medium_confidence and confidence >= 0.6:
+                should_apply = True
+            if not should_apply:
+                pending[slot_name] = (
+                    candidate.to_metric()
+                    if hasattr(candidate, "to_metric")
+                    else {"value": value, "confidence": confidence}
+                )
+                continue
+
+            if slot_name == "customer_name":
+                self.customer_name = str(value).strip()
+                self.name_confirmed = confidence >= 0.9
+                applied.append(slot_name)
+            elif slot_name == "delivery_address":
+                self.delivery_address = str(value).strip()
+                self.delivery_address_mentioned = True
+                self.delivery_intended = True
+                if getattr(candidate, "validator_valid", None) is True:
+                    self.address_verified = True
+                    self.verify_address_failed = False
+                applied.append(slot_name)
+            elif slot_name == "phone":
+                self.phone_number = str(value).strip()
+                self.phone_confirmed = confidence >= 0.85
+                applied.append(slot_name)
+            elif slot_name == "order_items":
+                items = value if isinstance(value, list) else [value]
+                cleaned = [str(item).strip() for item in items if str(item).strip()]
+                if cleaned:
+                    self.selected_dish = cleaned[0]
+                    self.order_items_extras = cleaned[1:]
+                    self.selected_items = cleaned
+                    self.order_intent = True
+                    applied.append(slot_name)
+            elif slot_name == "delivery_date":
+                self.reservation_date = str(value).strip()
+                applied.append(slot_name)
+            elif slot_name == "party_size":
+                try:
+                    self.party_size = int(value)
+                    applied.append(slot_name)
+                except Exception:
+                    pending[slot_name] = {"value": value, "confidence": confidence}
+            elif slot_name == "confirmation_intent":
+                self.semantic_slot_values["confirmation_intent"] = str(value)
+                applied.append(slot_name)
+
+            if slot_name:
+                self.semantic_slot_values[slot_name] = (
+                    candidate.to_metric()
+                    if hasattr(candidate, "to_metric")
+                    else {"value": value, "confidence": confidence}
+                )
+
+        if pending:
+            self.pending_readback_slots.update(pending)
+        self.semantic_slot_metrics = getattr(candidates, "to_metric", lambda: {})()
+        return applied
+
     def current_intent_items(self) -> List[str]:
         """
         FIX 2: Get items for the current active intent (multi-intent mode),
@@ -1452,19 +1538,13 @@ class ConversationState:
         return any(digits.startswith(p) for p in mobile_prefixes)
 
     def has_valid_address(self) -> bool:
-        """Address with street + number + street suffix (non-garbage). CRITICAL: reject non-Bonn deliveries."""
+        """Address accepted by semantic extraction/validator or legacy structure."""
         if not self.delivery_address:
             return False
         a = self.delivery_address.strip()
         if len(a) < 8:
             return False
         has_digit = bool(re.search(r"\d", a))
-        has_street_suffix = bool(re.search(
-            r"(?:straße|str\.?|allee|ring|gasse|damm|weg|platz|ufer|chaussee)",
-            a.lower(),
-        ))
-        if not (has_digit and has_street_suffix):
-            return False
         # CRITICAL FIX H2.2_D3: Reject Munich/non-Bonn delivery addresses
         # Restaurant is in Bonn (53113) — reject addresses in Munich (80335) or other cities
         _reject_cities = ("münchen", "muenchen", "munich", "80335")
@@ -1479,6 +1559,20 @@ class ConversationState:
             # If no postcode found, check if Bonn is mentioned
             if "bonn" not in _addr_lower and "bonn-beuel" not in _addr_lower:
                 return False
+        if self.address_verified and has_digit:
+            return True
+        semantic_address = self.semantic_slot_values.get("delivery_address")
+        if isinstance(semantic_address, dict):
+            sem_conf = float(semantic_address.get("confidence") or 0.0)
+            sem_valid = semantic_address.get("validator_valid")
+            if has_digit and (sem_valid is True or sem_conf >= 0.85):
+                return True
+        has_street_suffix = bool(re.search(
+            r"(?:straße|strasse|str\.?|allee|ring|gasse|damm|weg|platz|ufer|chaussee|bogen)",
+            a.lower(),
+        ))
+        if not (has_digit and has_street_suffix):
+            return False
         return True
 
     def has_valid_address_or_pickup(self) -> bool:
@@ -1609,6 +1703,10 @@ class ConversationState:
             "customer_name": self.customer_name,
             "first_name": self.first_name,
             "delivery_address": self.delivery_address,
+            "selected_items": self.selected_items,
+            "semantic_slot_values": self.semantic_slot_values,
+            "pending_readback_slots": self.pending_readback_slots,
+            "semantic_slot_metrics": self.semantic_slot_metrics,
             "cached_menu": self.cached_menu,
             "cached_menu_at_turn": self.cached_menu_at_turn,
             "cached_menu_metadata": self.cached_menu_metadata,
@@ -1716,6 +1814,10 @@ class ConversationState:
             customer_name=data.get("customer_name"),
             first_name=data.get("first_name"),
             delivery_address=data.get("delivery_address"),
+            selected_items=data.get("selected_items"),
+            semantic_slot_values=data.get("semantic_slot_values", {}),
+            pending_readback_slots=data.get("pending_readback_slots", {}),
+            semantic_slot_metrics=data.get("semantic_slot_metrics", {}),
             cached_menu=data.get("cached_menu"),
             cached_menu_at_turn=data.get("cached_menu_at_turn"),
             cached_menu_metadata=data.get("cached_menu_metadata", {}),

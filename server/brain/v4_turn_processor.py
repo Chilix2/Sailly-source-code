@@ -106,11 +106,25 @@ class V4TurnProcessor:
         self._last_bot_response: str = ""
         self._pending_bot_response: str = ""
         self._response_repeat_count: int = 0
+        self._last_slot_extraction_latency_ms: Optional[int] = None
+        self._last_slot_retention_status: Optional[dict] = None
+        self._last_validation_passes: Optional[list] = None
+        self._semantic_tools_called_this_turn: list[str] = []
 
         # Anthropic client for TinyGenerator
         self._llm_client = AsyncAnthropic(
             api_key=os.environ.get("ANTHROPIC_API_KEY", "")
         )
+        try:
+            from server.brain.slot_extractor import SlotExtractor
+            from server.brain.slot_extraction_layer import SlotExtractionLayer
+
+            self.slot_extractor = SlotExtractor(anthropic_client=self._llm_client)
+            self.slot_extraction_layer = SlotExtractionLayer(self.slot_extractor)
+        except Exception as exc:
+            logger.warning("[V4Turn] semantic slot extraction disabled: %s", exc)
+            self.slot_extractor = None
+            self.slot_extraction_layer = None
 
     # ── brain_service reads turn_processor._state for CRM ────────────────────
     @property
@@ -131,7 +145,25 @@ class V4TurnProcessor:
         from server.brain.context_doc_builder import _persist_resolved_entities_to_state
         from server.brain.v4_pipeline import process_turn_v4
 
-        # Step 1: phone / name / date / party_size extraction via conversation_state.
+        self._semantic_tools_called_this_turn = []
+
+        semantic_pre_response = await self._run_semantic_slot_extraction(user_text)
+        if semantic_pre_response:
+            clean = semantic_pre_response
+            if user_text:
+                self.last_turns.append(("user", user_text))
+            self.last_turns.append(("assistant", clean))
+            self.last_turns = self.last_turns[-10:]
+            self._last_bot_response = clean
+            self.turn_idx += 1
+            return TurnResult(
+                clean_text=clean,
+                raw_response=clean,
+                tools_called=list(self._semantic_tools_called_this_turn),
+                node_name="semantic_slot_readback",
+            )
+
+        # Step 1: semantic candidates plus legacy phone/name/date/party extraction.
         # Workers in v4_pipeline handle date/time/party_size/name but NOT phone numbers
         # (phone uses the cross-turn digit-buffer logic in update_state_from_utterance).
         update_state_from_utterance(self.state, user_text)
@@ -164,6 +196,8 @@ class V4TurnProcessor:
         profile = result_dict.get("profile", result_dict.get("node_name", "greeting"))
         self.node_mgr.current_node_name = profile
         tools = result_dict.get("tools_called", [])
+        if self._semantic_tools_called_this_turn:
+            tools = list(dict.fromkeys(list(tools or []) + self._semantic_tools_called_this_turn))
         for t in tools:
             if t not in self.all_tools:
                 self.all_tools.append(t)
@@ -179,6 +213,128 @@ class V4TurnProcessor:
             end_reason=result_dict.get("end_reason", ""),
             node_name=profile,
         )
+
+    async def _run_semantic_slot_extraction(self, user_text: str) -> Optional[str]:
+        """Extract, validate, and apply semantic slot candidates before v4 logic."""
+        if not user_text or self.slot_extraction_layer is None:
+            return None
+
+        import time
+        from server.brain.slot_extraction_layer import slots_for_current_turn
+        from server.brain.slot_validators import (
+            AddressValidator,
+            DateValidator,
+            OrderItemValidator,
+            PartySizeValidator,
+            PhoneValidator,
+        )
+
+        started = time.monotonic()
+        slots = slots_for_current_turn(self.state, user_text)
+        candidates = await self.slot_extraction_layer.extract(
+            user_utterance=user_text,
+            conversation_history=self.last_turns + ([("user", user_text)] if user_text else []),
+            current_state=self.state,
+            slots_to_extract=slots,
+        )
+        self._last_slot_extraction_latency_ms = int((time.monotonic() - started) * 1000)
+
+        validators = {
+            "delivery_address": AddressValidator(call_sid=self.call_sid, tenant_id=self.tenant_id or "doboo"),
+            "phone": PhoneValidator(),
+            "order_items": OrderItemValidator(self.state),
+            "delivery_date": DateValidator(),
+            "party_size": PartySizeValidator(),
+        }
+        validation_passes: list[dict] = []
+        for candidate in candidates.all():
+            validator = validators.get(candidate.slot_name)
+            if validator is None:
+                continue
+            result = await validator.validate(candidate)
+            candidate.validator_feedback = result.feedback
+            candidate.validator_valid = result.is_valid
+            candidate.confidence = max(0.0, min(1.0, candidate.confidence + result.confidence_adjustment))
+            candidate.needs_readback = candidate.confidence < 0.85
+            if result.corrected_value is not None:
+                candidate.value = result.corrected_value
+                candidate.source = "validator_corrected"
+            if result.tool_called:
+                self._semantic_tools_called_this_turn.append(result.tool_called)
+            validation_passes.append({
+                "slot": candidate.slot_name,
+                "valid": result.is_valid,
+                "feedback": result.feedback,
+                "tool_called": result.tool_called,
+            })
+
+        confirmation = candidates.by_name("confirmation_intent")
+        pending = getattr(self.state, "pending_readback_slots", {}) or {}
+        if pending and confirmation and str(confirmation.value).lower() == "yes":
+            self._apply_pending_semantic_slots()
+            self.state.pending_readback_slots = {}
+        elif pending and confirmation and str(confirmation.value).lower() == "no":
+            self.state.pending_readback_slots = {}
+            return "Alles klar, was soll ich ändern?"
+
+        applied = self.state.update_state_from_extracted_slots(candidates)
+        self._last_slot_retention_status = {
+            "requested_slots": slots,
+            "applied_slots": applied,
+            **getattr(self.state, "_last_semantic_slot_metrics", {}),
+        }
+        self._last_validation_passes = validation_passes
+
+        pending = getattr(self.state, "pending_readback_slots", {}) or {}
+        if pending and not applied:
+            return self._build_semantic_readback(pending)
+        return None
+
+    def _apply_pending_semantic_slots(self) -> None:
+        from server.brain.slot_extraction_layer import SlotCandidate, SlotCandidates
+
+        pending = getattr(self.state, "pending_readback_slots", {}) or {}
+        candidates = SlotCandidates()
+        for slot_name, raw in pending.items():
+            if not isinstance(raw, dict):
+                continue
+            candidate = SlotCandidate(
+                slot_name=slot_name,
+                value=raw.get("value"),
+                confidence=max(float(raw.get("confidence") or 0.6), 0.85),
+                evidence_span=str(raw.get("evidence_span") or ""),
+                source=str(raw.get("source") or "readback_confirmed"),
+                needs_readback=False,
+                validator_valid=raw.get("validator_valid"),
+            )
+            if slot_name == "order_items":
+                candidates.order_items.append(candidate)
+            elif hasattr(candidates, slot_name):
+                setattr(candidates, slot_name, candidate)
+        self.state.update_state_from_extracted_slots(candidates, apply_medium_confidence=True)
+
+    def _build_semantic_readback(self, pending: dict) -> str:
+        labels = {
+            "customer_name": "den Namen",
+            "delivery_address": "die Adresse",
+            "phone": "die Telefonnummer",
+            "order_items": "die Bestellung",
+            "delivery_date": "das Datum",
+            "party_size": "die Personenzahl",
+        }
+        parts = []
+        for slot_name, raw in pending.items():
+            if not isinstance(raw, dict):
+                continue
+            label = labels.get(slot_name, slot_name)
+            value = raw.get("value")
+            if isinstance(value, list):
+                value = ", ".join(str(v) for v in value)
+            if value:
+                parts.append(f"{label}: {value}")
+        if not parts:
+            return ""
+        return "Ich habe verstanden: " + "; ".join(parts) + ". Stimmt das so?"
 
     async def _persist_state_safe(self):
         """State persistence stub — v4 does not use Redis adk_brain blob."""

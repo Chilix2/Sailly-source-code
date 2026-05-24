@@ -148,6 +148,22 @@ def _is_confirmation_v4(text: str) -> bool:
     return False
 
 
+def _semantic_confirmation_value(state) -> str:
+    values = getattr(state, "semantic_slot_values", {}) or {}
+    raw = values.get("confirmation_intent")
+    if isinstance(raw, dict):
+        return str(raw.get("value") or "").lower()
+    return str(raw or "").lower()
+
+
+def _semantic_confirms_v4(state) -> bool:
+    return _semantic_confirmation_value(state) == "yes"
+
+
+def _semantic_denies_v4(state) -> bool:
+    return _semantic_confirmation_value(state) == "no"
+
+
 # ── Helper: pre-commit summaries (BEFORE tool execution) ────────────────────────
 
 def _build_pre_commit_summary_v4(state) -> str:
@@ -1023,6 +1039,80 @@ async def process_turn_v4(
         except Exception as _e_w:
             logger.debug("[v4_pipeline] inline get_weather failed (non-fatal): %s", _e_w)
 
+    _directions_kws = (
+        "anfahrt", "wie komm", "wie komme", "wie kommt man", "weg zu euch",
+        "route", "wegbeschreibung", "erreichbar", "hinkommen", "zu euch kommen",
+        "vom hauptbahnhof", "am hauptbahnhof", "bahnhof",
+    )
+    _is_directions_question = any(kw in _text_lo for kw in _directions_kws)
+    if _is_directions_question and "get_directions" not in tool_results:
+        try:
+            from tools.executor import execute_tool as _et_dir
+
+            def _directions_origin(text: str) -> str:
+                patterns = [
+                    r"\b(?:vom|von|ab|am|an der|an dem)\s+(.+?)(?:\s+(?:zu|zum|zur|nach)\b|[?.!,]|$)",
+                    r"\bich bin (?:gerade |grad )?(?:am|an der|in)\s+(.+?)(?:[?.!,]|$)",
+                ]
+                for _pat in patterns:
+                    _m = re.search(_pat, text, re.IGNORECASE)
+                    if _m:
+                        _origin = _m.group(1).strip()
+                        _origin = re.sub(r"\b(?:und|wollte|möchte|will).*$", "", _origin, flags=re.IGNORECASE).strip()
+                        _origin = _origin.replace(" in Bonn", " Bonn")
+                        if _origin:
+                            return _origin
+                if "hauptbahnhof" in text.lower():
+                    return "Hauptbahnhof Bonn"
+                return ""
+
+            _destination = (
+                ((_tcfg_top.location or {}).get("address") if _tcfg_top else None)
+                or getattr(getattr(_tcfg_top, "practice", None), "location", None)
+                or "Friedrich-Ebert-Allee 69, 53113 Bonn"
+            )
+            _mode = "TRANSIT" if any(kw in _text_lo for kw in ("bahnhof", "bus", "bahn", "öpnv", "oepnv")) else "DRIVE"
+            if any(kw in _text_lo for kw in ("zu fuß", "zu fuss", "laufen", "gehe")):
+                _mode = "WALK"
+            _origin = _directions_origin(user_text)
+            _dir_res = await _et_dir(
+                "get_directions",
+                {"origin": _origin, "destination": _destination, "mode": _mode},
+                call_sid,
+                tenant_id,
+            )
+            if isinstance(_dir_res, dict):
+                tool_results["get_directions"] = _dir_res
+                logger.info(
+                    "[v4_pipeline] executed get_directions inline: origin=%r destination=%r mode=%s",
+                    _origin,
+                    _destination,
+                    _mode,
+                )
+                _dir_msg = _dir_res.get("message") or _dir_res.get("error") or ""
+                _addr = _dir_res.get("address") or _dir_res.get("destination") or _destination
+                if intent_result.intent in (IntentKind.FAQ, IntentKind.GREETING, IntentKind.UNKNOWN):
+                    directions_text = (
+                        f"Ja, gerne. Unsere Adresse ist {_addr}. {_dir_msg}"
+                        if _dir_msg else f"Ja, gerne. Unsere Adresse ist {_addr}."
+                    )
+                    if tts_callback:
+                        try:
+                            await tts_callback(directions_text)
+                        except Exception as _cb_err:
+                            logger.warning(f"[v4_pipeline] tts_callback raised: {_cb_err}")
+                    return _quick_return(
+                        directions_text,
+                        "directions_lookup",
+                        intent_result,
+                        t0,
+                        tools=list(tool_results.keys()),
+                        next_action="say",
+                        should_end=False,
+                    )
+        except Exception as _e_dir:
+            logger.debug("[v4_pipeline] inline get_directions failed (non-fatal): %s", _e_dir)
+
     # CRITICAL FIX B2.3_D3: Always call get_menu when ordering or discussing dishes — FIRE EARLY before routing
     # This prevents SPEISEKARTE_FALSCH and PREIS_FALSCH by grounding bot responses in actual menu data
     _is_order_or_menu_question = any(kw in _text_lo for kw in (
@@ -1297,7 +1387,7 @@ async def process_turn_v4(
     if end_call_stage == "correction_pending":
         # If user says "ja" / confirms during correction_pending, they meant "nothing to change"
         # — treat as a re-confirmation rather than a correction input.
-        if _is_confirmation_v4(user_text):
+        if _semantic_confirms_v4(state) or _is_confirmation_v4(user_text):
             logger.info(f"[v4_pipeline] T{turn_idx} correction_pending but user confirmed → re-enter pre_commit_readback")
             state.end_call_stage = "pre_commit_readback"
             end_call_stage = "pre_commit_readback"
@@ -1406,7 +1496,7 @@ async def process_turn_v4(
             )
             # Fall through so the readback gate rebuilds the summary with the
             # corrected name before any commit tool can fire.
-        elif _is_confirmation_v4(user_text):
+        elif _semantic_confirms_v4(state) or _is_confirmation_v4(user_text):
             # User confirmed — mark stage as idle and fall through to commit gate
             _order_readback_confirmed_now = end_call_stage == "order_pre_commit_readback"
             state.end_call_stage = "idle"
@@ -1490,7 +1580,7 @@ async def process_turn_v4(
                     end_call_stage = "idle"
                     state._false_denial_count = 0
                     _order_slots_ok = _all_slots_present(state, "create_order")
-                elif _is_repeat_request and not _is_confirmation_v4(user_text):
+                elif _is_repeat_request and not (_semantic_confirms_v4(state) or _is_confirmation_v4(user_text)):
                     # User is repeating their order WITHOUT leading confirmation — re-show readback
                     logger.info(f"[v4_pipeline] T{turn_idx} pre-commit: user repeating (no leading confirm) → re-show readback")
                     state._readback_already_shown = False
@@ -1563,7 +1653,7 @@ async def process_turn_v4(
         # Add explicit 'das stimmt so' and similar patterns that confirm existing readback
         _confirm_extras = ("das stimmt so", "stimmt so", "passt so", "so passt", "so ist es richtig")
         _is_explicit_confirm = any(p in user_text.lower() for p in _confirm_extras)
-        if _is_confirmation_v4(user_text) or _is_explicit_confirm:
+        if _semantic_confirms_v4(state) or _is_confirmation_v4(user_text) or _is_explicit_confirm:
             state.end_call_stage = "confirmed"
             # Vary farewell to avoid repeating the same confirmation phrase
             _farewell_options = [
@@ -1686,6 +1776,74 @@ async def process_turn_v4(
             tools=scheduled_run, next_action="clarify", should_end=False,
         )
 
+    _is_delivery_order = (
+        _is_order_intent
+        and _order_not_committed
+        and (
+            intent_result.intent == IntentKind.DELIVERY
+            or getattr(state, "delivery_intended", False) is True
+            or getattr(state, "delivery_address_mentioned", False) is True
+        )
+    )
+    if (
+        _is_delivery_order
+        and getattr(state, "delivery_address", None)
+        and not getattr(state, "verify_address_called", False)
+    ):
+        try:
+            from tools.executor import execute_tool as _verify_exec
+
+            _tenant_city = (
+                getattr(_tcfg_top, "city", None)
+                or ((_tcfg_top.location or {}).get("city") if _tcfg_top else None)
+                or "Deutschland"
+            )
+            _addr_to_verify = getattr(state, "delivery_address", "") or ""
+            _verify_args = {"address": _addr_to_verify, "city": _tenant_city, "country": "Deutschland"}
+            _verify_result = await _verify_exec("verify_address", _verify_args, call_sid, tenant_id)
+            state.verify_address_called = True
+            if "verify_address" not in scheduled_run:
+                scheduled_run.append("verify_address")
+            logger.info(f"[v4_pipeline] T{turn_idx} early verify_address → {_verify_result}")
+            if isinstance(_verify_result, dict):
+                if _verify_result.get("formatted_address"):
+                    state.delivery_address = _verify_result["formatted_address"]
+                    state.address_verified = bool(_verify_result.get("valid", True))
+                    state.address_confirmed = True
+                    state.verify_address_failed = False
+                elif _verify_result.get("valid") is True:
+                    state.address_verified = True
+                    state.address_confirmed = True
+                    state.verify_address_failed = False
+                elif _verify_result.get("address") and _verify_result.get("suggestion"):
+                    # Timeout/temporary Maps issue: keep the caller moving and verify at commit again.
+                    state.delivery_address = _verify_result["address"]
+                    state.verify_address_failed = True
+                else:
+                    state.verify_address_failed = True
+                    correction_text = (
+                        _verify_result.get("suggestion")
+                        or "Die Adresse konnte ich nicht sicher finden. Können Sie Straße, Hausnummer und Stadt bitte noch einmal nennen?"
+                    )
+                    state.last_field_asked = "address"
+                    if tts_callback:
+                        try:
+                            await tts_callback(correction_text)
+                        except Exception as _cb_err:
+                            logger.warning(f"[v4_pipeline] tts_callback raised: {_cb_err}")
+                    return _quick_return(
+                        correction_text,
+                        "order_start",
+                        intent_result,
+                        t0,
+                        tools=scheduled_run,
+                        next_action="clarify",
+                        should_end=False,
+                    )
+        except Exception as _early_va_err:
+            state.verify_address_failed = True
+            logger.warning(f"[v4_pipeline] T{turn_idx} early verify_address failed (non-fatal): {_early_va_err}")
+
     if _is_order_intent and _order_not_committed and _order_slots_ok:
         # CRITICAL FIX H2.2_D3: Mandatory readback with items+prices BEFORE any user confirmation
         # Initialize readback tracking on first access
@@ -1743,7 +1901,7 @@ async def process_turn_v4(
         
         # Handle confirmation AFTER readback was shown
         if state.end_call_stage == "order_pre_commit_readback" and getattr(state, '_readback_already_shown', False):
-            if _is_confirmation_v4(user_text):
+            if _semantic_confirms_v4(state) or _is_confirmation_v4(user_text):
                 # User confirmed readback → proceed to commit
                 state.end_call_stage = "idle"
                 logger.info(f"[v4_pipeline] T{turn_idx} order readback CONFIRMED → executing create_order")
