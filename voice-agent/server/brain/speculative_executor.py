@@ -171,3 +171,9 @@ class SpeculativeExecutor:
         self._partial_text = ""
         self._speculative_profile = None
         self._t_start = None
+
+    def consume_results(self) -> dict[str, WorkerOutput]:
+        """Return reusable speculative outputs once, then clear them."""
+        results = dict(self._results)
+        self._results = {}
+        return results

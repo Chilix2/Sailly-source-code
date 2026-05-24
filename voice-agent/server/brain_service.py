@@ -808,6 +808,16 @@ class BrowserBrainService(FrameProcessor):
                 except Exception:
                     pass
 
+                try:
+                    se = self._get_speculative_executor()
+                    speculative_results = se.consume_results() if se is not None else {}
+                    if self.turn_processor is not None:
+                        self.turn_processor._speculative_worker_results = speculative_results
+                    self._last_speculative_reused_count = len(speculative_results)
+                except Exception as _spec_err:
+                    logger.debug("[BRAIN] speculative result handoff failed: %s", _spec_err)
+                    self._last_speculative_reused_count = 0
+
                 result = await self.turn_processor.process_turn(
                     user_text, tts_callback=_tts_push
                 )
@@ -1044,6 +1054,7 @@ class BrowserBrainService(FrameProcessor):
                         "slot_extraction_latency_ms": getattr(_tp, "_last_slot_extraction_latency_ms", None) if _tp else None,
                         "slot_retention_status": getattr(_tp, "_last_slot_retention_status", None) if _tp else None,
                         "validation_passes": getattr(_tp, "_last_validation_passes", None) if _tp else None,
+                        "speculative_reused_count": getattr(self, "_last_speculative_reused_count", None),
                     })
                     try:
                         from tools.executor import drain_tool_events as _drain_tool_events

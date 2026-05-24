@@ -1436,11 +1436,20 @@ class ConversationState:
                 should_apply = True
             if not should_apply:
                 if slot_name == "delivery_address":
-                    self.delivery_address = None
-                    self.address_verified = False
-                    self.address_confirmed = False
-                    self.verify_address_called = False
-                    self.verify_address_failed = False
+                    if getattr(candidate, "validator_valid", None) is True:
+                        self.delivery_address = str(value).strip()
+                        self.delivery_address_mentioned = True
+                        self.delivery_intended = True
+                        self.address_verified = True
+                        self.address_confirmed = False
+                        self.verify_address_called = True
+                        self.verify_address_failed = False
+                    else:
+                        self.delivery_address = None
+                        self.address_verified = False
+                        self.address_confirmed = False
+                        self.verify_address_called = False
+                        self.verify_address_failed = False
                     self._readback_already_shown = False
                     self._order_readback_confirmed = False
                 pending[slot_name] = (

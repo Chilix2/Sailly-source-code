@@ -27,4 +27,3 @@ calls.db
 # Dev
 .cursor/
 .vscode/
-.git/

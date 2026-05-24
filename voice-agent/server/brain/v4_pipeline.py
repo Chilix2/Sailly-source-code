@@ -32,7 +32,7 @@ from server.brain.intent_session import IntentKind, IntentResult, TurnType
 from server.brain.tiny_generator import TinyGenerator
 from server.brain.worker_executor import execute as worker_execute
 from server.brain.worker_router import route
-from server.brain.workers import ExecutionResult, WorkerContext
+from server.brain.workers import ExecutionResult, WorkerContext, WorkerOutput
 
 logger = logging.getLogger(__name__)
 
@@ -472,6 +472,7 @@ async def process_turn_v4(
     tool_results: Optional[dict] = None,
     caller_phone: str = "",
     intent_result: Optional[IntentResult] = None,
+    speculative_worker_results: Optional[dict[str, WorkerOutput]] = None,
 ) -> dict:
     """Run one turn through the deterministic v4 pipeline.
 
@@ -496,6 +497,15 @@ async def process_turn_v4(
       - end_call_stage == "correction_pending":
           → reset to "idle", let workers update slots, fall through to normal generation
     """
+    if tts_callback is not None:
+        raw_tts_callback = tts_callback
+
+        async def _chunked_tts_callback(text: str) -> None:
+            for chunk in _split_tts_sentence_chunks(text):
+                await raw_tts_callback(chunk)
+
+        tts_callback = _chunked_tts_callback
+
     t0 = time.monotonic()
 
     # Strip caller-bot audit annotations before any processing.
@@ -1022,7 +1032,31 @@ async def process_turn_v4(
     profile = _tenant_resolve_profile(_tcfg_top, profile)
     plan = route(profile, turn_type, pipeline=_pipeline_cfg)
     ctx = _build_worker_ctx(user_text, turn_idx, state, call_sid, tenant_id)
+    reusable_speculative: dict[str, WorkerOutput] = {}
+    if speculative_worker_results:
+        required_names = {worker.name for worker in plan.required}
+        reusable_speculative = {
+            name: output
+            for name, output in speculative_worker_results.items()
+            if name in required_names and getattr(output, "success", False)
+        }
+        if reusable_speculative:
+            plan.required = [
+                worker for worker in plan.required
+                if worker.name not in reusable_speculative
+            ]
+            logger.info(
+                "[v4_pipeline] T%d reusing speculative workers: %s",
+                turn_idx,
+                sorted(reusable_speculative),
+            )
     execution_result = await worker_execute(plan, ctx)
+    if reusable_speculative:
+        execution_result.required.update(reusable_speculative)
+        execution_result.required_failed = [
+            name for name in execution_result.required_failed
+            if name not in reusable_speculative
+        ]
 
     # ── Execute business-info tools inline so results land in ctx_doc ────────
     # get_date_info is telemetry-labelled but never truly called when

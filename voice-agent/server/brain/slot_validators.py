@@ -82,9 +82,10 @@ class AddressValidator(SlotValidator):
         needs_confirm = bool(result.get("needs_caller_confirm"))
 
         if success and normalized and (needs_confirm or confidence < 0.9):
+            target_confidence = 0.84
             return SlotValidationResult(
-                is_valid=False,
-                confidence_adjustment=max(0.0, 0.75 - candidate.confidence),
+                is_valid=True,
+                confidence_adjustment=target_confidence - candidate.confidence,
                 feedback=result.get("readback_text") or "Adresse bitte bestätigen lassen.",
                 corrected_value=normalized,
                 tool_called="verify_address",

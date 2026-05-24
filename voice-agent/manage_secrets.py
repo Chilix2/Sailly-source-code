@@ -3,7 +3,7 @@
 Google Cloud Secret Manager integration for Sailly Sound Validation.
 
 Usage:
-    python3 manage_secrets.py --create xai-api-key "<YOUR_XAI_API_KEY>"
+    python3 manage_secrets.py --create xai-api-key "xai-xxxxxxxxxx"
     python3 manage_secrets.py --load xai-api-key
     python3 manage_secrets.py --sync-from-env
 """

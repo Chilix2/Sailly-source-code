@@ -209,7 +209,9 @@ class V4TurnProcessor:
             last_turns=turns_with_current,
             tts_callback=tts_callback,
             caller_phone=self.caller_phone,
+            speculative_worker_results=getattr(self, "_speculative_worker_results", None),
         )
+        self._speculative_worker_results = None
 
         # Step 3: maintain turn history for TinyGenerator context window
         # (No explicit persist call needed — process_turn_v4 mutates state in-place.)
