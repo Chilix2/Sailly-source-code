@@ -1875,6 +1875,61 @@ class ConversationState:
             last_caller_confirmation_turn=data.get("last_caller_confirmation_turn"),
         )
 
+def _iter_cached_menu_items(state: "ConversationState"):
+    """Yield flat item dictionaries from the cached tenant menu."""
+    menu = getattr(state, "cached_menu", None)
+    if not menu or not isinstance(menu, dict):
+        return
+    for items in menu.values():
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if isinstance(item, dict):
+                yield item
+
+
+def _menu_item_match_names(item: dict) -> list[str]:
+    names = []
+    name = str(item.get("name") or "").strip()
+    if name:
+        names.append(name)
+    aliases = item.get("aliases") or []
+    if isinstance(aliases, list):
+        names.extend(str(alias).strip() for alias in aliases if str(alias).strip())
+    return names
+
+
+def _menu_item_price_and_label(item: dict, fallback_name: str) -> tuple[Optional[float], str]:
+    """Return an orderable price and canonical label for direct or variant-priced items."""
+    name = str(item.get("name") or fallback_name or "").strip()
+    price = item.get("price") or item.get("preis")
+    if price is not None:
+        return (float(price), name)
+
+    variants = item.get("variants") or []
+    if not isinstance(variants, list):
+        return (None, name)
+
+    candidates = []
+    for variant in variants:
+        if not isinstance(variant, dict):
+            continue
+        variant_price = variant.get("price") or variant.get("preis")
+        if variant_price is None:
+            continue
+        # Prefer orderable/delivery-capable variants when the menu distinguishes glass vs bottle.
+        eligible = variant.get("delivery_eligible", True) is not False
+        size = str(variant.get("size") or "").strip()
+        candidates.append((not eligible, float(variant_price), size))
+
+    if not candidates:
+        return (None, name)
+
+    _, selected_price, selected_size = sorted(candidates, key=lambda row: (row[0], row[1]))[0]
+    label = f"{name} {selected_size}".strip() if selected_size else name
+    return (selected_price, label)
+
+
 def get_cached_dish_price(state: "ConversationState", dish_name: str) -> Optional[float]:
     """Case-insensitive price lookup against the cached menu (get_menu tool result).
 
@@ -1905,13 +1960,9 @@ def get_cached_dish_price(state: "ConversationState", dish_name: str) -> Optiona
     # Validates dish is actually on menu before confirming any price to caller.
     target = dish_name.lower().strip()
     found_on_menu = False
-    for category, items in state.cached_menu.items():
-        if not isinstance(items, list):
-            continue
-        for item in items:
-            if not isinstance(item, dict):
-                continue
-            item_name = (item.get("name") or "").lower().strip()
+    for item in _iter_cached_menu_items(state):
+        for item_name_raw in _menu_item_match_names(item):
+            item_name = item_name_raw.lower().strip()
             if item_name == target or target in item_name.split():
                 found_on_menu = True
                 break
@@ -1927,7 +1978,7 @@ def get_cached_dish_price(state: "ConversationState", dish_name: str) -> Optiona
     
     # CRITICAL: Reject non-existent menu items BEFORE any price lookup.
     # Prevents PREIS_FALSCH by blocking fallback/invented prices for items not on menu.
-    # DOBOO menu does NOT include "Kimchi Jjigae" or bare "Kimchi" as main dishes.
+    # DOBOO menu does NOT include "Kimchi Jjigae" as a current orderable dish.
     _KNOWN_NONEXISTENT = {"kimchi jjigae", "kimchi jjigae stew", "kimchi jjige"}
     if dish_name.lower().strip() in _KNOWN_NONEXISTENT:
         logger.warning(
@@ -1949,17 +2000,13 @@ def get_cached_dish_price(state: "ConversationState", dish_name: str) -> Optiona
     best_ratio = 0.0
 
     # Pass 1: exact match only (prevents "Bibimbap" → "Bibimbap vegetarisch" short-circuit)
-    for category, items in state.cached_menu.items():
-        if not isinstance(items, list):
-            continue
-        for item in items:
-            if not isinstance(item, dict):
-                continue
-            item_name = (item.get("name") or "").lower().strip()
+    for item in _iter_cached_menu_items(state):
+        for item_name_raw in _menu_item_match_names(item):
+            item_name = item_name_raw.lower().strip()
             if item_name == target:
-                price = item.get("price") or item.get("preis")
+                price, _ = _menu_item_price_and_label(item, dish_name)
                 if price is not None:
-                    return float(price)
+                    return price
 
     # Pass 2: substring + fuzzy (only when no exact match exists)
     # Prefer the SHORTEST matching item name to pick the simplest variant
@@ -1967,17 +2014,13 @@ def get_cached_dish_price(state: "ConversationState", dish_name: str) -> Optiona
     # BUT prefer alphabetically-first among same-length names for determinism
     # SPECIAL: for ambiguous base names (like "Bibimbap"), prefer the vegetarian variant
     _VEGETARIAN_PREF = ("vegetarisch", "vegan", "tofu", "gemüse")
-    for category, items in state.cached_menu.items():
-        if not isinstance(items, list):
+    for item in _iter_cached_menu_items(state):
+        price, _ = _menu_item_price_and_label(item, dish_name)
+        if price is None:
             continue
-        for item in items:
-            if not isinstance(item, dict):
-                continue
-            item_name = (item.get("name") or "").lower().strip()
+        for item_name_raw in _menu_item_match_names(item):
+            item_name = item_name_raw.lower().strip()
             if not item_name:
-                continue
-            price = item.get("price") or item.get("preis")
-            if price is None:
                 continue
             # Substring match: track candidates sorted by preference
             if target in item_name or item_name in target:
