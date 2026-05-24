@@ -374,6 +374,94 @@ def _join_german_list(parts: list[str]) -> str:
     return ", ".join(parts[:-1]) + " und " + parts[-1]
 
 
+def _default_menu_price_label(item: dict) -> tuple[float | None, str]:
+    name = str(item.get("name") or "").strip()
+    price = item.get("price") or item.get("preis")
+    if price is not None:
+        return float(price), name
+    variants = item.get("variants") or []
+    candidates = []
+    if isinstance(variants, list):
+        for variant in variants:
+            if not isinstance(variant, dict):
+                continue
+            variant_price = variant.get("price") or variant.get("preis")
+            if variant_price is None:
+                continue
+            eligible = variant.get("delivery_eligible", True) is not False
+            size = str(variant.get("size") or "").strip()
+            candidates.append((not eligible, float(variant_price), size))
+    if not candidates:
+        return None, name
+    _, selected_price, selected_size = sorted(candidates, key=lambda row: (row[0], row[1]))[0]
+    label = f"{name} {selected_size}".strip() if selected_size else name
+    return selected_price, label
+
+
+def _menu_item_names(item: dict) -> list[str]:
+    names = []
+    name = str(item.get("name") or "").strip()
+    if name:
+        names.append(name)
+    aliases = item.get("aliases") or []
+    if isinstance(aliases, list):
+        names.extend(str(alias).strip() for alias in aliases if str(alias).strip())
+    return names
+
+
+def _suggest_menu_alternatives(state, missing_item: str, *, limit: int = 3) -> list[str]:
+    """Return real menu alternatives for unavailable/ambiguous caller items."""
+    menu = getattr(state, "cached_menu", None)
+    if not isinstance(menu, dict):
+        return []
+
+    missing = str(missing_item or "").lower()
+    preferred_names: list[str] = []
+    if any(word in missing for word in ("cola", "fanta", "softdrink", "limonade", "wasser", "getränk")):
+        preferred_names = [
+            "Africola/Africola Zero",
+            "Bio Limonaden Proviant",
+            "Djahé Ingwerlimonade",
+            "Wasser",
+        ]
+    elif "kimchi" in missing:
+        preferred_names = ["Kimchi", "Korean Pancake Kimchi", "Kimchi Fries"]
+
+    suggestions: list[str] = []
+
+    def append_if_orderable(item: dict) -> None:
+        price, label = _default_menu_price_label(item)
+        if price is None or not label:
+            return
+        rendered = f"{label} für {price:.2f} Euro"
+        if rendered not in suggestions:
+            suggestions.append(rendered)
+
+    for wanted in preferred_names:
+        for items in menu.values():
+            if not isinstance(items, list):
+                continue
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                if any(name.lower() == wanted.lower() for name in _menu_item_names(item)):
+                    append_if_orderable(item)
+                    break
+            if len(suggestions) >= limit:
+                return suggestions[:limit]
+
+    for items in menu.values():
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            append_if_orderable(item)
+            if len(suggestions) >= limit:
+                return suggestions[:limit]
+    return suggestions[:limit]
+
+
 def _build_order_overview_v4(state, *, final: bool = False) -> dict:
     """Build a priced order overview or a concrete blocker when prices are missing."""
     from server.brain.conversation_state import resolve_dish_canonical
@@ -406,13 +494,24 @@ def _build_order_overview_v4(state, *, final: bool = False) -> dict:
 
     if missing_prices:
         missing = _join_german_list(missing_prices)
+        suggestions = _suggest_menu_alternatives(state, missing_prices[0])
+        if suggestions:
+            alternatives = _join_german_list(suggestions)
+            text = (
+                f"{missing} haben wir leider nicht eindeutig auf der aktuellen Karte. "
+                f"Ich kann Ihnen stattdessen {alternatives} anbieten. "
+                "Was darf ich davon nehmen?"
+            )
+        else:
+            text = (
+                f"Für {missing} finde ich gerade keinen eindeutigen Menüpreis. "
+                "Bitte wählen Sie ein eindeutig verfügbares Gericht aus der Speisekarte."
+            )
         return {
             "ok": False,
             "missing": missing_prices,
-            "text": (
-                f"Für {missing} finde ich gerade keinen eindeutigen Menüpreis. "
-                "Bitte wählen Sie ein eindeutig verfügbares Gericht aus der Speisekarte."
-            ),
+            "suggestions": suggestions,
+            "text": text,
         }
 
     if canonical_items:
@@ -1293,9 +1392,9 @@ async def process_turn_v4(
                             for _item in _cat_items:
                                 if isinstance(_item, dict):
                                     _iname = _item.get("name", "")
-                                    _iprice = _item.get("price")
-                                    if _iname and _iprice is not None:
-                                        _menu_lines.append(f"{_iname}: {_iprice:.2f}€")
+                                    _iprice, _ilabel = _default_menu_price_label(_item)
+                                    if _ilabel and _iprice is not None:
+                                        _menu_lines.append(f"{_ilabel}: {_iprice:.2f}€")
                     if _menu_lines:
                         ctx_doc.resolved_entities["menu_data"] = "Speisekarte: " + " | ".join(_menu_lines[:15])
                         logger.info("[v4_pipeline] Menu loaded for dish validation (B2.3_D3)")
@@ -1406,10 +1505,10 @@ async def process_turn_v4(
                                     for _item in _cat_items:
                                         if isinstance(_item, dict):
                                             _iname = _item.get("name", "")
-                                            _iprice = _item.get("price")
+                                            _iprice, _ilabel = _default_menu_price_label(_item)
                                             _idesc = _item.get("description", "")
-                                            if _iname and _iprice is not None:
-                                                _menu_lines.append(f"{_iname}: {_iprice:.2f}€ — {_idesc}" if _idesc else f"{_iname}: {_iprice:.2f}€")
+                                            if _ilabel and _iprice is not None:
+                                                _menu_lines.append(f"{_ilabel}: {_iprice:.2f}€ — {_idesc}" if _idesc else f"{_ilabel}: {_iprice:.2f}€")
                             if _menu_lines:
                                 ctx_doc.resolved_entities["menu_data"] = "Speisekarte: " + " | ".join(_menu_lines[:20])
                             else:
@@ -2076,6 +2175,46 @@ async def process_turn_v4(
             address_prompt, "order_start", intent_result, t0,
             tools=scheduled_run, next_action="clarify", should_end=False,
         )
+
+    if _is_order_intent and any(marker in _text_lo for marker in ("statt", "anstelle", "ersatz")):
+        current_items = list(getattr(state, "selected_items", None) or [])
+        if current_items:
+            try:
+                from server.brain.conversation_state import _extract_all_dishes, resolve_dish_canonical
+
+                replacement_items = _extract_all_dishes(user_text, items=getattr(state, "known_items", None))
+                if not replacement_items:
+                    replacement_match = re.search(
+                        r"(?:statt|anstelle|ersatz)\s+(?:\S+\s+)?([A-Za-zÄÖÜäöüß][A-Za-zÄÖÜäöüß\-/ ]{1,40})",
+                        user_text,
+                        flags=re.IGNORECASE,
+                    )
+                    if replacement_match:
+                        raw_replacement = replacement_match.group(1).strip(" .,!?:;")
+                        if raw_replacement:
+                            replacement_items = [raw_replacement]
+
+                if replacement_items:
+                    unresolved_idx = None
+                    for idx, existing_item in enumerate(current_items):
+                        _, existing_price = resolve_dish_canonical(state, existing_item)
+                        if existing_price is None:
+                            unresolved_idx = idx
+                            break
+                    if unresolved_idx is not None:
+                        current_items[unresolved_idx:unresolved_idx + 1] = replacement_items
+                        state.selected_dish = current_items[0]
+                        state.selected_items = _dedupe_order_items(current_items)
+                        state.order_items_extras = state.selected_items[1:]
+                        state._readback_already_shown = False
+                        state._order_readback_confirmed = False
+                        logger.info(
+                            "[v4_pipeline] T%d substitution replaced unresolved order item with %s",
+                            turn_idx,
+                            replacement_items,
+                        )
+            except Exception as _sub_err:
+                logger.debug("[v4_pipeline] substitution handling failed (non-fatal): %s", _sub_err)
 
     if _is_order_intent and _order_not_committed and _order_slots_ok:
         # CRITICAL FIX H2.2_D3: Mandatory readback with items+prices BEFORE any user confirmation

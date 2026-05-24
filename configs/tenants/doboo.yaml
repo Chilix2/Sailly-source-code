@@ -34,87 +34,49 @@ pre_order:
 # ── Full menu ──────────────────────────────────────────────────────────────────
 menu:
   categories:
-    - name: "Hauptgerichte"
-      items:
-        - name: "Bibimbap"
-          price: 14.90
-          description: "Reis mit Gemüse, Ei, Gochujang-Sauce"
-          vegetarian: true
-          allergens: ["Ei", "Soja", "Sesam"]
-        - name: "Bulgogi"
-          price: 16.90
-          description: "Mariniertes Rindfleisch, Reis, Beilagen"
-          vegetarian: false
-          allergens: ["Soja", "Sesam"]
-        - name: "Kimchi Jjigae"
-          price: 13.90
-          description: "Koreanischer Kimchi-Eintopf mit Tofu oder Fleisch"
-          vegetarian: false
-          allergens: ["Soja"]
-        - name: "Tteokbokki"
-          price: 10.90
-          description: "Reiskuchen in würziger Gochujang-Sauce"
-          vegetarian: true
-          allergens: ["Weizen", "Soja"]
-        - name: "Japchae"
-          price: 13.90
-          description: "Glasnudeln mit Gemüse & Rindfleisch"
-          vegetarian: false
-          allergens: ["Soja", "Sesam", "Weizen"]
-        - name: "Mandu"
-          price: 7.90
-          description: "Koreanische Teigtaschen (Dampf oder gebraten)"
-          vegetarian: false
-          allergens: ["Weizen", "Soja"]
-        - name: "Tofu Jjigae"
-          price: 12.90
-          description: "Pikanter Tofu-Eintopf"
-          vegetarian: true
-          vegan: true
-          allergens: ["Soja"]
-        - name: "Tofu Bibimbap"
-          price: 13.90
-          description: "Vegane Version mit knusprigem Tofu"
-          vegetarian: true
-          vegan: true
-          allergens: ["Soja", "Sesam"]
-    - name: "Dessert"
-      items:
-        - name: "Kimchi"
-          price: 4.90
-          description: "Portion Kimchi"
-          vegetarian: true
-          allergens: []
-        - name: "Mochi-Eis"
-          price: 4.90
-          description: "Japanisches Reiskuchen-Eis, 3 Stück"
-          vegetarian: true
-          allergens: ["Weizen", "Milch"]
-        - name: "Mochi Eis"
-          price: 4.90
-          description: "Japanisches Reiskuchen-Eis, 3 Stück (alternative Schreibweise)"
-          vegetarian: true
-          allergens: ["Weizen", "Milch"]
-    - name: "Getränke"
-      items:
-        - name: "Wasser"
-          price: 2.50
-          description: "Stilles oder Sprudelwasser"
-          vegetarian: true
-          vegan: true
-          allergens: []
-        - name: "Cola"
-          price: 3.00
-          description: "Cola"
-          vegetarian: true
-          vegan: true
-          allergens: []
-        - name: "Softdrinks"
-          price: 3.00
-          description: "Diverse Softdrinks"
-          vegetarian: true
-          vegan: true
-          allergens: []
+  - name: Beliebte Hauptgerichte
+    items:
+    - name: Bibimbap vegetarisch
+      price: 12.9
+      description: Koreanische Reisschüssel mit Gemüse und Ei. Tofu +2,00 € möglich
+    - name: Bibimbap Hähnchen
+      price: 14.9
+      description: Koreanische Reisschüssel mit Hähnchen
+    - name: Bibimbap Rind
+      price: 16.5
+      description: Koreanische Reisschüssel mit Rind
+    - name: Bulgogi Rind
+      price: 17.9
+      description: Bulgogi mit Rind
+    - name: Spicy Tofu mit Reis
+      price: 13.9
+      description: Scharfer Tofu mit Reis
+  - name: Vorspeisen
+    items:
+    - name: Kimchi
+      price: 4.9
+      description: Koreanischer Chinakohl
+    - name: Edamame natur mit Meersalz
+      price: 5.5
+      description: Sojabohnen natur mit Meersalz
+    - name: Frittierte Mandus (3 Stk.)
+      price: 5.9
+      description: Vegetarisch frittierte Teigtaschen
+  - name: Getränke
+    items:
+    - name: Wasser
+      description: Still oder Sprudel
+      variants:
+      - size: 0,25L
+        price: 2.9
+      - size: 0,75L
+        price: 7.9
+    - name: Africola/Africola Zero
+      description: 0,25L
+      price: 3.0
+    - name: Bio Limonaden Proviant
+      description: 0,33L
+      price: 3.5
 
 # Twilio routing
 twilio_numbers:
@@ -466,667 +428,1108 @@ practice:
 # Dynamic business data (filled in by executor)
 tool_data:
   menu:
-    # ── Getränke (nichtalkoholisch) ──────────────────────────────────────────
     getraenke_nichtalkoholisch:
-      - name: "Bio Limonade Proviant"
-        description: "Hausgemachte Bio-Limonade, 0,33L. Sorten: Rhabarber, Apfelschorle, Ingwer-Zitrone, Zitrone"
-        variants:
-          - size: "0,33L"
-            price: 3.50
-            delivery_eligible: true
-        vegetarian: true
-        allergens: []
-      - name: "Djahé Ingwerlimonade"
-        description: "Ingwerlimonade, 0,33L. Sorten: Maracuja, Rhabarber"
-        variants:
-          - size: "0,33L"
-            price: 4.20
-            delivery_eligible: true
-        vegetarian: true
-        allergens: []
-      - name: "Wasser"
-        description: "Still oder Sprudel (still/sparkling)"
-        variants:
-          - size: "0,25L"
-            price: 2.90
-            delivery_eligible: true
-          - size: "0,75L"
-            price: 7.90
-            delivery_eligible: true
-        vegetarian: true
-        allergens: []
-      - name: "Africola"
-        description: "Africola oder Africola Zero, 0,25L"
-        variants:
-          - size: "0,25L"
-            price: 3.00
-            delivery_eligible: true
-        vegetarian: true
-        allergens: []
-      - name: "Koreanischer Tee mit Honig"
-        description: "Warmer Tee mit Honig. Sorten: Ingwer, Yuzu, Dattel-Zimt"
-        price: 3.50
+    - name: Bio Limonaden Proviant
+      description: 'Bio-Limonade, 0,33L. Sorten: Rhabarber, Apfelschorle, Ingwer-Zitrone, Zitrone'
+      variants:
+      - size: 0,33L
+        price: 3.5
         delivery_eligible: true
-        vegetarian: true
-        allergens: []
-      - name: "Japanischer Grüner Tee"
-        description: "Japanese green tea"
-        price: 3.50
+      delivery_eligible: true
+      vegetarian: true
+      vegan: true
+      allergens: []
+      aliases:
+      - Proviant Limonade
+      - Bio Limonade
+    - name: Djahé Ingwerlimonade
+      description: 'Ingwerlimonade, 0,33L. Sorten: Maracuja, Rhabarber'
+      variants:
+      - size: 0,33L
+        price: 4.2
         delivery_eligible: true
-        vegetarian: true
-        allergens: []
-      - name: "Koreanischer Kaffee"
-        description: "Korean coffee"
-        price: 2.80
+      delivery_eligible: true
+      vegetarian: true
+      vegan: true
+      allergens: []
+      aliases:
+      - Djahe Ingwerlimonade
+      - Ingwerlimonade
+    - name: Wasser
+      description: Still oder Sprudel
+      variants:
+      - size: 0,25L
+        price: 2.9
         delivery_eligible: true
-        vegetarian: true
-        allergens: []
-
-    # ── Getränke (alkoholisch) ───────────────────────────────────────────────
+      - size: 0,75L
+        price: 7.9
+        delivery_eligible: true
+      delivery_eligible: true
+      vegetarian: true
+      vegan: true
+      allergens: []
+      aliases:
+      - Mineralwasser
+      - stilles Wasser
+      - Sprudelwasser
+    - name: Africola/Africola Zero
+      description: Africola oder Africola Zero, 0,25L
+      variants:
+      - size: 0,25L
+        price: 3.0
+        delivery_eligible: true
+      delivery_eligible: true
+      vegetarian: true
+      vegan: true
+      allergens: []
+      aliases:
+      - Africola
+      - Africola Zero
+    - name: Koreanischer Tee mit Honig
+      description: 'Warmer koreanischer Tee mit Honig. Sorten: Ingwer, Yuzu, Dattel-Zimt'
+      price: 3.5
+      delivery_eligible: true
+      vegetarian: true
+      allergens: []
+      aliases:
+      - Ingwertee
+      - Yuzu Tee
+      - Dattel-Zimt Tee
+    - name: Japanischer Grüner Tee
+      description: Japanese green tea
+      price: 3.5
+      delivery_eligible: true
+      vegetarian: true
+      vegan: true
+      allergens: []
+      aliases:
+      - Grüner Tee
+    - name: Koreanischer Kaffee
+      description: Korean coffee
+      price: 2.8
+      delivery_eligible: true
+      vegetarian: true
+      vegan: true
+      allergens: []
+      aliases:
+      - Kaffee
     getraenke_alkoholisch:
-      - name: "Weißwein Grauburgunder QbA trocken"
-        description: "Pfandturm, Rheinhessen, Dr. Koehler. Glas (0,2L) nur im Restaurant; Flasche (0,75L) auch für Lieferung"
-        variants:
-          - size: "0,2L Glas"
-            price: 6.40
-            delivery_eligible: false
-            note: "Nur im Restaurant / Abholung"
-          - size: "0,75L Flasche"
-            price: 19.00
-            delivery_eligible: true
-        vegetarian: true
-        allergens: ["Sulfite"]
-      - name: "Weißwein Sauvignon Blanc trocken"
-        description: "Edition Johannan Lorenz, Nahe. Glas (0,2L) nur im Restaurant; Flasche (0,75L) auch für Lieferung"
-        variants:
-          - size: "0,2L Glas"
-            price: 6.90
-            delivery_eligible: false
-            note: "Nur im Restaurant / Abholung"
-          - size: "0,75L Flasche"
-            price: 21.00
-            delivery_eligible: true
-        vegetarian: true
-        allergens: ["Sulfite"]
-      - name: "Rotwein Merlot Montes Reserva"
-        description: "Chile, Montes. Glas (0,2L) nur im Restaurant; Flasche (0,75L) auch für Lieferung"
-        variants:
-          - size: "0,2L Glas"
-            price: 6.90
-            delivery_eligible: false
-            note: "Nur im Restaurant / Abholung"
-          - size: "0,75L Flasche"
-            price: 21.00
-            delivery_eligible: true
-        vegetarian: true
-        allergens: ["Sulfite"]
-      - name: "Asahi"
-        description: "Japanisches Bier, 0,33L"
-        variants:
-          - size: "0,33L"
-            price: 3.90
-            delivery_eligible: true
-        vegetarian: true
-        allergens: ["Gluten"]
-      - name: "Cass"
-        description: "Koreanisches Bier, 0,33L"
-        variants:
-          - size: "0,33L"
-            price: 3.90
-            delivery_eligible: true
-        vegetarian: true
-        allergens: ["Gluten"]
-      - name: "Kölsch"
-        description: "Kölsch, 0,33L"
-        variants:
-          - size: "0,33L"
-            price: 2.90
-            delivery_eligible: true
-        vegetarian: true
-        allergens: ["Gluten"]
-      - name: "Kölsch alkoholfrei"
-        description: "Alkoholfreies Kölsch, 0,33L"
-        variants:
-          - size: "0,33L"
-            price: 2.90
-            delivery_eligible: true
-        vegetarian: true
-        allergens: ["Gluten"]
-      - name: "Sake"
-        description: "Japanischer Reiswein, 0,2L"
-        variants:
-          - size: "0,2L"
-            price: 6.50
-            delivery_eligible: true
-        vegetarian: true
-        allergens: []
-      - name: "Soju"
-        description: "Koreanischer Reisschnaps, natur oder mit Fruchtgeschmack, 0,35L Flasche"
-        variants:
-          - size: "0,35L Flasche"
-            price: 7.50
-            delivery_eligible: true
-        vegetarian: true
-        allergens: []
-
-    # ── Vorspeisen & kleine Gerichte ────────────────────────────────────────
+    - name: Grauburgunder QbA trocken
+      description: Weißwein, Pfandturm, Rheinhessen, Dr. Koehler
+      variants:
+      - size: 0,2L Glas
+        price: 6.4
+        delivery_eligible: false
+        note: Nur im Restaurant / Abholung
+      - size: 0,75L Flasche
+        price: 19.0
+        delivery_eligible: true
+      delivery_eligible: true
+      vegetarian: true
+      allergens:
+      - Sulfite
+      aliases:
+      - Weißwein Grauburgunder
+      - Grauburgunder
+    - name: Sauvignon Blanc trocken
+      description: Weißwein, Edition Johannan Lorenz, Nahe, Lorenz und Söhne
+      variants:
+      - size: 0,2L Glas
+        price: 6.9
+        delivery_eligible: false
+        note: Nur im Restaurant / Abholung
+      - size: 0,75L Flasche
+        price: 21.0
+        delivery_eligible: true
+      delivery_eligible: true
+      vegetarian: true
+      allergens:
+      - Sulfite
+      aliases:
+      - Weißwein Sauvignon Blanc
+      - Sauvignon Blanc
+    - name: Merlot Montes Reserva
+      description: Rotwein, Chile, Montes
+      variants:
+      - size: 0,2L Glas
+        price: 6.9
+        delivery_eligible: false
+        note: Nur im Restaurant / Abholung
+      - size: 0,75L Flasche
+        price: 21.0
+        delivery_eligible: true
+      delivery_eligible: true
+      vegetarian: true
+      allergens:
+      - Sulfite
+      aliases:
+      - Rotwein Merlot
+      - Merlot
+    - name: Asahi
+      description: Japanisches Bier, 0,33L
+      variants:
+      - size: 0,33L
+        price: 3.9
+        delivery_eligible: true
+      delivery_eligible: true
+      vegetarian: true
+      allergens:
+      - Gluten
+      aliases:
+      - Japanisches Bier
+    - name: Cass
+      description: Koreanisches Bier, 0,33L
+      variants:
+      - size: 0,33L
+        price: 3.9
+        delivery_eligible: true
+      delivery_eligible: true
+      vegetarian: true
+      allergens:
+      - Gluten
+      aliases:
+      - Koreanisches Bier
+    - name: Kölsch
+      description: Kölsch, 0,33L
+      variants:
+      - size: 0,33L
+        price: 2.9
+        delivery_eligible: true
+      delivery_eligible: true
+      vegetarian: true
+      allergens:
+      - Gluten
+    - name: Kölsch alkoholfrei
+      description: Alkoholfreies Kölsch, 0,33L
+      variants:
+      - size: 0,33L
+        price: 2.9
+        delivery_eligible: true
+      delivery_eligible: true
+      vegetarian: true
+      allergens:
+      - Gluten
+    - name: Sake
+      description: Japanischer Reiswein, 0,2L
+      variants:
+      - size: 0,2L
+        price: 6.5
+        delivery_eligible: true
+      delivery_eligible: true
+      vegetarian: true
+      allergens: []
+    - name: Soju
+      description: Koreanischer Reisschnaps natur oder mit Fruchtgeschmack
+      variants:
+      - size: Flasche 0,35L
+        price: 7.5
+        delivery_eligible: true
+      delivery_eligible: true
+      vegetarian: true
+      allergens: []
     vorspeisen:
-      - name: "Doboo Jorim"
-        description: "Geschmorter Tofu in Sojamarinade"
-        price: 6.50
-        vegetarian: true
-        allergens: ["Soja"]
-      - name: "Doboo Jorim Spicy"
-        description: "Geschmorter Tofu in scharfer Sojamarinade"
-        price: 6.50
-        vegetarian: true
-        allergens: ["Soja"]
-      - name: "Chapche"
-        description: "Koreanische Glasnudeln mit Gemüse"
-        price: 6.20
-        vegetarian: true
-        allergens: ["Soja", "Sesam"]
-      - name: "Frittierte Mandus (3 Stk.)"
-        description: "Vegetarisch frittierte Teigtaschen, deep fried dumplings"
-        price: 5.90
-        vegetarian: true
-        allergens: ["Weizen", "Soja"]
-      - name: "Gedämpfte Mandus Gemüse (5 Stk.)"
-        description: "Gedämpfte vegetarische Teigtaschen, steamed vegetable dumplings"
-        price: 6.50
-        vegetarian: true
-        allergens: ["Weizen", "Soja"]
-      - name: "Gedämpfte Mandus Kimchi (5 Stk.)"
-        description: "Gedämpfte Kimchi-Teigtaschen, steamed kimchi dumplings"
-        price: 6.50
-        vegetarian: false
-        allergens: ["Weizen", "Soja"]
-      - name: "Gedämpfte Mandus Fleisch (5 Stk.)"
-        description: "Gedämpfte Fleisch-Teigtaschen, steamed meat dumplings"
-        price: 6.50
-        vegetarian: false
-        allergens: ["Weizen", "Soja"]
-      - name: "Gedämpfte Mandus Mix (9 Stk.)"
-        description: "Mix-Teigtaschen, 9 Stück gemischt"
-        price: 10.90
-        vegetarian: false
-        allergens: ["Weizen", "Soja"]
-      - name: "Chicken Wings frittiert (5 Stk.)"
-        description: "Frittierte Hähnchenflügel, deep fried"
-        price: 7.50
-        vegetarian: false
-        allergens: []
-      - name: "Chicken Wings scharf mariniert (5 Stk.)"
-        description: "Scharf marinierte Hähnchenflügel, spicy marinated"
-        price: 7.50
-        vegetarian: false
-        allergens: []
-      - name: "Korean Pancake Kimchi"
-        description: "Koreanischer Kimchi-Pfannkuchen, korean cabbage pancake"
-        price: 7.50
-        vegetarian: false
-        allergens: ["Weizen", "Ei"]
-      - name: "Korean Pancake Bulgogi"
-        description: "Koreanischer Rindfleisch-Pfannkuchen, beef pancake"
-        price: 8.50
-        vegetarian: false
-        allergens: ["Weizen", "Ei", "Soja"]
-      - name: "Korean Pancake Lachs"
-        description: "Koreanischer Lachs-Pfannkuchen, salmon pancake"
-        price: 8.50
-        vegetarian: false
-        allergens: ["Weizen", "Ei", "Fisch"]
-      - name: "Korean Pancake Gemüse"
-        description: "Koreanischer Gemüse-Pfannkuchen, vegetable pancake"
-        price: 6.90
-        vegetarian: true
-        allergens: ["Weizen", "Ei"]
-      - name: "Kimchi Fries"
-        description: "Süßkartoffelpommes mit karamelisiertem Kimchi und Käse"
-        price: 8.90
-        vegetarian: false
-        allergens: ["Milch"]
-      - name: "Korean Tacos Rind"
-        description: "Korean Tacos mit Salat und Bulgogi Rind"
-        price: 7.90
-        vegetarian: false
-        allergens: ["Weizen", "Soja"]
-      - name: "Korean Tacos Hähnchen"
-        description: "Korean Tacos mit Salat und Hähnchen"
-        price: 7.90
-        vegetarian: false
-        allergens: ["Weizen"]
-      - name: "Korean Tacos Spicy Tofu"
-        description: "Korean Tacos mit Salat und Spicy Tofu"
-        price: 6.90
-        vegetarian: true
-        allergens: ["Weizen", "Soja"]
-      - name: "Korean Tacos Spicy Lachs"
-        description: "Korean Tacos mit Salat und Lachs"
-        price: 9.50
-        vegetarian: false
-        allergens: ["Weizen", "Fisch"]
-      - name: "Edamame"
-        description: "Sojabohnen natur mit Meersalz, soybean with sea salt"
-        price: 5.50
-        vegetarian: true
-        allergens: ["Soja"]
-      - name: "Kimchi"
-        description: "Koreanischer Chinakohl, fermentiert, korean cabbage"
-        price: 4.90
-        vegetarian: false
-        allergens: []
-      - name: "Wakame"
-        description: "Algen-Salat, seaweed"
-        price: 4.90
-        vegetarian: true
-        allergens: ["Sesam"]
-      - name: "Misosuppe"
-        description: "Japanische Misosuppe, miso soup"
-        price: 3.90
-        vegetarian: true
-        allergens: ["Soja"]
-      - name: "Süßkartoffeln"
-        description: "Gebratene Süßkartoffeln, sweet potatoes"
-        price: 4.90
-        vegetarian: true
-        allergens: []
-      - name: "Reis"
-        description: "Gedämpfter Reis, steamed rice"
-        price: 3.50
-        vegetarian: true
-        allergens: []
-      - name: "Scharfe Sauce"
-        description: "Hausgemachte scharfe Sauce, spicy sauce"
-        price: 1.50
-        vegetarian: true
-        allergens: []
-
-    # ── Hauptgerichte ────────────────────────────────────────────────────────
+    - name: Doboo Jorim
+      description: Geschmorter Tofu in Sojamarinade
+      price: 6.5
+      delivery_eligible: true
+      vegetarian: true
+      vegan: true
+      allergens:
+      - Soja
+    - name: Doboo Jorim Spicy
+      description: Geschmorter Tofu in scharfer Sojamarinade
+      price: 6.5
+      delivery_eligible: true
+      vegetarian: true
+      vegan: true
+      allergens:
+      - Soja
+    - name: Chapche
+      description: Koreanische Glasnudeln
+      price: 6.2
+      delivery_eligible: true
+      vegetarian: true
+      allergens:
+      - Soja
+      - Sesam
+      aliases:
+      - Japchae
+    - name: Frittierte Mandus (3 Stk.)
+      description: Vegetarisch frittierte Teigtaschen
+      price: 5.9
+      delivery_eligible: true
+      vegetarian: true
+      allergens:
+      - Weizen
+      - Soja
+      aliases:
+      - Frittierte Mandu
+      - Mandu frittiert
+    - name: Gedämpfte Mandus Gemüse (5 Stk.)
+      description: Gedämpfte Teigtaschen mit Gemüse
+      price: 6.5
+      delivery_eligible: true
+      vegetarian: true
+      allergens:
+      - Weizen
+      - Soja
+      aliases:
+      - Mandu Gemüse
+      - Gedämpfte Mandu Gemüse
+    - name: Gedämpfte Mandus Kimchi (5 Stk.)
+      description: Gedämpfte Teigtaschen mit Kimchi
+      price: 6.5
+      delivery_eligible: true
+      vegetarian: false
+      allergens:
+      - Weizen
+      - Soja
+      aliases:
+      - Mandu Kimchi
+      - Gedämpfte Mandu Kimchi
+    - name: Gedämpfte Mandus Fleisch (5 Stk.)
+      description: Gedämpfte Teigtaschen mit Fleisch
+      price: 6.5
+      delivery_eligible: true
+      vegetarian: false
+      allergens:
+      - Weizen
+      - Soja
+      aliases:
+      - Mandu Fleisch
+      - Gedämpfte Mandu Fleisch
+    - name: Gedämpfte Mandus Mix (9 Stk.)
+      description: Gemischte gedämpfte Teigtaschen
+      price: 10.9
+      delivery_eligible: true
+      vegetarian: false
+      allergens:
+      - Weizen
+      - Soja
+      aliases:
+      - Mandu Mix
+    - name: Chicken Wings frittiert (5 Stk.)
+      description: Frittierte Hähnchenflügel
+      price: 7.5
+      delivery_eligible: true
+      vegetarian: false
+      allergens: []
+    - name: Chicken Wings scharf mariniert (5 Stk.)
+      description: Scharf marinierte Hähnchenflügel
+      price: 7.5
+      delivery_eligible: true
+      vegetarian: false
+      allergens: []
+    - name: Korean Pancake Kimchi
+      description: Koreanischer Pfannkuchen mit Kimchi
+      price: 7.5
+      delivery_eligible: true
+      vegetarian: false
+      allergens:
+      - Weizen
+      - Ei
+    - name: Korean Pancake Bulgogi
+      description: Koreanischer Pfannkuchen mit Bulgogi-Rind
+      price: 8.5
+      delivery_eligible: true
+      vegetarian: false
+      allergens:
+      - Weizen
+      - Ei
+      - Soja
+    - name: Korean Pancake Lachs
+      description: Koreanischer Pfannkuchen mit Lachs
+      price: 8.5
+      delivery_eligible: true
+      vegetarian: false
+      allergens:
+      - Weizen
+      - Ei
+      - Fisch
+    - name: Korean Pancake Gemüse
+      description: Koreanischer Pfannkuchen mit Gemüse
+      price: 6.9
+      delivery_eligible: true
+      vegetarian: true
+      allergens:
+      - Weizen
+      - Ei
+    - name: Kimchi Fries
+      description: Süßkartoffelpommes mit karamelisiertem Kimchi und Käse
+      price: 8.9
+      delivery_eligible: true
+      vegetarian: false
+      allergens:
+      - Milch
+    - name: Korean Tacos Rind
+      description: Korean Tacos mit Salat und Bulgogi-Rind
+      price: 7.9
+      delivery_eligible: true
+      vegetarian: false
+      allergens:
+      - Weizen
+      - Soja
+    - name: Korean Tacos Hähnchen
+      description: Korean Tacos mit Salat und Hähnchen
+      price: 7.9
+      delivery_eligible: true
+      vegetarian: false
+      allergens:
+      - Weizen
+    - name: Korean Tacos Spicy Tofu
+      description: Korean Tacos mit Salat und Spicy Tofu
+      price: 6.9
+      delivery_eligible: true
+      vegetarian: true
+      allergens:
+      - Weizen
+      - Soja
+    - name: Korean Tacos Spicy Lachs
+      description: Korean Tacos mit Salat und Spicy Lachs
+      price: 9.5
+      delivery_eligible: true
+      vegetarian: false
+      allergens:
+      - Weizen
+      - Fisch
+    - name: Edamame natur mit Meersalz
+      description: Sojabohnen natur mit Meersalz
+      price: 5.5
+      delivery_eligible: true
+      vegetarian: true
+      vegan: true
+      allergens:
+      - Soja
+      aliases:
+      - Edamame
+    - name: Kimchi
+      description: Koreanischer Chinakohl
+      price: 4.9
+      delivery_eligible: true
+      vegetarian: false
+      allergens: []
+      aliases:
+      - Chinakohl Kimchi
+    - name: Wakame
+      description: Algensalat
+      price: 4.9
+      delivery_eligible: true
+      vegetarian: true
+      vegan: true
+      allergens:
+      - Sesam
+    - name: Misosuppe
+      description: Japanische Misosuppe
+      price: 3.9
+      delivery_eligible: true
+      vegetarian: true
+      allergens:
+      - Soja
+    - name: Süßkartoffeln
+      description: Gebratene Süßkartoffeln
+      price: 4.9
+      delivery_eligible: true
+      vegetarian: true
+      vegan: true
+      allergens: []
+    - name: Reis
+      description: Gedämpfter Reis
+      price: 3.5
+      delivery_eligible: true
+      vegetarian: true
+      vegan: true
+      allergens: []
+    - name: Scharfe Sauce
+      description: Hausgemachte scharfe Sauce
+      price: 1.5
+      delivery_eligible: true
+      vegetarian: true
+      vegan: true
+      allergens: []
     hauptgerichte:
-      - name: "Spicy Tofu mit Reis"
-        description: "Scharfer Tofu mit Reis, vegetarisch"
-        price: 13.90
-        vegetarian: true
-        allergens: ["Soja"]
-      - name: "Hähnchen Dak Galbi mit Udon"
-        description: "Scharfes Hähnchen mit Udon-Nudeln, chicken with udon noodles"
-        price: 16.50
-        vegetarian: false
-        allergens: ["Weizen", "Soja"]
-      - name: "Spicy Tofu mit Udon"
-        description: "Scharfer Tofu mit Udon-Nudeln, vegetarisch"
-        price: 15.50
-        vegetarian: true
-        allergens: ["Weizen", "Soja"]
-      - name: "Ramyun Suppe Basic"
-        description: "Scharfe Nudelsuppe, spicy noodle soup"
-        price: 11.50
-        vegetarian: false
-        allergens: ["Weizen", "Soja"]
-      - name: "Ramyun Suppe Mandu"
-        description: "Scharfe Nudelsuppe mit Teigtaschen, spicy noodle soup with dumplings"
-        price: 12.50
-        vegetarian: false
-        allergens: ["Weizen", "Soja"]
-      - name: "Ramyun Suppe Hähnchen"
-        description: "Scharfe Nudelsuppe mit Hähnchen, spicy noodle soup with chicken"
-        price: 12.50
-        vegetarian: false
-        allergens: ["Weizen", "Soja"]
-      - name: "Ramyun Suppe Rind"
-        description: "Scharfe Nudelsuppe mit Rind, spicy noodle soup with beef"
-        price: 12.90
-        vegetarian: false
-        allergens: ["Weizen", "Soja"]
-      - name: "Ramyun Suppe Ebi Tempura"
-        description: "Scharfe Nudelsuppe mit frittierter Garnele, spicy noodle soup with deep fried shrimp"
-        price: 13.50
-        vegetarian: false
-        allergens: ["Weizen", "Krebstiere"]
-      - name: "Bibimbap"
-        description: "Koreanische Reisschüssel mit Gemüse, Ei und Gochujang-Sauce"
-        price: 14.90
-        vegetarian: true
-        allergens: ["Ei", "Soja", "Sesam"]
-      - name: "Bibimbap vegetarisch"
-        description: "Koreanische Reisschüssel mit Gemüse und Ei. Tofu auf Wunsch +2,00€"
-        price: 12.90
-        vegetarian: true
-        allergens: ["Ei", "Soja", "Sesam"]
-      - name: "Bibimbap Hähnchen"
-        description: "Koreanische Reisschüssel mit Hähnchen"
-        price: 14.90
-        vegetarian: false
-        allergens: ["Soja", "Sesam"]
-      - name: "Bibimbap Rind"
-        description: "Koreanische Reisschüssel mit Rindfleisch"
-        price: 16.50
-        vegetarian: false
-        allergens: ["Soja", "Sesam"]
-      - name: "Bibimbap Jeyuk"
-        description: "Koreanische Reisschüssel mit Schwein, scharf. Jeyuk pork spicy"
-        price: 14.90
-        vegetarian: false
-        allergens: ["Soja", "Sesam"]
-      - name: "Bibimbap Sake (Lachs)"
-        description: "Koreanische Reisschüssel mit Lachs, salmon"
-        price: 16.50
-        vegetarian: false
-        allergens: ["Fisch", "Sesam"]
-      - name: "Dolsot-Bibimbap Aufpreis"
-        description: "Im heißen Steintopf, in the hot stone pot, Aufpreis auf Bibimbap"
-        price: 3.00
-        vegetarian: true
-        allergens: []
-      - name: "Bulgogi Hähnchen"
-        description: "Mariniertes Hähnchen-Bulgogi, chicken bulgogi"
-        price: 16.50
-        vegetarian: false
-        allergens: ["Soja", "Sesam"]
-      - name: "Bulgogi Rind"
-        description: "Mariniertes Rindfleisch-Bulgogi, beef bulgogi"
-        price: 17.90
-        vegetarian: false
-        allergens: ["Soja", "Sesam"]
-      - name: "Bulgogi Jeyuk"
-        description: "Mariniertes Schweinefleisch-Bulgogi, pork bulgogi"
-        price: 16.50
-        vegetarian: false
-        allergens: ["Soja", "Sesam"]
-      - name: "Chapche Aufpreis"
-        description: "Zusätzlich Glasnudeln zu Bulgogi, glass noodles add-on"
-        price: 3.00
-        vegetarian: true
-        allergens: ["Soja"]
-
-    # ── Sushi ────────────────────────────────────────────────────────────────
-    sushi:
-      - name: "Tuna Roll (8 Stk.)"
-        description: "Klassischer Thunfischcreme-Roll, classic tuna creme roll"
-        price: 8.50
-        vegetarian: false
-        allergens: ["Fisch", "Sesam"]
-      - name: "Avocado Lachs Roll (8 Stk.)"
-        description: "Avocado und Lachs, avocado salmon roll"
-        price: 8.90
-        vegetarian: false
-        allergens: ["Fisch", "Sesam"]
-      - name: "Avocado Lachs Rucola Roll (8 Stk.)"
-        description: "Avocado, Lachs, Rucola"
-        price: 9.50
-        vegetarian: false
-        allergens: ["Fisch", "Sesam"]
-      - name: "Rainbow Roll (8 Stk.)"
-        description: "Lachs, Thunfisch, Avocado"
-        price: 10.90
-        vegetarian: false
-        allergens: ["Fisch", "Sesam"]
-      - name: "Ebi Tempura Roll (8 Stk.)"
-        description: "Frittierte Garnele, deep fried shrimp roll"
-        price: 9.90
-        vegetarian: false
-        allergens: ["Krebstiere", "Weizen", "Sesam"]
-      - name: "Ebi Tempura Rucola Roll (8 Stk.)"
-        description: "Frittierte Garnele mit Rucola"
-        price: 10.20
-        vegetarian: false
-        allergens: ["Krebstiere", "Weizen", "Sesam"]
-      - name: "Gimbap Roll (8 Stk.)"
-        description: "Gurke, Möhre, Ei, Rettich — koreanischer Klassiker"
-        price: 7.80
-        vegetarian: false
-        allergens: ["Ei", "Sesam"]
-      - name: "Veggi Roll (8 Stk.)"
-        description: "Avocado, Gurke, Paprika, Frischkäse"
-        price: 7.80
-        vegetarian: true
-        allergens: ["Milch", "Sesam"]
-      - name: "Inari-Veggi Roll (8 Stk.)"
-        description: "Inari, Röstzwiebeln, Avocado"
-        price: 8.50
-        vegetarian: true
-        allergens: ["Soja", "Sesam"]
-      - name: "Unagi Roll (8 Stk.)"
-        description: "Unagi (Aal), Avocado, Gurke, eel roll"
-        price: 9.50
-        vegetarian: false
-        allergens: ["Fisch", "Sesam"]
-      - name: "Mango-Lachs Roll (8 Stk.)"
-        description: "Frischkäse, Mango, Lachs"
-        price: 10.90
-        vegetarian: false
-        allergens: ["Fisch", "Milch", "Sesam"]
-      - name: "Spicy Tekkatartar Roll (8 Stk.)"
-        description: "Scharfes Thunfischtartar, Gurke, Avocado on top"
-        price: 13.50
-        vegetarian: false
-        allergens: ["Fisch", "Sesam"]
-      - name: "Veggi mit Lachs on top Roll (8 Stk.)"
-        description: "Avocado, Gurke, Paprika, Frischkäse mit Lachs on top"
-        price: 13.50
-        vegetarian: false
-        allergens: ["Fisch", "Milch", "Sesam"]
-      - name: "Crunchy Roll Aufpreis"
-        description: "Alle Rollen auch als Crunchy Roll frittiert, all rolls also available as crunchy fried"
-        price: 2.50
-        vegetarian: true
-        allergens: ["Weizen"]
-      - name: "Nigiri Doboo Tofu-Tasche"
-        description: "1 Stück Nigiri mit Tofu-Tasche (Inari)"
-        price: 2.70
-        vegetarian: true
-        allergens: ["Soja"]
-      - name: "Nigiri Sake (Lachs)"
-        description: "1 Stück Nigiri mit Lachs"
-        price: 3.20
-        vegetarian: false
-        allergens: ["Fisch"]
-      - name: "Nigiri Ebi (Garnele)"
-        description: "1 Stück Nigiri mit Garnele"
-        price: 3.20
-        vegetarian: false
-        allergens: ["Krebstiere"]
-      - name: "Nigiri Maguro (Thunfisch)"
-        description: "1 Stück Nigiri mit Thunfisch"
-        price: 3.50
-        vegetarian: false
-        allergens: ["Fisch"]
-      - name: "Nigiri Unagi (Aal)"
-        description: "1 Stück Nigiri mit Aal"
-        price: 3.50
-        vegetarian: false
-        allergens: ["Fisch"]
-      - name: "Maki Kappa (6 Stk.)"
-        description: "Gurken-Maki, cucumber maki"
-        price: 4.20
-        vegetarian: true
-        allergens: ["Sesam"]
-      - name: "Maki Avocado (6 Stk.)"
-        price: 4.50
-        vegetarian: true
-        allergens: ["Sesam"]
-      - name: "Maki Sake (Lachs) (6 Stk.)"
-        price: 5.50
-        vegetarian: false
-        allergens: ["Fisch", "Sesam"]
-      - name: "Maki Sake Rucola (6 Stk.)"
-        price: 5.90
-        vegetarian: false
-        allergens: ["Fisch", "Sesam"]
-      - name: "Maki Tekka (Thunfisch) (6 Stk.)"
-        price: 5.90
-        vegetarian: false
-        allergens: ["Fisch", "Sesam"]
-      - name: "Maki Tekka Rucola (6 Stk.)"
-        price: 6.20
-        vegetarian: false
-        allergens: ["Fisch", "Sesam"]
-      - name: "Maki Avocado Lachs (6 Stk.)"
-        price: 5.90
-        vegetarian: false
-        allergens: ["Fisch", "Sesam"]
-      - name: "Sushi Mix Nr. 1 vegetarisch"
-        description: "Avocado Maki, Kappa Maki, Inari Nigiri, 3 Stück Doboo Rolle, 4 Stück Gimbap Rolle"
-        price: 13.50
-        vegetarian: true
-        allergens: ["Soja", "Ei", "Sesam"]
-      - name: "Sushi Mix Nr. 2"
-        description: "3 Kappa Maki, 3 Sake Maki, 4 Tuna Roll, 4 Avocado Lachs Rolle, 1 Sake Nigiri"
-        price: 14.90
-        vegetarian: false
-        allergens: ["Fisch", "Sesam"]
-      - name: "Sushi Mix Nr. 3"
-        description: "4 Lachs-Avocado Rolle, 4 Veggi Rolle, je 1 Nigiri Sake, Maguro, Ebi"
-        price: 14.90
-        vegetarian: false
-        allergens: ["Fisch", "Krebstiere", "Milch", "Sesam"]
-      - name: "Sushi Mix Nr. 4"
-        description: "8 Lachs-, 8 Thunfisch-, 8 Gurkenmakis"
-        price: 14.50
-        vegetarian: false
-        allergens: ["Fisch", "Sesam"]
-      - name: "Sushi Mix Nr. 5"
-        description: "3 Sake-Maki, 3 Tekka-Maki, 4 Avocado Lachs Rolle, 3 Sake Nigiri"
-        price: 16.90
-        vegetarian: false
-        allergens: ["Fisch", "Sesam"]
-      - name: "Sushi Mix Nr. 6"
-        description: "Sake-Maki, Tekka-Maki und Kappa-Maki, je 2 Nigiri Sake, Maguro, Ebi"
-        price: 29.90
-        vegetarian: false
-        allergens: ["Fisch", "Krebstiere", "Sesam"]
-      - name: "Sushi Mix Nr. 7"
-        description: "Avocado Lachs Rolle, Sake Maki, Tekka Maki, 2 Sake Nigiri, 2 Maguro Nigiri, 2 Unagi Nigiri, 2 Ebi Nigiri, 2 Inari"
-        price: 43.00
-        vegetarian: false
-        allergens: ["Fisch", "Krebstiere", "Sesam"]
-
-    # ── Desserts ─────────────────────────────────────────────────────────────
+    - name: Spicy Tofu mit Reis
+      description: Scharfer Tofu mit Reis
+      price: 13.9
+      delivery_eligible: true
+      vegetarian: true
+      allergens:
+      - Soja
+    - name: Hähnchen Dak Galbi mit Udon
+      description: Hähnchen Dak Galbi mit Udon-Nudeln
+      price: 16.5
+      delivery_eligible: true
+      vegetarian: false
+      allergens:
+      - Weizen
+      - Soja
+    - name: Spicy Tofu mit Udon
+      description: Scharfer Tofu mit Udon-Nudeln
+      price: 15.5
+      delivery_eligible: true
+      vegetarian: true
+      allergens:
+      - Weizen
+      - Soja
+    - name: Ramyun Suppe Basic
+      description: Scharfe Nudelsuppe
+      price: 11.5
+      delivery_eligible: true
+      vegetarian: false
+      allergens:
+      - Weizen
+      - Soja
+      aliases:
+      - Scharfe Nudelsuppe Basic
+      - Ramyun Basic
+    - name: Ramyun Suppe Mandu
+      description: Scharfe Nudelsuppe mit Teigtaschen
+      price: 12.5
+      delivery_eligible: true
+      vegetarian: false
+      allergens:
+      - Weizen
+      - Soja
+    - name: Ramyun Suppe Hähnchen
+      description: Scharfe Nudelsuppe mit Hähnchen
+      price: 12.5
+      delivery_eligible: true
+      vegetarian: false
+      allergens:
+      - Weizen
+      - Soja
+    - name: Ramyun Suppe Rind
+      description: Scharfe Nudelsuppe mit Rind
+      price: 12.9
+      delivery_eligible: true
+      vegetarian: false
+      allergens:
+      - Weizen
+      - Soja
+    - name: Ramyun Suppe Ebi Tempura
+      description: Scharfe Nudelsuppe mit frittierter Garnele
+      price: 13.5
+      delivery_eligible: true
+      vegetarian: false
+      allergens:
+      - Weizen
+      - Krebstiere
+    - name: Bibimbap vegetarisch
+      description: Bibimbap vegetarisch. Tofu auf Wunsch +2,00 €
+      price: 12.9
+      delivery_eligible: true
+      vegetarian: true
+      allergens:
+      - Ei
+      - Soja
+      - Sesam
+      aliases:
+      - Bibimbap
+    - name: Bibimbap Hähnchen
+      description: Bibimbap mit Hähnchen
+      price: 14.9
+      delivery_eligible: true
+      vegetarian: false
+      allergens:
+      - Soja
+      - Sesam
+    - name: Bibimbap Rind
+      description: Bibimbap mit Rind
+      price: 16.5
+      delivery_eligible: true
+      vegetarian: false
+      allergens:
+      - Soja
+      - Sesam
+    - name: Bibimbap Jeyuk
+      description: Bibimbap mit Schwein, scharf
+      price: 14.9
+      delivery_eligible: true
+      vegetarian: false
+      allergens:
+      - Soja
+      - Sesam
+    - name: Bibimbap Sake (Lachs)
+      description: Bibimbap mit Lachs
+      price: 16.5
+      delivery_eligible: true
+      vegetarian: false
+      allergens:
+      - Fisch
+      - Sesam
+      aliases:
+      - Bibimbap Lachs
+      - Bibimbap Sake
+    - name: Dolsot-Bibimbap Aufpreis
+      description: Aufpreis für Bibimbap im heißen Steintopf
+      price: 3.0
+      delivery_eligible: true
+      vegetarian: true
+      allergens: []
+      note: Aufpreis
+    - name: Bulgogi Hähnchen
+      description: Bulgogi mit Hähnchen
+      price: 16.5
+      delivery_eligible: true
+      vegetarian: false
+      allergens:
+      - Soja
+      - Sesam
+    - name: Bulgogi Rind
+      description: Bulgogi mit Rind
+      price: 17.9
+      delivery_eligible: true
+      vegetarian: false
+      allergens:
+      - Soja
+      - Sesam
+      aliases:
+      - Bulgogi
+    - name: Bulgogi Jeyuk
+      description: Bulgogi mit Schwein
+      price: 16.5
+      delivery_eligible: true
+      vegetarian: false
+      allergens:
+      - Soja
+      - Sesam
+    - name: Chapche Aufpreis
+      description: Zusätzlich mit Chapche
+      price: 3.0
+      delivery_eligible: true
+      vegetarian: true
+      allergens:
+      - Soja
+      note: Aufpreis
+    sushi_rollen:
+    - name: Tuna Roll (8 Stk.)
+      description: Thunfischcreme
+      price: 8.5
+      delivery_eligible: true
+      vegetarian: false
+      allergens:
+      - Fisch
+      - Sesam
+      aliases:
+      - Tuna Roll
+    - name: Avocado Lachs Roll (8 Stk.)
+      description: Avocado, Lachs
+      price: 8.9
+      delivery_eligible: true
+      vegetarian: false
+      allergens:
+      - Fisch
+      - Sesam
+      aliases:
+      - Avocado Lachs
+    - name: Avocado Lachs Rucola Roll (8 Stk.)
+      description: Avocado, Lachs, Rucola
+      price: 9.5
+      delivery_eligible: true
+      vegetarian: false
+      allergens:
+      - Fisch
+      - Sesam
+      aliases:
+      - Avocado Lachs Rucola
+    - name: Rainbow Roll (8 Stk.)
+      description: Lachs, Thunfisch, Avocado
+      price: 10.9
+      delivery_eligible: true
+      vegetarian: false
+      allergens:
+      - Fisch
+      - Sesam
+      aliases:
+      - Rainbow
+    - name: Ebi Tempura Roll (8 Stk.)
+      description: Frittierte Garnele
+      price: 9.9
+      delivery_eligible: true
+      vegetarian: false
+      allergens:
+      - Krebstiere
+      - Weizen
+      - Sesam
+      aliases:
+      - Ebi Tempura
+    - name: Ebi Tempura Rucola Roll (8 Stk.)
+      description: Frittierte Garnele, Rucola
+      price: 10.2
+      delivery_eligible: true
+      vegetarian: false
+      allergens:
+      - Krebstiere
+      - Weizen
+      - Sesam
+      aliases:
+      - Ebi Tempura Rucola
+    - name: Gimbap Roll (8 Stk.)
+      description: Gurke, Möhre, Ei, Rettich
+      price: 7.8
+      delivery_eligible: true
+      vegetarian: false
+      allergens:
+      - Ei
+      - Sesam
+      aliases:
+      - Gimbap
+    - name: Veggi Roll (8 Stk.)
+      description: Avocado, Gurke, Paprika, Frischkäse
+      price: 7.8
+      delivery_eligible: true
+      vegetarian: true
+      allergens:
+      - Milch
+      - Sesam
+      aliases:
+      - Veggi
+    - name: Inari-Veggi Roll (8 Stk.)
+      description: Inari, Röstzwiebeln, Avocado
+      price: 8.5
+      delivery_eligible: true
+      vegetarian: true
+      allergens:
+      - Soja
+      - Sesam
+      aliases:
+      - Inari Veggi
+    - name: Unagi Roll (8 Stk.)
+      description: Unagi, Avocado, Gurke
+      price: 9.5
+      delivery_eligible: true
+      vegetarian: false
+      allergens:
+      - Fisch
+      - Sesam
+      aliases:
+      - Unagi
+    - name: Mango-Lachs Roll (8 Stk.)
+      description: Frischkäse, Mango, Lachs
+      price: 10.9
+      delivery_eligible: true
+      vegetarian: false
+      allergens:
+      - Fisch
+      - Milch
+      - Sesam
+      aliases:
+      - Mango Lachs
+    - name: Spicy Tekkatartar Roll (8 Stk.)
+      description: Scharfes Thunfischtartar, Gurke, Avocado on top
+      price: 13.5
+      delivery_eligible: true
+      vegetarian: false
+      allergens:
+      - Fisch
+      - Sesam
+      aliases:
+      - Spicy Tekkatartar
+    - name: Veggi mit Lachs on top Roll (8 Stk.)
+      description: Avocado, Gurke, Paprika, Frischkäse mit Lachs on top
+      price: 13.5
+      delivery_eligible: true
+      vegetarian: false
+      allergens:
+      - Fisch
+      - Milch
+      - Sesam
+    - name: Crunchy Roll Aufpreis
+      description: Alle Rollen auch als Crunchy Rolls frittiert
+      price: 2.5
+      delivery_eligible: true
+      vegetarian: true
+      allergens:
+      - Weizen
+      aliases:
+      - Frittiert Aufpreis
+      note: Aufpreis
+    nigiri:
+    - name: Nigiri Doboo Tofu-Tasche
+      description: Tofutasche / Inari
+      price: 2.7
+      delivery_eligible: true
+      vegetarian: true
+      allergens:
+      - Soja
+      aliases:
+      - Doboo Tofu-Tasche
+    - name: Nigiri Sake (Lachs)
+      description: Lachs
+      price: 3.2
+      delivery_eligible: true
+      vegetarian: false
+      allergens:
+      - Fisch
+      aliases:
+      - Nigiri Sake
+      - Sake Nigiri
+    - name: Nigiri Ebi (Garnele)
+      description: Garnele
+      price: 3.2
+      delivery_eligible: true
+      vegetarian: false
+      allergens:
+      - Krebstiere
+      aliases:
+      - Nigiri Ebi
+      - Ebi Nigiri
+    - name: Nigiri Maguro (Thunfisch)
+      description: Thunfisch
+      price: 3.5
+      delivery_eligible: true
+      vegetarian: false
+      allergens:
+      - Fisch
+      aliases:
+      - Nigiri Maguro
+      - Maguro Nigiri
+    - name: Nigiri Unagi (Aal)
+      description: Aal
+      price: 3.5
+      delivery_eligible: true
+      vegetarian: false
+      allergens:
+      - Fisch
+      aliases:
+      - Nigiri Unagi
+      - Unagi Nigiri
+    maki:
+    - name: Maki Kappa (6 Stk.)
+      description: Gurke
+      price: 4.2
+      delivery_eligible: true
+      vegetarian: true
+      vegan: true
+      allergens:
+      - Sesam
+      aliases:
+      - Kappa Maki
+    - name: Maki Avocado (6 Stk.)
+      description: Avocado
+      price: 4.5
+      delivery_eligible: true
+      vegetarian: true
+      vegan: true
+      allergens:
+      - Sesam
+      aliases:
+      - Avocado Maki
+    - name: Maki Sake (Lachs) (6 Stk.)
+      description: Lachs
+      price: 5.5
+      delivery_eligible: true
+      vegetarian: false
+      allergens:
+      - Fisch
+      - Sesam
+      aliases:
+      - Sake Maki
+    - name: Maki Sake Rucola (6 Stk.)
+      description: Lachs, Rucola
+      price: 5.9
+      delivery_eligible: true
+      vegetarian: false
+      allergens:
+      - Fisch
+      - Sesam
+      aliases:
+      - Sake Rucola Maki
+    - name: Maki Tekka (Thunfisch) (6 Stk.)
+      description: Thunfisch
+      price: 5.9
+      delivery_eligible: true
+      vegetarian: false
+      allergens:
+      - Fisch
+      - Sesam
+      aliases:
+      - Tekka Maki
+    - name: Maki Tekka Rucola (6 Stk.)
+      description: Thunfisch, Rucola
+      price: 6.2
+      delivery_eligible: true
+      vegetarian: false
+      allergens:
+      - Fisch
+      - Sesam
+      aliases:
+      - Tekka Rucola Maki
+    - name: Maki Avocado Lachs (6 Stk.)
+      description: Avocado, Lachs
+      price: 5.9
+      delivery_eligible: true
+      vegetarian: false
+      allergens:
+      - Fisch
+      - Sesam
+      aliases:
+      - Avocado Lachs Maki
+    sushi_mix:
+    - name: Sushi Mix Nr. 1 vegetarisch
+      description: Avocado Maki, Kappa Maki, Inari Nigiri, 3 Stück Doboo Rolle, 4 Stück Gimbap Rolle
+      price: 13.5
+      delivery_eligible: true
+      vegetarian: true
+      allergens:
+      - Soja
+      - Ei
+      - Sesam
+    - name: Sushi Mix Nr. 2
+      description: 3 Kappa Maki, 3 Sake Maki, 4 Tuna Roll, 4 Avocado Lachs Rolle, 1 Sake Nigiri
+      price: 14.9
+      delivery_eligible: true
+      vegetarian: false
+      allergens:
+      - Fisch
+      - Sesam
+    - name: Sushi Mix Nr. 3
+      description: 4 Lachs-Avocado Rolle, 4 Veggi Rolle, je 1 Nigiri Sake, Nigiri Maguro, Nigiri Ebi
+      price: 14.9
+      delivery_eligible: true
+      vegetarian: false
+      allergens:
+      - Fisch
+      - Krebstiere
+      - Milch
+      - Sesam
+    - name: Sushi Mix Nr. 4
+      description: 8 Lachs-, 8 Thunfisch-, 8 Gurkenmakis
+      price: 14.5
+      delivery_eligible: true
+      vegetarian: false
+      allergens:
+      - Fisch
+      - Sesam
+    - name: Sushi Mix Nr. 5
+      description: 3 Sake-Maki, 3 Tekka-Maki, 4 Avocado Lachs Rolle, 3 Sake Nigiri
+      price: 16.9
+      delivery_eligible: true
+      vegetarian: false
+      allergens:
+      - Fisch
+      - Sesam
+    - name: Sushi Mix Nr. 6
+      description: Sake-Maki, Tekka-Maki und Kappa-Maki, je 2 Nigiri Sake, 2 Nigiri Maguro, 2 Nigiri Ebi
+      price: 29.9
+      delivery_eligible: true
+      vegetarian: false
+      allergens:
+      - Fisch
+      - Krebstiere
+      - Sesam
+    - name: Sushi Mix Nr. 7
+      description: Avocado Lachs Rolle, Sake Maki, Tekka Maki, 2 Sake Nigiri, 2 Maguro Nigiri, 2 Unagi Nigiri, 2 Ebi Nigiri,
+        2 Inari
+      price: 43.0
+      delivery_eligible: true
+      vegetarian: false
+      allergens:
+      - Fisch
+      - Krebstiere
+      - Sesam
     desserts:
-      - name: "Matcha Eis klein"
-        description: "Grüner Tee Eis, green tea ice cream, kleine Portion"
-        price: 4.20
-        vegetarian: true
-        allergens: ["Milch"]
-      - name: "Matcha Eis groß"
-        description: "Grüner Tee Eis, green tea ice cream, große Portion"
-        price: 5.90
-        vegetarian: true
-        allergens: ["Milch"]
-      - name: "Doboo Bang"
-        description: "Dampfnudel mit roter Bohnenpaste, dumpling with red bean paste"
-        price: 5.90
-        vegetarian: true
-        allergens: ["Weizen"]
-      - name: "Doboo Bang mit Eis"
-        description: "Dampfnudel mit roter Bohnenpaste und Eis, dumpling with red bean paste and ice cream"
-        price: 6.50
-        vegetarian: true
-        allergens: ["Weizen", "Milch"]
-      - name: "Matcha Mochi"
-        description: "Grüner Tee Eis mit Reiskuchen, green tea ice cream with rice cake"
-        price: 7.20
-        vegetarian: true
-        allergens: ["Milch"]
-      - name: "Mochi-Eisbällchen (3 Stk.)"
-        description: "Drei Mochi-Eisbällchen, three mochi ice cream balls"
-        price: 6.50
-        vegetarian: true
-        allergens: ["Milch"]
-
-    # ── Mittagsklassiker (nur 11:30–14:00 Uhr) ──────────────────────────────
-    mittagsangebot:
-      available_hours: "11:30-14:00"
-      note: "Nur mittags von 11:30 bis 14:00 Uhr. Alle Menüs auch vegetarisch möglich."
-      items:
-        - name: "Mittags-Bibimbap vegetarisch"
-          description: "Vegetarisches Bibimbap zum Mittagspreis. Tofu +2,00€"
-          price: 11.90
-          vegetarian: true
-          allergens: ["Ei", "Soja", "Sesam"]
-        - name: "Mittags-Bibimbap Hähnchen"
-          description: "Bibimbap mit Hähnchen zum Mittagspreis"
-          price: 12.90
-          vegetarian: false
-          allergens: ["Soja", "Sesam"]
-        - name: "Mittags-Bibimbap Rind"
-          description: "Bibimbap mit Rind zum Mittagspreis"
-          price: 13.90
-          vegetarian: false
-          allergens: ["Soja", "Sesam"]
-        - name: "Mittags-Bibimbap Jeyuk"
-          description: "Bibimbap mit Schwein (scharf) zum Mittagspreis"
-          price: 12.90
-          vegetarian: false
-          allergens: ["Soja", "Sesam"]
-        - name: "Mittags-Bibimbap Sake (Lachs)"
-          description: "Bibimbap mit Lachs zum Mittagspreis"
-          price: 14.50
-          vegetarian: false
-          allergens: ["Fisch", "Sesam"]
-        - name: "Mittags-Bulgogi Hähnchen"
-          description: "Bulgogi mit Hähnchen zum Mittagspreis"
-          price: 14.90
-          vegetarian: false
-          allergens: ["Soja", "Sesam"]
-        - name: "Mittags-Bulgogi Rind"
-          description: "Bulgogi mit Rind zum Mittagspreis"
-          price: 15.90
-          vegetarian: false
-          allergens: ["Soja", "Sesam"]
-        - name: "Mittags-Bulgogi Jeyuk"
-          description: "Bulgogi mit Schwein zum Mittagspreis"
-          price: 14.90
-          vegetarian: false
-          allergens: ["Soja", "Sesam"]
-        - name: "Mittags-Bulgogi Spicy Tofu"
-          description: "Bulgogi mit Spicy Tofu zum Mittagspreis"
-          price: 12.90
-          vegetarian: true
-          allergens: ["Soja", "Sesam"]
-
-    # ── Mittagsmenüs (nur 11:30–14:00 Uhr) ─────────────────────────────────
+    - name: Matcha Eis klein
+      description: Grüner Tee Eis, kleine Portion
+      price: 4.2
+      delivery_eligible: true
+      vegetarian: true
+      allergens:
+      - Milch
+    - name: Matcha Eis groß
+      description: Grüner Tee Eis, große Portion
+      price: 5.9
+      delivery_eligible: true
+      vegetarian: true
+      allergens:
+      - Milch
+    - name: Doboo Bang
+      description: Dampfnudel mit roter Bohnenpaste
+      price: 5.9
+      delivery_eligible: true
+      vegetarian: true
+      allergens:
+      - Weizen
+    - name: Doboo Bang mit Eis
+      description: Dampfnudel mit roter Bohnenpaste und Eis
+      price: 6.5
+      delivery_eligible: true
+      vegetarian: true
+      allergens:
+      - Weizen
+      - Milch
+    - name: Matcha Mochi
+      description: Grüner Tee Eis mit Reiskuchen
+      price: 7.2
+      delivery_eligible: true
+      vegetarian: true
+      allergens:
+      - Milch
+    - name: Mochi-Eisbällchen (3 Stk.)
+      description: Verschiedene Sorten
+      price: 6.5
+      delivery_eligible: true
+      vegetarian: true
+      allergens:
+      - Milch
+      aliases:
+      - Mochi Eisbällchen
+      - Mochi-Eis
     mittagsmenues:
-      available_hours: "11:30-14:00"
-      note: "Nur mittags von 11:30 bis 14:00 Uhr. Alle Menüs auch vegetarisch möglich."
-      items:
-        - name: "Menü Ramyun Basic"
-          description: "Ramyun Nudelsuppe + 3 frittierte vegetarische Mandu + 2 Stück Gimbap Roll"
-          price: 13.50
-          vegetarian: false
-          allergens: ["Weizen", "Soja", "Sesam"]
-        - name: "Menü Ramyun Hähnchen"
-          description: "Ramyun Hähnchen + 3 frittierte Mandu + 2 Gimbap"
-          price: 14.90
-          vegetarian: false
-          allergens: ["Weizen", "Soja", "Sesam"]
-        - name: "Menü Ramyun Rind"
-          description: "Ramyun Rind + 3 frittierte Mandu + 2 Gimbap"
-          price: 14.90
-          vegetarian: false
-          allergens: ["Weizen", "Soja", "Sesam"]
-        - name: "Menü Ramyun Mandu"
-          description: "Ramyun Mandu + 3 frittierte Mandu + 2 Gimbap"
-          price: 14.90
-          vegetarian: false
-          allergens: ["Weizen", "Soja"]
-        - name: "Menü Ramyun Ebi Tempura"
-          description: "Ramyun Ebi Tempura + 3 frittierte Mandu + 2 Gimbap"
-          price: 15.90
-          vegetarian: false
-          allergens: ["Weizen", "Krebstiere", "Sesam"]
-        - name: "Menü Mandu"
-          description: "Chapche Glasnudeln + 6 gedämpfte Mandu + 4 Stück Gimbap Roll"
-          price: 13.50
-          vegetarian: false
-          allergens: ["Weizen", "Soja", "Sesam"]
-        - name: "Menü All In"
-          description: "Chapche + Edamame (Sojabohnen) + 3 frittierte vegetarische Mandu + 4 Stück Avocado Lachs Rollen"
-          price: 13.90
-          vegetarian: false
-          allergens: ["Fisch", "Weizen", "Soja", "Sesam"]
-  
+    - name: Menü Ramyun Basic
+      description: Ramyun Nudelsuppe + 3 frittierte vegetarische Mandu + 2 Stück Gimbap Roll
+      price: 13.5
+      delivery_eligible: true
+      vegetarian: false
+      allergens:
+      - Weizen
+      - Soja
+      - Sesam
+      note: Nur mittags von 11:30 bis 14:00 Uhr
+    - name: Menü Ramyun Hähnchen
+      description: Ramyun Nudelsuppe mit Hähnchen + 3 frittierte vegetarische Mandu + 2 Stück Gimbap Roll
+      price: 14.9
+      delivery_eligible: true
+      vegetarian: false
+      allergens:
+      - Weizen
+      - Soja
+      - Sesam
+      note: Nur mittags von 11:30 bis 14:00 Uhr
+    - name: Menü Ramyun Rind
+      description: Ramyun Nudelsuppe mit Rind + 3 frittierte vegetarische Mandu + 2 Stück Gimbap Roll
+      price: 14.9
+      delivery_eligible: true
+      vegetarian: false
+      allergens:
+      - Weizen
+      - Soja
+      - Sesam
+      note: Nur mittags von 11:30 bis 14:00 Uhr
+    - name: Menü Ramyun Mandu
+      description: Ramyun Nudelsuppe mit Mandu + 3 frittierte vegetarische Mandu + 2 Stück Gimbap Roll
+      price: 14.9
+      delivery_eligible: true
+      vegetarian: false
+      allergens:
+      - Weizen
+      - Soja
+      - Sesam
+      note: Nur mittags von 11:30 bis 14:00 Uhr
+    - name: Menü Ramyun Ebi Tempura
+      description: Ramyun Nudelsuppe mit Ebi Tempura + 3 frittierte vegetarische Mandu + 2 Stück Gimbap Roll
+      price: 15.9
+      delivery_eligible: true
+      vegetarian: false
+      allergens:
+      - Weizen
+      - Krebstiere
+      - Sesam
+      note: Nur mittags von 11:30 bis 14:00 Uhr
+    - name: Menü Mandu
+      description: Chapche + 6 gedämpfte Mandu + 4 Stück Gimbap Roll
+      price: 13.5
+      delivery_eligible: true
+      vegetarian: false
+      allergens:
+      - Weizen
+      - Soja
+      - Sesam
+      note: Nur mittags von 11:30 bis 14:00 Uhr
+    - name: Menü All In
+      description: Chapche + Edamame + 3 frittierte vegetarische Mandu + 4 Stück Avocado Lachs Rolle
+      price: 13.9
+      delivery_eligible: true
+      vegetarian: false
+      allergens:
+      - Fisch
+      - Weizen
+      - Soja
+      - Sesam
+      note: Nur mittags von 11:30 bis 14:00 Uhr
+    mittagsangebot:
+    - name: Mittags-Bibimbap vegetarisch
+      description: Vegetarisches Bibimbap zum Mittagspreis. Tofu +2,00 €
+      price: 11.9
+      delivery_eligible: true
+      vegetarian: true
+      allergens:
+      - Ei
+      - Soja
+      - Sesam
+      note: Nur mittags von 11:30 bis 14:00 Uhr
+    - name: Mittags-Bibimbap Hähnchen
+      description: Bibimbap mit Hähnchen zum Mittagspreis
+      price: 12.9
+      delivery_eligible: true
+      vegetarian: false
+      allergens:
+      - Soja
+      - Sesam
+      note: Nur mittags von 11:30 bis 14:00 Uhr
+    - name: Mittags-Bibimbap Rind
+      description: Bibimbap mit Rind zum Mittagspreis
+      price: 13.9
+      delivery_eligible: true
+      vegetarian: false
+      allergens:
+      - Soja
+      - Sesam
+      note: Nur mittags von 11:30 bis 14:00 Uhr
+    - name: Mittags-Bibimbap Jeyuk
+      description: Bibimbap mit Schwein, scharf, zum Mittagspreis
+      price: 12.9
+      delivery_eligible: true
+      vegetarian: false
+      allergens:
+      - Soja
+      - Sesam
+      note: Nur mittags von 11:30 bis 14:00 Uhr
+    - name: Mittags-Bibimbap Sake (Lachs)
+      description: Bibimbap mit Lachs zum Mittagspreis
+      price: 14.5
+      delivery_eligible: true
+      vegetarian: false
+      allergens:
+      - Fisch
+      - Sesam
+      note: Nur mittags von 11:30 bis 14:00 Uhr
+    - name: Mittags-Bulgogi Hähnchen
+      description: Bulgogi mit Hähnchen zum Mittagspreis
+      price: 14.9
+      delivery_eligible: true
+      vegetarian: false
+      allergens:
+      - Soja
+      - Sesam
+      note: Nur mittags von 11:30 bis 14:00 Uhr
+    - name: Mittags-Bulgogi Rind
+      description: Bulgogi mit Rind zum Mittagspreis
+      price: 15.9
+      delivery_eligible: true
+      vegetarian: false
+      allergens:
+      - Soja
+      - Sesam
+      note: Nur mittags von 11:30 bis 14:00 Uhr
+    - name: Mittags-Bulgogi Jeyuk
+      description: Bulgogi mit Schwein zum Mittagspreis
+      price: 14.9
+      delivery_eligible: true
+      vegetarian: false
+      allergens:
+      - Soja
+      - Sesam
+      note: Nur mittags von 11:30 bis 14:00 Uhr
+    - name: Mittags-Bulgogi Spicy Tofu
+      description: Bulgogi mit Spicy Tofu zum Mittagspreis
+      price: 12.9
+      delivery_eligible: true
+      vegetarian: true
+      allergens:
+      - Soja
+      - Sesam
+      note: Nur mittags von 11:30 bis 14:00 Uhr
+
   restaurant_info:
     address: "Friedrich-Ebert-Allee 69, 53113 Bonn (Eingang Adalbert-Stifter-Straße)"
     phone: "+49 228 1234567"
@@ -1197,16 +1600,69 @@ hours_formatted: "Mo–Do 11:30–21:30, Fr 11:30–14:00 und 18:00–21:30, Sa 
 formality: "Sie"
 state_extraction: "keyword"
 items:
-  - "Bibimbap"
-  - "Bulgogi"
-  - "Kimchi Jjigae"
-  - "Tteokbokki"
-  - "Japchae"
-  - "Mandu"
-  - "Tofu Jjigae"
-  - "Tofu Bibimbap"
-  - "Mochi-Eis"
-  - "Mochi Eis"
+  - "Bibimbap vegetarisch"
+  - "Bibimbap Hähnchen"
+  - "Bibimbap Rind"
+  - "Bibimbap Jeyuk"
+  - "Bibimbap Sake (Lachs)"
+  - "Bulgogi Hähnchen"
+  - "Bulgogi Rind"
+  - "Bulgogi Jeyuk"
+  - "Spicy Tofu mit Reis"
+  - "Spicy Tofu mit Udon"
+  - "Hähnchen Dak Galbi mit Udon"
+  - "Ramyun Suppe Basic"
+  - "Ramyun Suppe Mandu"
+  - "Ramyun Suppe Hähnchen"
+  - "Ramyun Suppe Rind"
+  - "Ramyun Suppe Ebi Tempura"
+  - "Kimchi"
+  - "Edamame natur mit Meersalz"
+  - "Wakame"
+  - "Misosuppe"
+  - "Süßkartoffeln"
+  - "Reis"
+  - "Frittierte Mandus (3 Stk.)"
+  - "Gedämpfte Mandus Gemüse (5 Stk.)"
+  - "Gedämpfte Mandus Kimchi (5 Stk.)"
+  - "Gedämpfte Mandus Fleisch (5 Stk.)"
+  - "Gedämpfte Mandus Mix (9 Stk.)"
+  - "Korean Pancake Kimchi"
+  - "Korean Pancake Bulgogi"
+  - "Korean Pancake Lachs"
+  - "Korean Pancake Gemüse"
+  - "Kimchi Fries"
+  - "Korean Tacos Rind"
+  - "Korean Tacos Hähnchen"
+  - "Korean Tacos Spicy Tofu"
+  - "Korean Tacos Spicy Lachs"
+  - "Tuna Roll (8 Stk.)"
+  - "Avocado Lachs Roll (8 Stk.)"
+  - "Rainbow Roll (8 Stk.)"
+  - "Gimbap Roll (8 Stk.)"
+  - "Veggi Roll (8 Stk.)"
+  - "Sushi Mix Nr. 1 vegetarisch"
+  - "Sushi Mix Nr. 2"
+  - "Sushi Mix Nr. 3"
+  - "Matcha Eis klein"
+  - "Matcha Eis groß"
+  - "Doboo Bang"
+  - "Doboo Bang mit Eis"
+  - "Matcha Mochi"
+  - "Mochi-Eisbällchen (3 Stk.)"
+  - "Wasser"
+  - "Africola/Africola Zero"
+  - "Bio Limonaden Proviant"
+  - "Djahé Ingwerlimonade"
+  - "Koreanischer Tee mit Honig"
+  - "Japanischer Grüner Tee"
+  - "Koreanischer Kaffee"
+  - "Asahi"
+  - "Cass"
+  - "Kölsch"
+  - "Kölsch alkoholfrei"
+  - "Sake"
+  - "Soju"
 extra_order_keywords:
   - "koreanisch"
   - "kimchi"

@@ -175,6 +175,9 @@ class OrderItemValidator(SlotValidator):
                 for item in items:
                     if isinstance(item, dict) and item.get("name"):
                         names.append(str(item["name"]))
+                        aliases = item.get("aliases") or []
+                        if isinstance(aliases, list):
+                            names.extend(str(alias) for alias in aliases if str(alias).strip())
                     elif isinstance(item, str):
                         names.append(item)
             for category_items in cached_menu.values():
@@ -183,6 +186,9 @@ class OrderItemValidator(SlotValidator):
                 for item in category_items:
                     if isinstance(item, dict) and item.get("name"):
                         names.append(str(item["name"]))
+                        aliases = item.get("aliases") or []
+                        if isinstance(aliases, list):
+                            names.extend(str(alias) for alias in aliases if str(alias).strip())
                     elif isinstance(item, str):
                         names.append(item)
         names.extend(str(item) for item in getattr(self.state, "known_items", []) or [])
