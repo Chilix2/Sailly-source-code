@@ -1,0 +1,21 @@
+{
+  "running": false,
+  "scenarios_done": 0,
+  "scenarios_total": 0,
+  "elapsed_s": 0,
+  "parallel_workers": 1,
+  "current_scenario_id": null,
+  "failure_buckets": [],
+  "summary": {
+    "one_live_passes": 0,
+    "one_live_rate": "--",
+    "one_live_avg_composite": "--",
+    "one_live_cost_usd_total": 0.0,
+    "cost_usd_grand_total": 0.0,
+    "one_live_avg_call_latency_ms": null,
+    "one_live_avg_turn_latency_ms": null,
+    "one_live_p50_turn_latency_ms": null,
+    "one_live_p90_turn_latency_ms": null
+  },
+  "results": []
+}

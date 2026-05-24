@@ -1,0 +1,42 @@
+{
+  "base_script_id": "B1.2",
+  "difficulty": "D2",
+  "attempt": 1,
+  "passed": 7,
+  "total": 7,
+  "pass_rate": 1.0,
+  "composite_score": 85.8,
+  "call_sids": [
+    "headless-520b2c80",
+    "headless-f224fccd",
+    "headless-48401b17",
+    "headless-42dc8837",
+    "headless-be749804",
+    "headless-3eb00490",
+    "headless-869b1870"
+  ],
+  "grok_report": {
+    "call_sids": [
+      "headless-520b2c80",
+      "headless-f224fccd",
+      "headless-48401b17",
+      "headless-42dc8837",
+      "headless-be749804",
+      "headless-3eb00490",
+      "headless-869b1870"
+    ],
+    "metric_scores": {
+      "tool_accuracy": 85,
+      "flow": 75,
+      "linguistic": 95,
+      "deterministic": 100
+    },
+    "composite_score": 85.8,
+    "improvements": "1. Ensure the bot consistently collects all required information (e.g., phone number) before confirming orders to prevent incomplete conversations, as seen in headless-48401b17. 2. Address user repetitions by acknowledging and clarifying immediately rather than proceeding, to avoid potential loops in calls like headless-520b2c80 and headless-42dc8837. 3. Always provide a full order confirmation at the end of every call, including readback of all details, as some calls end abruptly without it. 4. Improve natural progression by not requiring users to repeat the entire order when only missing details like phone number are needed. 5. Train the bot to handle variations in user input more robustly, ensuring no key elements are overlooked.",
+    "tool_analysis": "In the analyzed calls, the bot primarily fired tools for greeting, order confirmation, and occasionally asking for missing information like phone numbers (e.g., in headless-f224fccd, headless-42dc8837, and headless-be749804). No spurious calls were observed, but there were missing tool firings: for instance, in headless-48401b17, the bot did not fire a confirmation tool, leading to an incomplete interaction. In calls with user repetitions (e.g., headless-520b2c80 and headless-42dc8837), the bot should have fired a clarification tool earlier to confirm partial information and prevent redundancy. Overall, tools fired appropriately in most cases, but enhancing the sequence to include fallback for incomplete data would improve accuracy.",
+    "achtung_flags": []
+  },
+  "haiku_fixes": null,
+  "fixes_applied": false,
+  "duration_s": 242.0904769897461
+}

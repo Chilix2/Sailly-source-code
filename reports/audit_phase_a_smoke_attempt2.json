@@ -1,0 +1,40 @@
+{
+  "phase": "phase_a_smoke",
+  "attempt": 2,
+  "root_cause": "Sailly voice bot is rate-limiting WebSocket connections (HTTP 429) during the smoke test phase, likely due to burst request handling or missing connection pooling/backoff logic.",
+  "fix_actions": [
+    {
+      "kind": "config_patch",
+      "description": "Review and increase WebSocket rate limit thresholds in Sailly config (check rate_limit_per_minute, burst_size, and time_window settings). If using a reverse proxy or API gateway, adjust its rate limiting rules.",
+      "success": true,
+      "details": "logged \u2014 requires manual review"
+    },
+    {
+      "kind": "config_patch",
+      "description": "Add exponential backoff with jitter to the test harness: implement 1s initial delay, 2x multiplier, max 10s between WebSocket reconnection attempts across test cases.",
+      "success": true,
+      "details": "logged \u2014 requires manual review"
+    },
+    {
+      "kind": "config_patch",
+      "description": "Implement connection pooling or queuing in the test phase_runner: limit concurrent WebSocket connections to \u22642 during smoke tests, serialize test execution rather than parallel burst.",
+      "success": true,
+      "details": "logged \u2014 requires manual review"
+    },
+    {
+      "kind": "log_note",
+      "description": "Correlate HTTP 429 rejection timestamps with Sailly backend logs (check for rate limiter middleware logs, connection handler queue depth, and Deepgram/Gemini API quota usage). Verify no cascading failures from downstream STT/TTS services.",
+      "success": true,
+      "details": ""
+    },
+    {
+      "kind": "restart_service",
+      "description": "If rate limit config is already relaxed, perform a clean restart of sailly-browser-demo service on port 8080 with 30s warm-up grace period before resuming tests.",
+      "success": true,
+      "details": ""
+    }
+  ],
+  "confidence": 0.92,
+  "raw_analysis": "```json\n{\n  \"root_cause\": \"Sailly voice bot is rate-limiting WebSocket connections (HTTP 429) during the smoke test phase, likely due to burst request handling or missing connection pooling/backoff logic.\",\n  \"category\": \"api_timeout\",\n  \"confidence\": 0.92,\n  \"fix_actions\": [\n    {\n      \"kind\": \"config_patch\",\n      \"description\": \"Review and increase WebSocket rate limit thresholds in Sailly config (check rate_limit_per_minute, burst_size, and time_window settings). If using a reverse proxy or API gateway, adjust its rate limiting rules.\",\n      \"safe_to_automate\": true\n    },\n    {\n      \"kind\": \"config_patch\",\n      \"description\": \"Add exponential backoff with jitter to the test harness: implement 1s initial delay, 2x multiplier, max 10s between WebSocket reconnection attempts across test cases.\",\n      \"safe_to_automate\": true\n    },\n    {\n      \"kind\": \"config_patch\",\n      \"description\": \"Implement connection pooling or queuing in the test phase_runner: limit concurrent WebSocket connections to \u22642 during smoke tests, serialize test execution rather than parallel burst.\",\n      \"safe_to_automate\": true\n    },\n    {\n      \"kind\": \"log_note\",\n      \"description\": \"Correlate HTTP 429 rejection timestamps with Sailly backend logs (check for rate limiter middleware logs, connection handler queue depth, and Deepgram/Gemini API quota usage). Verify no cascading failures from downstream STT/TTS services.\",\n      \"safe_to_automate\": false\n    },\n    {\n      \"kind\": \"restart_service\",\n      \"description\": \"If rate limit config is already relaxed, perform a clean restart of sailly-browser-demo service on port 8080 with 30s warm-up grace period before resuming tests.\",\n      \"safe_to_automate\": true\n    }\n  ],\n  \"next_attempt_prognosis\": \"Next attempt will likely succeed (70% confidence) if backoff + connection queuing are implemented in the test harness. The service reports 'ok' status with 1 active connection, indicating it is not crashed but is actively rejecting concurrent attempts. Serializing test execution or adding inter-test delays should resolve this. However, if Deepgram/Gemini quota limits are also hit, root cause is deeper and requires API tier upgrade or batch scheduling.\"\n}\n```",
+  "elapsed_s": 18.38313341140747
+}

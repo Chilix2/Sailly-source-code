@@ -1,0 +1,16 @@
+{
+  "phase": "A",
+  "max_attempts": 3,
+  "threshold": 0.98,
+  "attempts": [
+    {
+      "attempt": 1,
+      "passed": 119,
+      "total": 119,
+      "pass_rate": 1.0,
+      "timestamp": "2026-05-05T13:37:51.341271"
+    }
+  ],
+  "final_pass_rate": 1.0,
+  "success": true
+}

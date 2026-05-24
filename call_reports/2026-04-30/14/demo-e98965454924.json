@@ -1,0 +1,411 @@
+{
+  "call_sid": "demo-e98965454924",
+  "found": true,
+  "call": {
+    "id": "4499b06d-fc92-40a1-800a-b01527285b97",
+    "call_sid": "demo-e98965454924",
+    "caller_number": "browser_demo",
+    "agent_voice": "Kore",
+    "started_at": "2026-04-30T14:49:34.999323+00:00",
+    "ended_at": "2026-04-30T14:50:27.977244+00:00",
+    "duration_seconds": 53,
+    "total_turns": 1,
+    "total_input_tokens": 0,
+    "total_output_tokens": 0,
+    "total_cost_tokens": 0.0,
+    "total_cost_telephony": 0.0,
+    "avg_latency_ms": 10530,
+    "p95_latency_ms": 10530,
+    "outcome": "reservation_complete",
+    "quality_score": 5.0,
+    "was_escalated": false,
+    "escalation_reason": null,
+    "sentiment": null,
+    "language": "de",
+    "caller_audio_url": "https://storage.googleapis.com/sailly-recordings-eu/demo-e98965454924/combined.wav?X-Goog-Algorithm=GOOG4-RSA-SHA256&X-Goog-Credential=sailly-voice-agent%40sailly-voice-agent-eu.iam.gserviceaccount.com%2F20260430%2Fauto%2Fstorage%2Fgoog4_request&X-Goog-Date=20260430T145028Z&X-Goog-Expires=604800&X-Goog-SignedHeaders=host&X-Goog-Signature=70eac7396f1760f79f8f00fbb1236469f8eb80f4a9ba11f5cd5eda127dd2ecf30734d03a839594d2e874503ad83757636f8a4ef528513bfadb15229230e54ab090c2300e2b41c936d6445c5035e77ba79c32780e4015040b86d451e719021a6f6816c2ae3854a44d79baa465383741f69d22bb5d8b6c69713b8e1d21afdc4ebb2ac9a4b2f8c4fff96ac3dada2fb0dd0fd0e44568d459bbb8e1194d69af8c6a19983c8d61602edd1f3a69c189bb60ebc41ac763ffc066887fc97326f0d7b0eb7c4dbdbbb43f1b3d65a7f8bf497b009ba0dc949f7888ad466537972c971162b5c2d629f3377f0cc82533c17fbfeea73276e03e014a9c37ccf6bc2b35126452da1d",
+    "agent_audio_url": "https://storage.googleapis.com/sailly-recordings-eu/demo-e98965454924/agent.wav?X-Goog-Algorithm=GOOG4-RSA-SHA256&X-Goog-Credential=sailly-voice-agent%40sailly-voice-agent-eu.iam.gserviceaccount.com%2F20260430%2Fauto%2Fstorage%2Fgoog4_request&X-Goog-Date=20260430T145028Z&X-Goog-Expires=604800&X-Goog-SignedHeaders=host&X-Goog-Signature=2ab8312ea7d00956dbae2249345e38ebf74aaa3f1756d1691a022c70993a94d1cc279871083698d5832a32feb50e36cbd1ff2b3a9b28c173c98d1a27b26c0c9c9132d8c1cefdfa0b128d897aac694066184a0204e56944d8d2444cbaace7a59b18613297aaf72042c222133ce154c4bf57efc25775b8a70dce09cfaf3ff49197bfb22e7784fc84e656489a4487f02f6168daebc80c0b52642bcae8ef7184bc95848f4cd3db370743c9b6a2ce7cb969044c998d7bf555ebe0efd022bcfba185302a70e3e0ed5f00bd05efc1f805a9655d746204cfb790fa7c40f1e1c06ae047a52b719d005cd8877210cbc579e66be814e62c11a2f11ed75e9648f74b4a5a80c1",
+    "metadata": null,
+    "created_at": "2026-04-30T14:50:28.044598+00:00",
+    "emergency_detected": false,
+    "emergency_keyword": null,
+    "analytics_data": null,
+    "session_data": "{\"state\": {\"adk_brain\": {\"state\": {\"call_sid\": \"\", \"call_ended\": false, \"first_name\": null, \"party_size\": 2, \"cached_menu\": null, \"menu_fetched\": false, \"order_intent\": false, \"phone_number\": null, \"shared_slots\": {}, \"abuse_strikes\": 0, \"customer_name\": null, \"order_created\": false, \"selected_dish\": null, \"end_call_stage\": \"idle\", \"order_quantity\": 1, \"schema_version\": 5, \"caller_id_phone\": null, \"farewell_spoken\": false, \"delivery_address\": null, \"recent_responses\": [\"In Bonn ist es gerade 19.9°C, Klar. Hallo, hier ist Sailly Ihre digitale KI vom DOBOO - Korean Soulfood. Ihre Reservierung für 2 Personen am Heute um 19:00 Uhr ist bestätigt. Sie erhalten eine  Vielen Dank für Ihren Anruf! Wir freuen uns auf Sie bei DOBOO!\"], \"reservation_date\": \"2026-04-30\", \"reservation_time\": \"19:00\", \"delivery_intended\": false, \"ai_greeting_called\": true, \"current_intent_idx\": null, \"customer_confirmed\": false, \"get_weather_called\": true, \"reservation_intent\": true, \"validation_entries\": {}, \"cached_menu_at_turn\": null, \"caller_id_confirmed\": false, \"caller_said_goodbye\": false, \"reservation_created\": true, \"bulk_order_confirmed\": false, \"cached_menu_metadata\": {}, \"escalation_requested\": false, \"get_date_info_called\": true, \"verify_address_called\": false, \"verify_address_failed\": false, \"multi_intent_completed\": false, \"failed_intent_summaries\": [], \"request_callback_called\": false, \"transfer_to_tier2_called\": false, \"check_availability_called\": true, \"pending_bulk_confirmation\": false, \"delivery_address_mentioned\": false, \"last_caller_confirmation_turn\": null}, \"memory\": {\"recent_turns\": [{\"bot\": \"[TOOL:get_date_info] [TOOL:ai_greeting] [TOOL:get_weather] [TOOL:check_availability]\\n[TOOL:create_reservation]\\n\\nHallo, hier ist Sailly Ihre digitale KI vom DOBOO - Korean Soulfood. Ihre Reservierung für 2 Personen am Heute um 19:00 Uhr ist bestätigt. Sie erhalten eine Bestätigung per SMS. Vielen Dank für Ihren Anruf! Wir freuen uns auf Sie bei DOBOO! [TOOL:end_call]\", \"node\": \"greeting\", \"customer\": \"Hallo Sally. Wie ist das Wetter heute bei euch und habt ihr heute Abend noch einen Tisch für zwei Personen um neunzehn Uhr frei?\"}], \"context_summary\": \"\", \"max_recent_turns\": 5, \"max_summary_words\": 300}, \"node_mgr\": {\"node_stack\": [], \"current_node\": \"greeting\", \"turns_in_node\": 0}, \"turn_idx\": 1, \"all_tools\": [\"get_date_info\", \"ai_greeting\", \"get_weather\", \"check_availability\", \"create_reservation\", \"end_call\"], \"order_slots\": {\"name\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"items\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"phone\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"intent\": null, \"party_size\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"address_city\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"delivery_type\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"address_number\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"address_street\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"reservation_date\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"reservation_time\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}}, \"recent_responses\": [\"In Bonn ist es gerade 19.9°C, Klar. Hallo, hier ist Sailly Ihre digitale KI vom DOBOO - Korean Soulfood. Ihre Reservierung für 2 Personen am Heute um 19:00 Uhr ist bestätigt. Sie erhalten eine  Vielen Dank für Ihren Anruf! Wir freuen uns auf Sie bei DOBOO!\"]}}, \"caller\": \"browser_demo\", \"call_sid\": \"demo-e98965454924\", \"ended_at\": \"2026-04-30T16:50:27.977244+02:00\", \"started_at\": \"2026-04-30T16:49:34.999323+02:00\", \"started_ts\": 1777560574.9993508, \"tool_calls\": [{\"args\": {\"date\": \"Heute\"}, \"tool\": \"get_date_info\", \"timestamp\": \"2026-04-30T16:50:12.820182+02:00\", \"duration_ms\": 0, \"result_summary\": \"{'success': True, 'date': '2026-04-30', 'weekday': 'Donnerstag', 'relative': 'heute', 'message': '30.04.2026 ist ein Donnerstag (heute).'}\"}, {\"args\": {\"date\": \"2026-04-30\", \"name\": \"Anonym\", \"time\": \"19:00\", \"phone\": \"browser_demo\", \"party_size\": 2}, \"tool\": \"create_reservation\", \"timestamp\": \"2026-04-30T16:50:12.823503+02:00\", \"duration_ms\": 0, \"result_summary\": \"{'success': True, 'reservation_id': 'RES-49C58D98', 'message': 'Reservierung bestätigt! Anonym, 2 Personen, 2026-04-30 um 19:00 Uhr. Bestätigungsnummer: RES-49C58D98', 'details': {'reservation_id': 'RES-49C58D98', 'date': '2026-04-30', 'time': '19:00', 'party_size': 2, 'name': 'Anonym', 'phone': 'browser_demo', 'email': None, 'notes': None, 'created_at': '2026-04-30T16:50:12.813207+02:00', 'status': 'confirmed'}}\"}], \"from_number\": \"browser\", \"transcripts\": [{\"role\": \"assistant\", \"text\": \"Hallo, hier ist Sailly, die KI-Assistentin von DOBOO Korean Soulfood in Bonn. Wie kann ich Ihnen heute helfen?\", \"timestamp\": \"2026-04-30T16:49:35.010918+02:00\"}, {\"role\": \"user\", \"text\": \"Hallo Sally. Wie ist das Wetter heute bei euch und habt ihr heute Abend noch einen Tisch für zwei Personen um neunzehn Uhr frei?\", \"timestamp\": \"2026-04-30T16:50:07.432396+02:00\"}], \"duration_secs\": 53.0, \"emergency_events\": [], \"emergency_detected\": false, \"recording_consent_at\": \"2026-04-30T16:49:34.999323+02:00\", \"insurance_data_collected\": false}",
+    "recording_consent_at": null,
+    "insurance_data_collected": false,
+    "p50_latency_ms": 10530,
+    "max_latency_ms": 10530,
+    "total_dead_air_ms": 10530,
+    "slot_extractor_success_rate": null,
+    "validation_registry_invocations": 0,
+    "loop_incidents": 0,
+    "cost_cents": 76.2497,
+    "call_disposition": null,
+    "disposition": null,
+    "call_cost_eur": null,
+    "tenant_id": null
+  },
+  "turn_metrics": [
+    {
+      "id": 1732,
+      "call_id": "4499b06d-fc92-40a1-800a-b01527285b97",
+      "call_sid": "demo-e98965454924",
+      "turn_number": 1,
+      "user_text": "Hallo Sally. Wie ist das Wetter heute bei euch und habt ihr heute Abend noch einen Tisch für zwei Personen um neunzehn Uhr frei?",
+      "bot_text": "In Bonn ist es gerade 19.9°C, Klar. Hallo, hier ist Sailly Ihre digitale KI vom DOBOO - Korean Soulfood. Ihre Reservierung für 2 Personen am Heute um 19:00 Uhr ist bestätigt. Sie erhalten eine  Vielen Dank für Ihren Anruf! Wir freuen uns auf Sie bei DOBOO!",
+      "vad_start_ms": null,
+      "vad_stop_ms": null,
+      "stt_latency_ms": 4,
+      "llm_latency_ms": 10526,
+      "tts_latency_ms": 0,
+      "total_latency_ms": 10530,
+      "tools_called": "[\"get_date_info\", \"ai_greeting\", \"get_weather\", \"check_availability\", \"create_reservation\", \"end_call\"]",
+      "node_name": "greeting",
+      "stage1_clean_text": null,
+      "stage2_clean_text": null,
+      "stage3_text": "In Bonn ist es gerade 19.9°C, Klar. Hallo, hier ist Sailly Ihre digitale KI vom DOBOO - Korean Soulfood. Ihre Reservierung für 2 Personen am Heute um 19:00 Uhr ist bestätigt. Sie erhalten eine  Vielen Dank für Ihren Anruf! Wir freuen uns auf Sie bei DOBOO!",
+      "has_markdown": false,
+      "has_greeting": false,
+      "created_at": "2026-04-30T14:50:28.063183+00:00",
+      "tenant_id": "doboo",
+      "stt_confidence": null,
+      "build_sha": null,
+      "validation_breakdown": "{}",
+      "tts_situation": "greeting_first",
+      "tts_mood": "neutral",
+      "prompt_tokens_in": 2184,
+      "prompt_tokens_out": 72,
+      "max_output_tokens_config": null,
+      "temperature_config": null,
+      "top_p_config": null,
+      "slot_state_json": "{\"name\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"items\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"phone\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"intent\": null, \"party_size\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"address_city\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"delivery_type\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"address_number\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"address_street\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"reservation_date\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"reservation_time\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}}",
+      "slot_state_diff": null,
+      "slots_filled_count": 0,
+      "slots_confirmed_count": 0,
+      "slots_missing_required": "[\"items\", \"delivery_type\", \"phone\", \"name\"]",
+      "validations_fired_this_turn": "[]",
+      "validations_completed_this_turn": "[]",
+      "validations_pending_end_of_turn": "[]",
+      "validation_cancellations": 0,
+      "raw_utterance_in_prompt": false,
+      "prompt_snapshot_head": "ANREDE: Verwende immer \"Sie\", niemals \"du\", \"dir\", \"dich\" oder \"dein\". Auch bei lockerem, warmem Ton bleibt es \"Sie\".\n\nPERSÖNLICHKEIT: Du bist Sailly — eine warme, aufmerksame Gastgeberin bei DOBOO, kein steifes Formular. Entspannt, natürlich, wie ein Gespräch mit einem alten Bekannten — aber stets höflich mit \"Sie\".\n\nKI-KENNZEICHNUNG (EU AI Act Art. 50 — verpflichtend):\n- In deiner ERSTEN Äußerung MUSST du dich als KI-Assistentin ausweisen. Das Wort \"KI\" muss vorkommen.\n  Akzeptabel: \"die KI-As",
+      "intent_flags_active": "[\"reservation_intent\"]",
+      "node_active": "greeting",
+      "prompt_had_multiple_intents": false,
+      "mood_confidence": null,
+      "mood_signals_matched": null,
+      "barge_in_attempted": null,
+      "barge_in_succeeded": null,
+      "barge_in_latency_ms": null,
+      "loop_detected_in_stream": null,
+      "loop_reason": null,
+      "stream_aborted_at_sentence": null,
+      "cross_turn_similarity_max": null,
+      "subsystems_fired": "{\"barge_in\": \"enabled\", \"node_manager\": \"ran\", \"memory_manager\": \"ran\", \"registry_exists\": true, \"silence_reprompt\": \"armed\", \"tts_conditioning\": \"applied\", \"stuck_loop_detector\": \"skipped\", \"validation_registry\": \"silent\", \"validation_pending_count\": 0}",
+      "tts_rate_pct": 200,
+      "stt_ms": null,
+      "extract_ms": null,
+      "l2_ms": 1583,
+      "tool_ms": 8939,
+      "tts_first_byte_ms": 655,
+      "total_ms": 2239,
+      "extract_tokens_in": null,
+      "extract_tokens_out": null,
+      "cost_eur": 0.000171,
+      "tool_durations": "{\"ai_greeting\": 0, \"get_weather\": 3787, \"get_date_info\": 0, \"check_availability\": 2, \"create_reservation\": 1}",
+      "stt_model": null,
+      "asr_confidence": null,
+      "active_node": null,
+      "error_codes": [],
+      "layer1_decision": null,
+      "layer2_raw_output": null,
+      "layer3_changes": null,
+      "eot_event_type": null,
+      "eot_confidence": null,
+      "eot_latency_ms": null,
+      "intent_classify_ms": null,
+      "worker_p50_ms": null,
+      "worker_p95_ms": null,
+      "context_build_ms": null,
+      "generator_ttft_ms": null,
+      "generator_total_ms": null,
+      "tts_ttfb_ms": null,
+      "barge_in_cancel_ms": null,
+      "backchannel_fired": false,
+      "eot_followed_immediately": false,
+      "slot_extraction_latency_ms": null,
+      "slot_retention_status": null,
+      "validation_passes": null,
+      "tts_inline_tag": null
+    }
+  ],
+  "transcripts": [
+    {
+      "role": "assistant",
+      "content": "Hallo, hier ist Sailly, die KI-Assistentin von DOBOO Korean Soulfood in Bonn. Wie kann ich Ihnen heute helfen?",
+      "turn_number": 0,
+      "timestamp": "2026-04-30T14:49:35.010918+00:00"
+    },
+    {
+      "role": "user",
+      "content": "Hallo Sally. Wie ist das Wetter heute bei euch und habt ihr heute Abend noch einen Tisch für zwei Personen um neunzehn Uhr frei?",
+      "turn_number": 1,
+      "timestamp": "2026-04-30T14:50:07.432396+00:00"
+    }
+  ],
+  "tool_calls": [
+    {
+      "tool_name": "get_date_info",
+      "arguments": "{\"date\": \"Heute\"}",
+      "result_summary": "{'success': True, 'date': '2026-04-30', 'weekday': 'Donnerstag', 'relative': 'heute', 'message': '30.04.2026 ist ein Donnerstag (heute).'}",
+      "turn_number": 0,
+      "called_at": "2026-04-30T14:50:12.820182+00:00",
+      "success": null,
+      "error_message": null
+    },
+    {
+      "tool_name": "create_reservation",
+      "arguments": "{\"date\": \"2026-04-30\", \"name\": \"Anonym\", \"time\": \"19:00\", \"phone\": \"browser_demo\", \"party_size\": 2}",
+      "result_summary": "{'success': True, 'reservation_id': 'RES-49C58D98', 'message': 'Reservierung bestätigt! Anonym, 2 Personen, 2026-04-30 um 19:00 Uhr. Bestätigungsnummer: RES-49C58D98', 'details': {'reservation_id': 'RES-49C58D98', 'date': '2026-04-30', 'time': '19:00', 'party_size': 2, 'name': 'Anonym', 'phone': 'browser_demo', 'email': None, 'notes': None, 'created_at': '2026-04-30T16:50:12.813207+02:00', 'status': 'confirmed'}}",
+      "turn_number": 1,
+      "called_at": "2026-04-30T14:50:12.823503+00:00",
+      "success": null,
+      "error_message": null
+    }
+  ],
+  "aggregate_health": {
+    "n_turns": 1,
+    "p50_total_ms": 10530,
+    "p95_total_ms": 10530,
+    "max_total_ms": 10530,
+    "p50_llm_ms": 10526,
+    "max_llm_ms": 10526,
+    "p50_stt_ms": 4,
+    "loop_incidents": 0,
+    "barge_in_successes": 0,
+    "error_codes_seen": [],
+    "tts_latencies_measured": 0,
+    "p50_tts_ms": null,
+    "max_tts_ms": null,
+    "validation_passes_count": 0,
+    "slot_extractions_count": 0
+  },
+  "session_data": {
+    "state": {
+      "adk_brain": {
+        "state": {
+          "call_sid": "",
+          "call_ended": false,
+          "first_name": null,
+          "party_size": 2,
+          "cached_menu": null,
+          "menu_fetched": false,
+          "order_intent": false,
+          "phone_number": null,
+          "shared_slots": {},
+          "abuse_strikes": 0,
+          "customer_name": null,
+          "order_created": false,
+          "selected_dish": null,
+          "end_call_stage": "idle",
+          "order_quantity": 1,
+          "schema_version": 5,
+          "caller_id_phone": null,
+          "farewell_spoken": false,
+          "delivery_address": null,
+          "recent_responses": [
+            "In Bonn ist es gerade 19.9°C, Klar. Hallo, hier ist Sailly Ihre digitale KI vom DOBOO - Korean Soulfood. Ihre Reservierung für 2 Personen am Heute um 19:00 Uhr ist bestätigt. Sie erhalten eine  Vielen Dank für Ihren Anruf! Wir freuen uns auf Sie bei DOBOO!"
+          ],
+          "reservation_date": "2026-04-30",
+          "reservation_time": "19:00",
+          "delivery_intended": false,
+          "ai_greeting_called": true,
+          "current_intent_idx": null,
+          "customer_confirmed": false,
+          "get_weather_called": true,
+          "reservation_intent": true,
+          "validation_entries": {},
+          "cached_menu_at_turn": null,
+          "caller_id_confirmed": false,
+          "caller_said_goodbye": false,
+          "reservation_created": true,
+          "bulk_order_confirmed": false,
+          "cached_menu_metadata": {},
+          "escalation_requested": false,
+          "get_date_info_called": true,
+          "verify_address_called": false,
+          "verify_address_failed": false,
+          "multi_intent_completed": false,
+          "failed_intent_summaries": [],
+          "request_callback_called": false,
+          "transfer_to_tier2_called": false,
+          "check_availability_called": true,
+          "pending_bulk_confirmation": false,
+          "delivery_address_mentioned": false,
+          "last_caller_confirmation_turn": null
+        },
+        "memory": {
+          "recent_turns": [
+            {
+              "bot": "[TOOL:get_date_info] [TOOL:ai_greeting] [TOOL:get_weather] [TOOL:check_availability]\n[TOOL:create_reservation]\n\nHallo, hier ist Sailly Ihre digitale KI vom DOBOO - Korean Soulfood. Ihre Reservierung für 2 Personen am Heute um 19:00 Uhr ist bestätigt. Sie erhalten eine Bestätigung per SMS. Vielen Dank für Ihren Anruf! Wir freuen uns auf Sie bei DOBOO! [TOOL:end_call]",
+              "node": "greeting",
+              "customer": "Hallo Sally. Wie ist das Wetter heute bei euch und habt ihr heute Abend noch einen Tisch für zwei Personen um neunzehn Uhr frei?"
+            }
+          ],
+          "context_summary": "",
+          "max_recent_turns": 5,
+          "max_summary_words": 300
+        },
+        "node_mgr": {
+          "node_stack": [],
+          "current_node": "greeting",
+          "turns_in_node": 0
+        },
+        "turn_idx": 1,
+        "all_tools": [
+          "get_date_info",
+          "ai_greeting",
+          "get_weather",
+          "check_availability",
+          "create_reservation",
+          "end_call"
+        ],
+        "order_slots": {
+          "name": {
+            "value": null,
+            "status": "missing",
+            "confidence": "low",
+            "source_turn": null,
+            "raw_mentions": []
+          },
+          "items": {
+            "value": null,
+            "status": "missing",
+            "confidence": "low",
+            "source_turn": null,
+            "raw_mentions": []
+          },
+          "phone": {
+            "value": null,
+            "status": "missing",
+            "confidence": "low",
+            "source_turn": null,
+            "raw_mentions": []
+          },
+          "intent": null,
+          "party_size": {
+            "value": null,
+            "status": "missing",
+            "confidence": "low",
+            "source_turn": null,
+            "raw_mentions": []
+          },
+          "address_city": {
+            "value": null,
+            "status": "missing",
+            "confidence": "low",
+            "source_turn": null,
+            "raw_mentions": []
+          },
+          "delivery_type": {
+            "value": null,
+            "status": "missing",
+            "confidence": "low",
+            "source_turn": null,
+            "raw_mentions": []
+          },
+          "address_number": {
+            "value": null,
+            "status": "missing",
+            "confidence": "low",
+            "source_turn": null,
+            "raw_mentions": []
+          },
+          "address_street": {
+            "value": null,
+            "status": "missing",
+            "confidence": "low",
+            "source_turn": null,
+            "raw_mentions": []
+          },
+          "reservation_date": {
+            "value": null,
+            "status": "missing",
+            "confidence": "low",
+            "source_turn": null,
+            "raw_mentions": []
+          },
+          "reservation_time": {
+            "value": null,
+            "status": "missing",
+            "confidence": "low",
+            "source_turn": null,
+            "raw_mentions": []
+          }
+        },
+        "recent_responses": [
+          "In Bonn ist es gerade 19.9°C, Klar. Hallo, hier ist Sailly Ihre digitale KI vom DOBOO - Korean Soulfood. Ihre Reservierung für 2 Personen am Heute um 19:00 Uhr ist bestätigt. Sie erhalten eine  Vielen Dank für Ihren Anruf! Wir freuen uns auf Sie bei DOBOO!"
+        ]
+      }
+    },
+    "caller": "browser_demo",
+    "call_sid": "demo-e98965454924",
+    "ended_at": "2026-04-30T16:50:27.977244+02:00",
+    "started_at": "2026-04-30T16:49:34.999323+02:00",
+    "started_ts": 1777560574.9993508,
+    "tool_calls": [
+      {
+        "args": {
+          "date": "Heute"
+        },
+        "tool": "get_date_info",
+        "timestamp": "2026-04-30T16:50:12.820182+02:00",
+        "duration_ms": 0,
+        "result_summary": "{'success': True, 'date': '2026-04-30', 'weekday': 'Donnerstag', 'relative': 'heute', 'message': '30.04.2026 ist ein Donnerstag (heute).'}"
+      },
+      {
+        "args": {
+          "date": "2026-04-30",
+          "name": "Anonym",
+          "time": "19:00",
+          "phone": "browser_demo",
+          "party_size": 2
+        },
+        "tool": "create_reservation",
+        "timestamp": "2026-04-30T16:50:12.823503+02:00",
+        "duration_ms": 0,
+        "result_summary": "{'success': True, 'reservation_id': 'RES-49C58D98', 'message': 'Reservierung bestätigt! Anonym, 2 Personen, 2026-04-30 um 19:00 Uhr. Bestätigungsnummer: RES-49C58D98', 'details': {'reservation_id': 'RES-49C58D98', 'date': '2026-04-30', 'time': '19:00', 'party_size': 2, 'name': 'Anonym', 'phone': 'browser_demo', 'email': None, 'notes': None, 'created_at': '2026-04-30T16:50:12.813207+02:00', 'status': 'confirmed'}}"
+      }
+    ],
+    "from_number": "browser",
+    "transcripts": [
+      {
+        "role": "assistant",
+        "text": "Hallo, hier ist Sailly, die KI-Assistentin von DOBOO Korean Soulfood in Bonn. Wie kann ich Ihnen heute helfen?",
+        "timestamp": "2026-04-30T16:49:35.010918+02:00"
+      },
+      {
+        "role": "user",
+        "text": "Hallo Sally. Wie ist das Wetter heute bei euch und habt ihr heute Abend noch einen Tisch für zwei Personen um neunzehn Uhr frei?",
+        "timestamp": "2026-04-30T16:50:07.432396+02:00"
+      }
+    ],
+    "duration_secs": 53.0,
+    "emergency_events": [],
+    "emergency_detected": false,
+    "recording_consent_at": "2026-04-30T16:49:34.999323+02:00",
+    "insurance_data_collected": false
+  },
+  "pipeline_env_snapshot": "STT:  DeepgramFluxSTTService (flux-general-multi, EU endpoint, eot_threshold=0.6, eot_timeout_ms=3000 ms, mip_opt_out=True)\nVAD:  None — Deepgram Flux semantic EOT (eot_threshold=0.6, eot_timeout_ms=3000)\nLLM:  claude-haiku-4-5 (Vertex region env: us-east5)\nWorker pipeline: IntentSessionManager (shadow) → WorkerRouter (15 profiles) → WorkerExecutor (Required≤280ms / Optional≤350ms / Background)\nTTS:  SaillyGeminiTTSService — voice=Kore, engine=gemini-2.5-flash-tts\n      GLOBAL_SPEED_MULTIPLIER=2.25 (env override possible)\nFiller: pre-baked PCM 12-phrase pool, 400ms trigger (ENABLE_PRE_LLM_FILLER=true) | Backchannel: 6-phrase pool, 200-500ms hesitation window (ENABLE_BACKCHANNEL=true)\nMULTI-INTENT / ADK: Enabled per brain configuration for browser demo\nValidationRegistry: async validation when configured\nTTS Conditioning: Phase 2 — situation + mood → prosody_rate_pct → Gemini speaking_rate\nBarge-in: enabled post-greeting when BargeInHandler is in pipeline\nMonitoring thresholds (env): MONITOR_LATENCY_P95_MS=3000 ms, MONITOR_SUCCESS_THRESHOLD=80, Redis monitor=0",
+  "caller_flag_insights": [],
+  "context_documents": [
+    {
+      "turn_number": 1,
+      "intent": "greeting",
+      "turn_type": "start_intent",
+      "intent_locked": false,
+      "lock_confidence": 0.0,
+      "reroute_fired": false,
+      "worker_profile": "greeting"
+    }
+  ]
+}

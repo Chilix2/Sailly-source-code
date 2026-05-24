@@ -1,0 +1,150 @@
+id: other_custom
+name: Other / custom
+description: Generic voice-agent capability pack for custom SMB workflows that do not fit a named vertical.
+version: "1.0"
+language_defaults: [de, en]
+compliance_checklist:
+  - AI disclosure is spoken in the first audible greeting.
+  - Unknown or sensitive requests are routed to human staff.
+  - Any record creation requires minimum contact details and readback confirmation.
+  - The assistant must not invent policies, prices, legal terms, or commitments outside configured knowledge.
+capabilities:
+  - id: custom_greeting
+    name: Configurable greeting and intent routing
+    category: conversation
+    description: Greet callers, disclose AI usage, detect language, and classify the caller's request into configured queues.
+    tools: []
+    slots: [language, caller_intent, queue]
+    variables: [business_name, industry_label, opening_hours, configured_queues]
+    guards:
+      - id: ki_disclosure_first_turn
+        description: First audible greeting must identify the assistant as AI-supported.
+        applies_to: [greeting]
+      - id: no_tool_leakage
+        description: Never expose tool names, JSON, or internal state to callers.
+        forbidden_behaviors: ["Say [tool:", "Read internal slot names."]
+    scenarios:
+      - id: custom_greeting_basic
+        name: Generic greeting
+        caller_goal: Caller says hello and asks what the business can help with.
+        mandatory: true
+        expected:
+          transcript_assertions: [KI]
+          guards: [ki_disclosure_first_turn, no_tool_leakage]
+  - id: custom_knowledge
+    name: Configured knowledge answers
+    category: knowledge
+    description: Answer questions only from configured business facts, FAQ, policies, and documents.
+    tools:
+      - name: faq
+        required: false
+        description: Ground operational and policy answers in tenant knowledge.
+    slots: [topic]
+    variables: [knowledge_sources, fallback_message, staff_followup_policy]
+    guards:
+      - id: knowledge_grounding
+        description: If a fact is not configured, avoid guessing and offer staff follow-up.
+        forbidden_behaviors: ["Invent prices.", "Invent terms.", "Invent opening hours."]
+    scenarios:
+      - id: custom_unknown_policy
+        name: Unknown policy fallback
+        caller_goal: Caller asks for a policy not present in configured knowledge.
+        mandatory: true
+        expected:
+          tools: [faq]
+          guards: [knowledge_grounding]
+  - id: custom_request_capture
+    name: Request, ticket, or workflow capture
+    category: transaction
+    description: Capture a structured request with contact data, summary, priority, and readback before record creation.
+    tools:
+      - name: create_support_ticket
+        required: true
+        required_slots: [customer_name, phone_number, issue_summary]
+        optional_slots: [email, priority, category]
+    slots: [customer_name, phone_number, email, category, issue_summary, priority]
+    variables: [workflow_name, priority_rules, response_sla]
+    guards:
+      - id: request_readback_before_commit
+        description: Repeat contact data and issue summary before creating the record.
+        applies_to: [create_support_ticket]
+      - id: no_outcome_overpromise
+        description: Do not promise resolution, approval, refund, delivery, or price unless configured.
+        forbidden_behaviors: ["Guarantee a specific outcome."]
+    scenarios:
+      - id: custom_request_capture
+        name: Structured request capture
+        caller_goal: Caller wants the business to follow up about a custom request.
+        mandatory: true
+        expected:
+          tools: [create_support_ticket]
+          guards: [request_readback_before_commit, no_outcome_overpromise]
+  - id: custom_booking_or_callback
+    name: Booking, appointment, or callback
+    category: transaction
+    description: Schedule generic appointments, demos, consultations, or callbacks after collecting reason and contact details.
+    tools:
+      - name: create_callback
+        required: false
+        required_slots: [customer_name, phone_number, preferred_date, preferred_time, reason]
+        optional_slots: [email, timezone]
+    slots: [customer_name, phone_number, email, preferred_date, preferred_time, timezone, reason]
+    variables: [calendar_source, appointment_types, callback_sla]
+    guards:
+      - id: booking_readback_before_commit
+        description: Confirm reason, preferred time, timezone if relevant, and contact data before commit.
+        applies_to: [create_callback]
+    scenarios:
+      - id: custom_callback_booking
+        name: Generic callback
+        caller_goal: Caller wants a callback tomorrow afternoon.
+        mandatory: true
+        expected:
+          tools: [create_callback]
+          guards: [booking_readback_before_commit]
+  - id: custom_lead_capture
+    name: Lead capture and qualification
+    category: lead
+    description: Collect prospect details, interest, budget/timeline if configured, and route to the configured owner.
+    tools:
+      - name: capture_sales_lead
+        required: false
+        required_slots: [customer_name, phone_number, interest]
+        optional_slots: [company_name, email, budget, timeline, notes]
+    slots: [customer_name, company_name, phone_number, email, interest, budget, timeline, notes]
+    variables: [lead_owner, qualification_questions, pricing_policy]
+    guards:
+      - id: no_unconfigured_offer
+        description: Do not invent pricing, discounts, eligibility, or product fit.
+        forbidden_behaviors: ["Promise a custom offer.", "Invent a price."]
+    scenarios:
+      - id: custom_lead_capture
+        name: Generic lead capture
+        caller_goal: Caller is interested in buying a service and wants someone to call back.
+        mandatory: true
+        expected:
+          tools: [capture_sales_lead]
+          guards: [no_unconfigured_offer]
+  - id: custom_escalation
+    name: Sensitive topics and human handoff
+    category: escalation
+    description: Escalate complaints, legal, payment, privacy, safety, abuse, or out-of-scope requests to staff.
+    tools:
+      - name: transfer_to_human
+        required: false
+        required_slots: [issue_type]
+        optional_slots: [customer_name, phone_number, notes]
+    slots: [issue_type, customer_name, phone_number, notes]
+    variables: [handoff_phone, escalation_hours, callback_sla]
+    guards:
+      - id: sensitive_topic_handoff
+        description: Complaints, legal/payment/privacy/safety topics, and abuse require staff handoff or safe call close.
+        applies_to: [transfer_to_human]
+    scenarios:
+      - id: custom_complaint_handoff
+        name: Generic complaint handoff
+        caller_goal: Caller is upset and wants a human to resolve a complaint.
+        mandatory: true
+        expected:
+          tools: [transfer_to_human]
+          guards: [sensitive_topic_handoff]

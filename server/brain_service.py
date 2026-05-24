@@ -175,6 +175,7 @@ class BrowserBrainService(FrameProcessor):
         # Per-turn metrics accumulator: each entry populated after a successful
         # process_turn call. Flushed to google_turn_metrics on finalize.
         self._turn_metrics: list[dict] = []
+        self._tool_call_events: list[dict] = []
         self._turn_counter: int = 0
         self._pending_end_reason: str | None = None
         # Phase 3 shadow: IntentSessionManager runs in parallel with legacy pipeline
@@ -1044,6 +1045,15 @@ class BrowserBrainService(FrameProcessor):
                         "slot_retention_status": getattr(_tp, "_last_slot_retention_status", None) if _tp else None,
                         "validation_passes": getattr(_tp, "_last_validation_passes", None) if _tp else None,
                     })
+                    for _tool_name in list(result.tools_called or []):
+                        if _tool_name and _tool_name != "end_call":
+                            self._tool_call_events.append({
+                                "tool": _tool_name,
+                                "name": _tool_name,
+                                "args": {},
+                                "result_summary": f"Executed during turn {self._turn_counter}",
+                                "turn_number": self._turn_counter,
+                            })
                 except Exception as me:
                     logger.debug(f"[BRAIN] turn_metrics accumulate failed: {me}")
 
@@ -1329,6 +1339,70 @@ class BrowserBrainService(FrameProcessor):
             f"{json_path} ({json_path.stat().st_size} bytes), "
             f"{md_path} ({md_path.stat().st_size} bytes)"
         )
+        await self._persist_call_report_metadata(
+            json_path=str(json_path),
+            md_path=str(md_path),
+            bundle=bundle,
+        )
+
+    async def _persist_call_report_metadata(self, json_path: str, md_path: str, bundle: dict) -> None:
+        """Persist generated report metadata so dashboard APIs can discover it."""
+        db_url = os.environ.get("DATABASE_URL")
+        if not db_url:
+            return
+
+        import asyncpg
+
+        transcripts = bundle.get("transcripts") or []
+        turn_metrics = bundle.get("turn_metrics") or []
+        tool_calls = bundle.get("tool_calls") or []
+
+        conn = await asyncpg.connect(db_url)
+        try:
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS google_call_reports (
+                    id BIGSERIAL PRIMARY KEY,
+                    call_sid TEXT NOT NULL UNIQUE REFERENCES google_calls(call_sid) ON DELETE CASCADE,
+                    json_path TEXT,
+                    md_path TEXT,
+                    generated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    found BOOLEAN NOT NULL DEFAULT FALSE,
+                    transcript_count INTEGER NOT NULL DEFAULT 0,
+                    turn_metric_count INTEGER NOT NULL DEFAULT 0,
+                    tool_call_count INTEGER NOT NULL DEFAULT 0,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
+            await conn.execute(
+                """
+                INSERT INTO google_call_reports
+                    (call_sid, json_path, md_path, generated_at, found,
+                     transcript_count, turn_metric_count, tool_call_count)
+                VALUES ($1, $2, $3, NOW(), $4, $5, $6, $7)
+                ON CONFLICT (call_sid) DO UPDATE SET
+                    json_path = EXCLUDED.json_path,
+                    md_path = EXCLUDED.md_path,
+                    generated_at = EXCLUDED.generated_at,
+                    found = EXCLUDED.found,
+                    transcript_count = EXCLUDED.transcript_count,
+                    turn_metric_count = EXCLUDED.turn_metric_count,
+                    tool_call_count = EXCLUDED.tool_call_count,
+                    updated_at = NOW()
+                """,
+                self.call_sid,
+                json_path,
+                md_path,
+                bool(bundle.get("found")),
+                len(transcripts),
+                len(turn_metrics),
+                len(tool_calls),
+            )
+            logger.info(f"[BRAIN] Report metadata persisted for {self.call_sid}")
+        finally:
+            await conn.close()
 
     async def _persist_turn_metric_live(self, tm: dict) -> None:
         """Best-effort live write for the Call Analysis turn view."""
@@ -1499,6 +1573,18 @@ class BrowserBrainService(FrameProcessor):
                 )
 
         tool_calls = session_data.get("tool_calls", [])
+        if self._tool_call_events:
+            _existing = {
+                (tc.get("tool") or tc.get("name"), tc.get("turn_number"))
+                for tc in tool_calls
+                if isinstance(tc, dict)
+            }
+            for _event in self._tool_call_events:
+                _key = (_event.get("tool") or _event.get("name"), _event.get("turn_number"))
+                if _key not in _existing:
+                    tool_calls.append(_event)
+                    _existing.add(_key)
+            session_data["tool_calls"] = tool_calls
         tool_names = [tc.get("tool", "") for tc in tool_calls]
         was_escalated = any(t in ("transfer_to_human", "transfer_to_tier2") for t in tool_names)
 
@@ -1601,7 +1687,7 @@ class BrowserBrainService(FrameProcessor):
                             tc.get("tool", ""),
                             json.dumps(tc.get("args", {})),
                             str(tc.get("result_summary") or tc.get("result") or "")[:500],
-                            i,
+                            int(tc.get("turn_number") or i),
                             _parse_dt(tc.get("timestamp") or tc.get("ts")) if (tc.get("timestamp") or tc.get("ts")) else now_dt,
                         )
                         for i, tc in enumerate(tool_calls)

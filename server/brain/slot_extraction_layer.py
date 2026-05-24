@@ -100,7 +100,7 @@ class SlotCandidates:
 class SlotExtractionLayer:
     """Contextual extraction with deterministic fallback and latency budget."""
 
-    def __init__(self, slot_extractor: Any = None, *, timeout_s: float = 1.5):
+    def __init__(self, slot_extractor: Any = None, *, timeout_s: float = 3.5):
         self.extractor = slot_extractor
         self.timeout_s = timeout_s
 

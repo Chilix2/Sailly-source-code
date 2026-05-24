@@ -419,14 +419,19 @@ if os.path.exists(validation_dir):
 
 
 @app.get("/api/call-reports/{call_sid}")
-async def get_call_report(call_sid: str, format: str = Query("json")):
+@app.get("/api/dashboard/call-report/{call_sid}")
+async def get_call_report(
+    call_sid: str,
+    format: str = Query("json"),
+    report_format: Optional[str] = Query(None),
+):
     """Serve generated call report artifacts or explain why none exists yet."""
     from pathlib import Path
 
     if not re.fullmatch(r"[A-Za-z0-9_-]{3,80}", call_sid):
         return JSONResponse({"error": "invalid_call_sid"}, status_code=400)
 
-    normalized_format = (format or "json").lower()
+    normalized_format = (report_format or format or "json").lower()
     if normalized_format not in {"json", "md", "markdown"}:
         return JSONResponse({"error": "unsupported_format", "supported": ["json", "md"]}, status_code=400)
 
@@ -439,7 +444,7 @@ async def get_call_report(call_sid: str, format: str = Query("json")):
     reason = "report_not_generated"
     details = {"found": False}
     try:
-        from server.call_report.builder import fetch_call_report_bundle
+        from server.call_report.builder import build_call_report_markdown, fetch_call_report_bundle
 
         bundle = await fetch_call_report_bundle(call_sid)
         details = {
@@ -454,6 +459,67 @@ async def get_call_report(call_sid: str, format: str = Query("json")):
             reason = "missing_google_transcripts_rows"
         elif not details["turn_metrics"]:
             reason = "missing_google_turn_metrics_rows"
+        else:
+            reports_dir = Path(os.environ.get("CALL_REPORTS_DIR", "call_reports"))
+            reports_dir.mkdir(parents=True, exist_ok=True)
+            json_path = reports_dir / f"{call_sid}.json"
+            md_path = reports_dir / f"{call_sid}.md"
+            json_path.write_text(json.dumps(bundle, indent=2, default=str), encoding="utf-8")
+            md_path.write_text(await build_call_report_markdown(call_sid), encoding="utf-8")
+            try:
+                import asyncpg
+
+                db_url = os.environ.get("DATABASE_URL")
+                if db_url:
+                    conn = await asyncpg.connect(db_url)
+                    try:
+                        await conn.execute(
+                            """
+                            CREATE TABLE IF NOT EXISTS google_call_reports (
+                                id BIGSERIAL PRIMARY KEY,
+                                call_sid TEXT NOT NULL UNIQUE REFERENCES google_calls(call_sid) ON DELETE CASCADE,
+                                json_path TEXT,
+                                md_path TEXT,
+                                generated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                                found BOOLEAN NOT NULL DEFAULT FALSE,
+                                transcript_count INTEGER NOT NULL DEFAULT 0,
+                                turn_metric_count INTEGER NOT NULL DEFAULT 0,
+                                tool_call_count INTEGER NOT NULL DEFAULT 0,
+                                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                            )
+                            """
+                        )
+                        await conn.execute(
+                            """
+                            INSERT INTO google_call_reports
+                                (call_sid, json_path, md_path, generated_at, found,
+                                 transcript_count, turn_metric_count, tool_call_count)
+                            VALUES ($1, $2, $3, NOW(), true, $4, $5, $6)
+                            ON CONFLICT (call_sid) DO UPDATE SET
+                                json_path = EXCLUDED.json_path,
+                                md_path = EXCLUDED.md_path,
+                                generated_at = EXCLUDED.generated_at,
+                                found = EXCLUDED.found,
+                                transcript_count = EXCLUDED.transcript_count,
+                                turn_metric_count = EXCLUDED.turn_metric_count,
+                                tool_call_count = EXCLUDED.tool_call_count,
+                                updated_at = NOW()
+                            """,
+                            call_sid,
+                            str(json_path),
+                            str(md_path),
+                            details["transcripts"],
+                            details["turn_metrics"],
+                            details["tool_calls"],
+                        )
+                    finally:
+                        await conn.close()
+            except Exception as meta_exc:
+                logger.warning(f"[report] metadata upsert failed for {call_sid}: {meta_exc}")
+            generated_path = md_path if ext == "md" else json_path
+            media_type = "text/markdown; charset=utf-8" if ext == "md" else "application/json"
+            return FileResponse(generated_path, media_type=media_type, filename=generated_path.name)
     except Exception as exc:
         reason = "db_lookup_failed"
         details = {"error": str(exc)}
