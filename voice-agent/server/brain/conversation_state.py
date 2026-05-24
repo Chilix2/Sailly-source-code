@@ -2061,35 +2061,27 @@ def resolve_dish_canonical(state: "ConversationState", dish_name: str) -> tuple:
 
     target = dish_name.lower().strip()
 
-    # Pass 1: exact match → return as-is
-    for category, items in state.cached_menu.items():
-        if not isinstance(items, list):
-            continue
-        for item in items:
-            if not isinstance(item, dict):
-                continue
-            item_name = (item.get("name") or "").lower().strip()
+    # Pass 1: exact match against canonical names and aliases.
+    for item in _iter_cached_menu_items(state):
+        for item_name_raw in _menu_item_match_names(item):
+            item_name = item_name_raw.lower().strip()
             if item_name == target:
-                price = item.get("price") or item.get("preis")
-                return (item.get("name", dish_name), float(price) if price is not None else None)
+                price, label = _menu_item_price_and_label(item, dish_name)
+                return (label, price)
 
     # Pass 2: prefix match — target is a prefix of item_name (e.g. "Bibimbap" in "Bibimbap vegetarisch")
     # Among prefix matches, prefer the CHEAPEST variant (lowest price) as the default
     prefix_candidates = []
-    for category, items in state.cached_menu.items():
-        if not isinstance(items, list):
+    for item in _iter_cached_menu_items(state):
+        price, label = _menu_item_price_and_label(item, dish_name)
+        if price is None:
             continue
-        for item in items:
-            if not isinstance(item, dict):
-                continue
-            item_name = (item.get("name") or "").lower().strip()
+        for item_name_raw in _menu_item_match_names(item):
+            item_name = item_name_raw.lower().strip()
             if not item_name:
                 continue
-            price = item.get("price") or item.get("preis")
-            if price is None:
-                continue
             if item_name.startswith(target + " ") or item_name.startswith(target + "-"):
-                prefix_candidates.append((float(price), item.get("name", dish_name), float(price)))
+                prefix_candidates.append((float(price), label, float(price)))
 
     if prefix_candidates:
         # Sort by price ascending → pick cheapest variant as default
@@ -2106,30 +2098,26 @@ def resolve_dish_canonical(state: "ConversationState", dish_name: str) -> tuple:
     best_fuzzy_price: Optional[float] = None
     best_fuzzy_canonical: Optional[str] = None
     from difflib import SequenceMatcher as _SM
-    for category, items in state.cached_menu.items():
-        if not isinstance(items, list):
+    for item in _iter_cached_menu_items(state):
+        price, label = _menu_item_price_and_label(item, dish_name)
+        if price is None:
             continue
-        for item in items:
-            if not isinstance(item, dict):
-                continue
-            item_name = (item.get("name") or "").lower().strip()
+        for item_name_raw in _menu_item_match_names(item):
+            item_name = item_name_raw.lower().strip()
             if not item_name:
-                continue
-            price = item.get("price") or item.get("preis")
-            if price is None:
                 continue
             if target in item_name or item_name in target:
                 ratio = _SM(None, target, item_name).ratio()
                 if ratio > best_substring_ratio:
                     best_substring_ratio = ratio
                     best_substring_price = float(price)
-                    best_substring_canonical = item.get("name", dish_name)
+                    best_substring_canonical = label
             else:
                 ratio = _SM(None, target, item_name).ratio()
                 if ratio > best_fuzzy_ratio:
                     best_fuzzy_ratio = ratio
                     best_fuzzy_price = float(price)
-                    best_fuzzy_canonical = item.get("name", dish_name)
+                    best_fuzzy_canonical = label
 
     # Prefer substring matches; fall back to fuzzy if no substring match
     if best_substring_ratio >= 0.60 and best_substring_price is not None:
