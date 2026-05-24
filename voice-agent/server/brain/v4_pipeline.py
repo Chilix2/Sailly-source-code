@@ -1886,9 +1886,21 @@ async def process_turn_v4(
                 scheduled_run.append("verify_address")
             logger.info(f"[v4_pipeline] T{turn_idx} early verify_address → {_verify_result}")
             if isinstance(_verify_result, dict):
-                if _verify_result.get("formatted_address"):
-                    state.delivery_address = _verify_result["formatted_address"]
-                    state.address_verified = bool(_verify_result.get("valid", True))
+                _verified_address = (
+                    _verify_result.get("formatted_address")
+                    or _verify_result.get("canonical_address")
+                    or _verify_result.get("normalized_address")
+                    or _verify_result.get("address")
+                )
+                _verify_success = bool(
+                    _verify_result.get("success")
+                    or _verify_result.get("valid")
+                    or _verify_result.get("ok")
+                    or _verify_result.get("status") in {"valid", "ok", "success"}
+                )
+                if _verify_success and _verified_address:
+                    state.delivery_address = _verified_address
+                    state.address_verified = True
                     state.address_confirmed = True
                     state.verify_address_failed = False
                 elif _verify_result.get("valid") is True:
@@ -2178,9 +2190,24 @@ async def process_turn_v4(
                     commit_tools_run.append("verify_address")
                     logger.info(f"[v4_pipeline] T{turn_idx} verify_address → {verify_result}")
                     # Update state with verified address if available
-                    if isinstance(verify_result, dict) and verify_result.get("formatted_address"):
-                        state.delivery_address = verify_result["formatted_address"]
-                        delivery_address = state.delivery_address
+                    if isinstance(verify_result, dict):
+                        _verified_address = (
+                            verify_result.get("formatted_address")
+                            or verify_result.get("canonical_address")
+                            or verify_result.get("normalized_address")
+                            or verify_result.get("address")
+                        )
+                        _verify_success = bool(
+                            verify_result.get("success")
+                            or verify_result.get("valid")
+                            or verify_result.get("ok")
+                            or verify_result.get("status") in {"valid", "ok", "success"}
+                        )
+                        if _verify_success and _verified_address:
+                            state.delivery_address = _verified_address
+                            state.address_verified = True
+                            state.verify_address_failed = False
+                            delivery_address = state.delivery_address
                 except Exception as _va_err:
                     logger.warning(f"[v4_pipeline] T{turn_idx} verify_address failed (non-fatal): {_va_err}")
 

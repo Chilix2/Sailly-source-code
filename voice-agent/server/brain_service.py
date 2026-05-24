@@ -460,6 +460,11 @@ class BrowserBrainService(FrameProcessor):
             se = self._get_speculative_executor()
             if se is not None and partial_text:
                 turn_idx = getattr(self.turn_processor, "turn_idx", 0) if self.turn_processor else 0
+                logger.info(
+                    "[BRAIN] Flux eager EOT received: turn=%s partial_chars=%s",
+                    turn_idx,
+                    len(partial_text),
+                )
                 await se.on_eager_eot(
                     partial_text=partial_text,
                     turn_idx=turn_idx,
@@ -810,10 +815,30 @@ class BrowserBrainService(FrameProcessor):
 
                 try:
                     se = self._get_speculative_executor()
+                    if se is not None and (
+                        getattr(se, "_partial_text", "")
+                        or getattr(se, "_speculative_tasks", {})
+                    ):
+                        turn_idx = getattr(self.turn_processor, "turn_idx", 0) if self.turn_processor else 0
+                        try:
+                            from server.brain.intent_classifier import classify as _classify
+                            final_profile = _classify(user_text, turn_idx=turn_idx).worker_profile
+                        except Exception:
+                            final_profile = None
+                        await se.on_end_of_turn(
+                            user_text,
+                            turn_idx,
+                            final_profile=final_profile,
+                        )
                     speculative_results = se.consume_results() if se is not None else {}
                     if self.turn_processor is not None:
                         self.turn_processor._speculative_worker_results = speculative_results
                     self._last_speculative_reused_count = len(speculative_results)
+                    if speculative_results:
+                        logger.info(
+                            "[BRAIN] Reusing speculative worker results: %s",
+                            sorted(speculative_results),
+                        )
                 except Exception as _spec_err:
                     logger.debug("[BRAIN] speculative result handoff failed: %s", _spec_err)
                     self._last_speculative_reused_count = 0
@@ -966,6 +991,11 @@ class BrowserBrainService(FrameProcessor):
                             # Subsystems fired (Sprint 0.4)
                             try:
                                 _subsystems_fired = _tp._collect_subsystem_status() if hasattr(_tp, "_collect_subsystem_status") else None
+                                if isinstance(_subsystems_fired, dict):
+                                    _subsystems_fired["eot_event_type"] = getattr(self, "_last_eot_event_type", None)
+                                    _subsystems_fired["speculative_reused_count"] = getattr(
+                                        self, "_last_speculative_reused_count", None
+                                    )
                             except Exception:
                                 _subsystems_fired = None
                     except Exception:
