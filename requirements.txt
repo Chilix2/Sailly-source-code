@@ -7,3 +7,4 @@ deepgram-sdk
 python-dotenv
 pyyaml
 google-auth
+redis
