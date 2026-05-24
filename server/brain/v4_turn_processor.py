@@ -97,7 +97,20 @@ class V4TurnProcessor:
         self._last_prompt_tokens_in: int = 0
         self._last_prompt_tokens_out: int = 0
         self._current_turn_error_codes: list = []
-        self.validation_registry = None
+        try:
+            from server.brain.validation_registry import ValidationRegistry
+            from tools.executor import execute_tool
+
+            self.validation_registry = ValidationRegistry(
+                execute_tool=execute_tool,
+                call_sid=call_sid,
+                tenant_id=tenant_id or "doboo",
+                state=self.state,
+            )
+            self.state.validation_registry_ref = self.validation_registry
+        except Exception as exc:
+            logger.warning("[V4Turn] validation registry disabled: %s", exc)
+            self.validation_registry = None
         self._validations_passed: int = 0
         self._validations_failed: int = 0
         self._validations_skipped: int = 0
@@ -133,7 +146,22 @@ class V4TurnProcessor:
 
     # ── brain_service calls this for metrics ─────────────────────────────────
     def _collect_subsystem_status(self) -> dict:
-        return {}
+        status: dict[str, str | bool] = {
+            "registry_exists": self.validation_registry is not None,
+        }
+        metrics = getattr(self.state, "_last_semantic_slot_metrics", {}) or {}
+        if metrics:
+            status["slot_extractor"] = "timed_out" if metrics.get("timed_out") else "completed"
+        elif self.slot_extraction_layer is not None:
+            status["slot_extractor"] = "idle"
+        if self.validation_registry is not None:
+            try:
+                status["validation_registry"] = (
+                    "fired" if getattr(self.validation_registry, "_entries", {}) else "silent"
+                )
+            except Exception:
+                status["validation_registry"] = "unknown"
+        return status
 
     # ── Main entry point ──────────────────────────────────────────────────────
     async def process_turn(

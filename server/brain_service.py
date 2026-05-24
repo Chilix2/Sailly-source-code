@@ -1045,8 +1045,26 @@ class BrowserBrainService(FrameProcessor):
                         "slot_retention_status": getattr(_tp, "_last_slot_retention_status", None) if _tp else None,
                         "validation_passes": getattr(_tp, "_last_validation_passes", None) if _tp else None,
                     })
+                    try:
+                        from tools.executor import drain_tool_events as _drain_tool_events
+                        _captured_tool_events = _drain_tool_events(self.call_sid)
+                    except Exception:
+                        _captured_tool_events = []
+                    _captured_tool_names = set()
+                    for _event in _captured_tool_events:
+                        if not isinstance(_event, dict):
+                            continue
+                        _tool_name = _event.get("tool") or _event.get("name")
+                        if not _tool_name or _tool_name == "end_call":
+                            continue
+                        if _event.get("turn_number") in (None, 99):
+                            _event["turn_number"] = self._turn_counter
+                        _captured_tool_names.add(_tool_name)
+                        self._tool_call_events.append(_event)
                     for _tool_name in list(result.tools_called or []):
                         if _tool_name and _tool_name != "end_call":
+                            if _tool_name in _captured_tool_names:
+                                continue
                             self._tool_call_events.append({
                                 "tool": _tool_name,
                                 "name": _tool_name,

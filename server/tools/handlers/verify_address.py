@@ -89,11 +89,12 @@ async def maps_lookup(address: str, city: str = "") -> Optional[dict]:
     Returns None on hard failure. Raises on transient errors (caller retries).
     """
     import aiohttp
+    import os
     import re
     from server.core.resilience import with_breaker, BreakerOpenError, MAPS_BREAKER
     from server.configs.secrets import get_secret
 
-    maps_api_key = get_secret("maps-api-key", default="")
+    maps_api_key = get_secret("maps-api-key", default="") or os.environ.get("GOOGLE_MAPS_API_KEY", "")
     
     # Dev fallback: if no API key, use simple geocoding cache for known Bonn addresses
     if not maps_api_key:

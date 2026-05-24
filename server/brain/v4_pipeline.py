@@ -41,6 +41,52 @@ _GERMAN_MONTHS = [
     "Juli", "August", "September", "Oktober", "November", "Dezember",
 ]
 _GERMAN_WEEKDAYS = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"]
+_TTS_NON_BOUNDARY_ABBREVIATIONS = (
+    "str.", "nr.", "bzw.", "z.b.", "ca.", "inkl.", "dr.", "prof.", "bspw.",
+)
+
+
+def _split_tts_sentence_chunks(text: str) -> list[str]:
+    """Split generated speech into German-safe sentence chunks for TTS streaming."""
+    text = (text or "").strip()
+    if not text:
+        return []
+    chunks: list[str] = []
+    start = 0
+    i = 0
+    while i < len(text):
+        if text.startswith(" — ", i):
+            chunk = text[start:i].strip()
+            if chunk:
+                chunks.append(chunk)
+            start = i + 3
+            i = start
+            continue
+
+        ch = text[i]
+        if ch in ".?!…":
+            before = text[: i + 1].lower()
+            prev_ch = text[i - 1] if i > 0 else ""
+            next_ch = text[i + 1] if i + 1 < len(text) else ""
+            if any(before.endswith(abbrev) for abbrev in _TTS_NON_BOUNDARY_ABBREVIATIONS):
+                i += 1
+                continue
+            if ch == "." and prev_ch.isdigit():
+                i += 1
+                continue
+            if next_ch and not next_ch.isspace():
+                i += 1
+                continue
+            chunk = text[start : i + 1].strip()
+            if chunk:
+                chunks.append(chunk)
+            start = i + 1
+        i += 1
+
+    tail = text[start:].strip()
+    if tail:
+        chunks.append(tail)
+    return chunks
 
 
 def _iso_to_spoken_german(iso: str) -> str:
@@ -2716,7 +2762,8 @@ async def process_turn_v4(
 
     if tts_callback and spoken:
         try:
-            await tts_callback(spoken)
+            for chunk in _split_tts_sentence_chunks(spoken):
+                await tts_callback(chunk)
         except Exception as cb_err:
             logger.warning(f"[v4_pipeline] tts_callback raised: {cb_err}")
 

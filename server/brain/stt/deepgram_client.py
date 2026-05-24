@@ -112,16 +112,32 @@ def build_flux_stt_settings(tenant_cfg) -> Dict[str, Any]:
     Returns:
         Dict ready to be unpacked into ``DeepgramFluxSTTService(**kwargs)``.
     """
+    audio_cfg: Dict[str, Any] = {}
+    if isinstance(tenant_cfg, dict):
+        audio_cfg = tenant_cfg.get("audio", {}) or {}
+    else:
+        audio_cfg = getattr(tenant_cfg, "audio", None) or {}
+        if not isinstance(audio_cfg, dict):
+            audio_cfg = {}
+
+    eot_threshold = float(audio_cfg.get("eot_threshold") or 0.6)
+    eager_eot_threshold = float(audio_cfg.get("eager_eot_threshold") or 0.5)
+    eot_timeout_ms = int(
+        audio_cfg.get("eot_timeout_ms")
+        or audio_cfg.get("stt_endpointing_ms")
+        or 3000
+    )
+
     base_kwargs: Dict[str, Any] = {
         "model": "flux-general-multi",
         "language": Language.DE,
-        "eot_threshold": 0.6,        # P2.1: was 0.7 — more aggressive semantic EOT
-        "eot_timeout_ms": 3000,      # P2.2: was 1200 — last-resort fallback only
+        "eot_threshold": eot_threshold,
+        "eot_timeout_ms": eot_timeout_ms,
     }
     # P8.4: enable EagerEndOfTurn events when the SDK supports the field.
     # Speculative workers fire on EagerEndOfTurn (~200-400ms head-start).
     try:
-        settings = DeepgramFluxSTTSettings(**base_kwargs, eager_eot_threshold=0.5)
+        settings = DeepgramFluxSTTSettings(**base_kwargs, eager_eot_threshold=eager_eot_threshold)
     except TypeError:
         # SDK without eager_eot support — speculative path stays dormant.
         settings = DeepgramFluxSTTSettings(**base_kwargs)

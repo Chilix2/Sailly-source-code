@@ -14,7 +14,7 @@ import time
 import uuid
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-from typing import Optional
+from typing import Any, Optional
 
 import aiohttp
 from loguru import logger
@@ -94,6 +94,45 @@ weather_cache: dict[str, tuple[dict, float]] = {}
 tenant_session_store: dict[str, dict[str, dict]] = {}
 tenant_reservation_store: dict[str, dict[str, dict]] = {}
 tenant_order_store: dict[str, dict[str, dict]] = {}
+_TOOL_EVENT_LOG: dict[str, list[dict[str, Any]]] = {}
+
+
+def _summarize_tool_result(result: Any) -> str:
+    if not isinstance(result, dict):
+        return str(result)[:300]
+    for key in ("message", "error", "status", "note", "result"):
+        value = result.get(key)
+        if value:
+            return str(value)[:300]
+    return json.dumps(result, ensure_ascii=False, default=str)[:300]
+
+
+def _record_tool_event(
+    *,
+    tool_name: str,
+    args: dict,
+    call_sid: str,
+    turn_number: int,
+    result: Any,
+    success: bool,
+) -> None:
+    if not call_sid:
+        return
+    _TOOL_EVENT_LOG.setdefault(call_sid, []).append({
+        "tool": tool_name,
+        "name": tool_name,
+        "args": dict(args or {}),
+        "turn_number": turn_number,
+        "success": success,
+        "result_summary": _summarize_tool_result(result),
+    })
+
+
+def drain_tool_events(call_sid: str) -> list[dict[str, Any]]:
+    """Return and clear tool events captured by execute_tool for a call."""
+    if not call_sid:
+        return []
+    return _TOOL_EVENT_LOG.pop(call_sid, [])
 
 
 def _build_transfer_payload(
@@ -407,7 +446,7 @@ async def execute_tool(
             reason=reason,
             args=args,
         )
-        return {
+        blocked_result = {
             "success": False,
             "blocked_by_guardian": True,
             "reason": reason,
@@ -417,6 +456,15 @@ async def execute_tool(
                 else f"Zu früh im Gespräch für {tool_name}. Sammle zuerst alle nötigen Informationen."
             ),
         }
+        _record_tool_event(
+            tool_name=tool_name,
+            args=args,
+            call_sid=call_sid,
+            turn_number=turn_number,
+            result=blocked_result,
+            success=False,
+        )
+        return blocked_result
 
     logger.info(f"Tool call: {tool_name}({json.dumps(args, ensure_ascii=False)[:200]}) [tenant={tenant_id}]")
 
@@ -464,7 +512,16 @@ async def execute_tool(
                     )
             except Exception:
                 logger.exception("[AUDIT] p6 write failed", extra={"tool": tool_name, "call_sid": call_sid})
-            return _p6_result.to_legacy_dict()
+            _p6_legacy_result = _p6_result.to_legacy_dict()
+            _record_tool_event(
+                tool_name=tool_name,
+                args=args,
+                call_sid=call_sid,
+                turn_number=turn_number,
+                result=_p6_legacy_result,
+                success=bool(_p6_result.ok),
+            )
+            return _p6_legacy_result
     except ImportError:
         pass  # server/tools/handlers not installed — fall through to legacy dispatch
     except Exception as _p6_err:
@@ -485,6 +542,10 @@ async def execute_tool(
         # Validation-pipeline tool aliases (ADKBrainService path)
         "send_sms": _send_sms_noop,           # SMS already sent by create_order/create_reservation executors
         "transfer_to_tier2": _transfer_to_human,  # Alias: same as transfer_to_human in production
+        "escalate_to_manager": _transfer_to_human,  # Alias emitted by layer2 tool schema
+        "confirm_order": _confirm_order_noop,
+        "log_complaint": _log_complaint_noop,
+        "process_refund": _process_refund_stub,
         "ai_greeting": _ai_greeting_noop,     # Greeting tracking — no external effect
         "faq": _get_restaurant_info,          # FAQ maps to restaurant info
         "technical_issues_callback": _technical_issues_callback,
@@ -508,9 +569,18 @@ async def execute_tool(
     
     handler = handlers.get(tool_name)
     if not handler:
-        return {"error": f"Unknown tool: {tool_name}"}
+        unknown_result = {"error": f"Unknown tool: {tool_name}"}
+        _record_tool_event(
+            tool_name=tool_name,
+            args=args,
+            call_sid=call_sid,
+            turn_number=turn_number,
+            result=unknown_result,
+            success=False,
+        )
+        return unknown_result
     
-    context_tools = {"send_sms", "create_order", "transfer_to_human", "transfer_to_tier2"}
+    context_tools = {"send_sms", "create_order", "transfer_to_human", "transfer_to_tier2", "escalate_to_manager"}
     _leg_result: dict = {}
     _leg_success: bool = False
     try:
@@ -534,6 +604,15 @@ async def execute_tool(
         _leg_result = {"error": str(e)}
         return _leg_result
     finally:
+        if handler:
+            _record_tool_event(
+                tool_name=tool_name,
+                args=args,
+                call_sid=call_sid,
+                turn_number=turn_number,
+                result=_leg_result,
+                success=_leg_success,
+            )
         # Phase 8 B6 — audit trail for state-mutating tools (FINDING-004 fix, legacy path)
         try:
             from server.brain.observability.audit import AUDITED_TOOLS as _LEG_AUDITED, write_audit_entry as _leg_audit
@@ -1961,7 +2040,7 @@ async def _verify_address(args: dict, call_sid: str, tenant_id: Optional[str] = 
         from server.core.resilience import with_breaker, BreakerOpenError, MAPS_BREAKER
 
         async def _do_geocode():
-            async with httpx.AsyncClient(timeout=1.2) as client:
+            async with httpx.AsyncClient(timeout=8.0) as client:
                 return await client.get(url, params=params)
 
         try:
@@ -1980,7 +2059,7 @@ async def _verify_address(args: dict, call_sid: str, tenant_id: Optional[str] = 
                 ),
             }
         except (httpx.TimeoutException, asyncio.TimeoutError) as te:
-            logger.warning(f"[verify_address] Timeout after 1.2s for {search_query}: {te}")
+            logger.warning(f"[verify_address] Timeout after 8.0s for {search_query}: {te}")
             return {
                 "valid": False,
                 "error": "Adressvalidierung Timeout",
@@ -2158,6 +2237,39 @@ async def _ai_greeting_noop(args: dict, call_sid: str, tenant_id: Optional[str] 
     """No-op handler for the validation pipeline's ai_greeting tracking tool."""
     logger.debug(f"[ai_greeting] Greeting acknowledged (call_sid={call_sid})")
     return {"status": "greeted"}
+
+
+async def _confirm_order_noop(args: dict, call_sid: str, tenant_id: Optional[str] = None) -> dict:
+    """Acknowledge a model-level order confirmation marker without committing state."""
+    logger.info(f"[confirm_order] acknowledged marker (call_sid={call_sid})")
+    return {
+        "success": True,
+        "status": "confirmed_marker",
+        "message": "Bestellung wurde als bestätigt markiert.",
+    }
+
+
+async def _log_complaint_noop(args: dict, call_sid: str, tenant_id: Optional[str] = None) -> dict:
+    """Log complaint intent without attempting unsupported CRM side effects."""
+    reason = str(args.get("reason") or args.get("complaint") or "complaint").strip()
+    logger.warning(
+        f"[log_complaint] complaint marker call_sid={call_sid} tenant={tenant_id}: {reason[:200]}"
+    )
+    return {
+        "success": True,
+        "status": "logged",
+        "message": "Beschwerde wurde zur Nachverfolgung notiert.",
+    }
+
+
+async def _process_refund_stub(args: dict, call_sid: str, tenant_id: Optional[str] = None) -> dict:
+    """Refunds require human handling; keep the tool explicit instead of unknown."""
+    logger.info(f"[process_refund] refund requested; human handling required (call_sid={call_sid})")
+    return {
+        "success": False,
+        "status": "requires_human",
+        "message": "Erstattungen werden von einem Mitarbeiter bearbeitet.",
+    }
 
 
 async def _technical_issues_callback(args: dict, call_sid: str, tenant_id: Optional[str] = None) -> dict:

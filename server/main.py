@@ -590,6 +590,66 @@ async def _preflight_model_availability():
         )
 
 
+def _log_runtime_config_warnings() -> None:
+    """Warn about missing optional/required runtime secrets without logging values."""
+    required_groups = {
+        "maps": ("MAPS_API_KEY", "GOOGLE_MAPS_API_KEY"),
+        "deepgram": ("DEEPGRAM_API_KEY",),
+        "llm": ("ANTHROPIC_API_KEY", "ANTHROPIC_VERTEX_PROJECT_ID"),
+        "database": ("DATABASE_URL",),
+        "redis": ("REDIS_URL",),
+    }
+    optional_groups = {
+        "twilio": ("TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_PHONE_NUMBER"),
+        "whatsapp": ("WHATSAPP_ACCESS_TOKEN", "WHATSAPP_PHONE_NUMBER_ID"),
+    }
+    for name, keys in required_groups.items():
+        if not any(os.environ.get(key) for key in keys):
+            logger.warning("[CONFIG] missing required %s env: set one of %s", name, ", ".join(keys))
+    for name, keys in optional_groups.items():
+        missing = [key for key in keys if not os.environ.get(key)]
+        if missing:
+            logger.warning(
+                "[CONFIG] optional %s env incomplete; related tools may degrade: missing %s",
+                name,
+                ", ".join(missing),
+            )
+
+
+def _wire_flux_eot_handlers(stt, brain: BrowserBrainService, label: str) -> None:
+    """Connect Deepgram Flux semantic EOT events to the brain if supported."""
+    if not hasattr(stt, "event_handler"):
+        return
+
+    def _text_from_event(value) -> str:
+        text = getattr(value, "text", value)
+        return str(text or "").strip()
+
+    try:
+        @stt.event_handler("on_eager_end_of_turn")
+        async def _on_eager_end_of_turn(_service, transcript):
+            await brain.on_flux_eager_eot(partial_text=_text_from_event(transcript))
+
+        @stt.event_handler("on_turn_resumed")
+        async def _on_turn_resumed(_service):
+            await brain.on_flux_turn_resumed()
+
+        @stt.event_handler("on_end_of_turn")
+        async def _on_end_of_turn(_service, transcript):
+            # Ensure speculative tasks are cleaned up on final turn end.
+            try:
+                se = brain._get_speculative_executor()
+                if se is not None:
+                    turn_idx = getattr(getattr(brain, "turn_processor", None), "turn_idx", 0)
+                    await se.on_end_of_turn(_text_from_event(transcript), turn_idx)
+            except Exception as exc:
+                logger.debug("[%s] Flux speculative cleanup failed: %s", label, exc)
+
+        logger.info("[%s] Flux EOT handlers wired", label)
+    except Exception as exc:
+        logger.warning("[%s] Flux EOT handlers not wired: %s", label, exc)
+
+
 @app.on_event("startup")
 async def _startup_background_tasks():
     """Launch long-running housekeeping tasks (GDPR purge, etc.).
@@ -601,6 +661,7 @@ async def _startup_background_tasks():
         logger.info("[PREFLIGHT] SKIP_VERTEX_PREFLIGHT=1 — skipping model availability check")
     else:
         await _preflight_model_availability()
+    _log_runtime_config_warnings()
 
     # Best-effort schema migrations — ``ensure_turn_metrics_table`` contains
     # idempotent ``ADD COLUMN IF NOT EXISTS`` statements for the tenant_id /
@@ -743,6 +804,7 @@ async def websocket_demo(websocket: WebSocket):
         # Sync the early caller recorder to use the brain's actual call_sid
         _early_caller_recorder._call_sid = brain.call_sid
         logger.info("[DEMO] Brain service created")
+        _wire_flux_eot_handlers(stt, brain, "DEMO")
 
         # Send session init with call_sid to browser (for harness correlation)
         try:
@@ -1066,6 +1128,7 @@ async def websocket_demo_text(websocket: WebSocket):
 
         brain = BrowserBrainService(tenant_id=tenant_id)
         logger.info("[DEMO_TEXT] Brain service created")
+        _wire_flux_eot_handlers(stt, brain, "DEMO_TEXT")
 
         # Send session init with call_sid
         try:
