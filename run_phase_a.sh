@@ -32,7 +32,7 @@ if [ "$USE_GCP" = true ]; then
         echo -e "${RED}[ERROR] gcloud CLI not found. Install with: curl https://sdk.cloud.google.com | bash${NC}"
         exit 1
     fi
-    export XAI_API_KEY=$(gcloud secrets versions access latest --secret="xai-REDACTED" 2>/dev/null || echo "")
+    export XAI_API_KEY=$(gcloud secrets versions access latest --secret="REDACTED_XAI_KEY" 2>/dev/null || echo "")
     if [ -z "$XAI_API_KEY" ]; then
         echo -e "${RED}[ERROR] Could not retrieve XAI_API_KEY from Google Secret Manager${NC}"
         exit 1

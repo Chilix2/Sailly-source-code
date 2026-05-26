@@ -26,7 +26,7 @@ Environment=SAILLY_HEALTH_URL=http://localhost:8080/healthz
 ExecStartPre=/bin/bash -c '\
     mkdir -p /run/sailly && \
     if command -v gcloud >/dev/null 2>&1; then \
-        echo "XAI_API_KEY=$(gcloud secrets versions access latest --secret=xai-REDACTED 2>/dev/null || echo "")" > /run/sailly/validation.env && \
+        echo "XAI_API_KEY=$(gcloud secrets versions access latest --secret=REDACTED_XAI_KEY 2>/dev/null || echo "")" > /run/sailly/validation.env && \
         echo "ANTHROPIC_API_KEY=$(gcloud secrets versions access latest --secret=anthropic-api-key 2>/dev/null || echo "")" >> /run/sailly/validation.env && \
         echo "DEEPGRAM_API_KEY=$(gcloud secrets versions access latest --secret=deepgram-api-key 2>/dev/null || echo "")" >> /run/sailly/validation.env && \
         chmod 600 /run/sailly/validation.env; \
