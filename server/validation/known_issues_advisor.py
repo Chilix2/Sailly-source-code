@@ -35,6 +35,7 @@ import json
 import logging
 import re
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -528,6 +529,59 @@ class KnownIssuesAdvisor:
                 tmp_path.unlink(missing_ok=True)
             except Exception:
                 pass
+
+    def record_failed_call(self, failure_data: Dict[str, Any]) -> Optional[str]:
+        """
+        Record a failure from validation or production into known issues database.
+        Auto-creates a new issue if failure doesn't match existing issues.
+
+        Args:
+            failure_data: Dict with keys scenario_id, call_sid, achtung_flags, failure_reasons, etc.
+
+        Returns:
+            issue_id: str of the matched or created issue, None if error
+        """
+        try:
+            scenario_id = failure_data.get("scenario_id", "unknown")
+            flags = failure_data.get("achtung_flags", [])
+            reasons = failure_data.get("failure_reasons", [])
+
+            # Extract flag codes for matching
+            flag_codes = []
+            for flag in flags:
+                if isinstance(flag, dict):
+                    text = flag.get("flag", "")
+                else:
+                    text = str(flag)
+                m = re.search(r"Achtung Sailly:\s*([A-Z_]+)", text, re.IGNORECASE)
+                if m:
+                    flag_codes.append(m.group(1))
+
+            # Create auto-detected issue entry
+            issue_id = f"AUTO_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            new_issue = {
+                "id": issue_id,
+                "title": f"Failed scenario: {scenario_id}",
+                "category": "auto_detected",
+                "severity": "medium",
+                "root_cause": " | ".join(reasons) if reasons else "Unknown failure",
+                "achtung_flags": flag_codes,
+                "observed_examples": [failure_data.get("call_sid", "")],
+                "first_seen": datetime.now().isoformat() + "Z",
+                "source": failure_data.get("source", "production"),
+                "composite_score_on_first_occurrence": failure_data.get("composite_score", 0),
+                "fix_attempts": [],
+            }
+
+            self._issues.append(new_issue)
+            self._save()
+            logger.info(f"[advisor] Auto-recorded failure: {scenario_id} → {issue_id}")
+
+            return issue_id
+
+        except Exception as e:
+            logger.error(f"[advisor] Failed to record failed call: {e}", exc_info=True)
+            return None
 
     @property
     def _library_path(self) -> Path:

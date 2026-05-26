@@ -338,6 +338,15 @@ class FixValidationLoop:
         self._heartbeat: int = 0
         self._results_lock: Optional[asyncio.Lock] = None
         self._state_lock: Optional[asyncio.Lock] = None
+        
+        # Initialize failure ingestor
+        try:
+            from server.failure_ingestor import FailureIngestor
+            self.ingestor = FailureIngestor()
+        except ImportError:
+            logger.warning("FailureIngestor not available")
+            self.ingestor = None
+        
         self._init_buckets()
 
     def _init_buckets(self):
@@ -523,6 +532,19 @@ class FixValidationLoop:
             result["cost_usd"] = round(ct.estimate_usd(), 4)
             runner.set_cost_tracker(None)
             adk.cost_tracker = None
+
+        # Ingest failure into known issues database
+        if not result["pass"] and self.ingestor:
+            self.ingestor.ingest_failure({
+                "scenario_id": result["scenario_id"],
+                "call_sid": getattr(conv, "call_sid", "") if "conv" in locals() else "",
+                "composite_score": result["composite"],
+                "tools_expected": result["expected_tools"],
+                "tools_called": result["tools_called"],
+                "failure_reasons": result["failures"],
+                "passed": result["pass"],
+                "source": "validation",
+            })
 
         return result
 
