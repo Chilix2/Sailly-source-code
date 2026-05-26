@@ -25,9 +25,16 @@ node_modules/
 .next/
 *.wav
 *.mp3
+call_reports/
+reports/
+logs/
+test-infra/**/venv/
+test-infra/**/out/
+.env.backup*
 
 # Backup artifacts (FINDING-025)
 *.bak
+*.bak-*
 *.deploy_bak
 *_backup_*
 .local/backups/

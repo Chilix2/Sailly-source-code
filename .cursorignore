@@ -1,0 +1,25 @@
+
+
+# Cleanup exclusions
+node_modules/
+venv/
+.venv/
+test-infra/**/venv/
+.git/
+.cache/
+.pytest_cache/
+__pycache__/
+dist/
+build/
+.next/
+call_reports/
+reports/
+logs/
+test-infra/**/out/
+*.log
+*.bak
+*.bak-*
+.env
+.env.*
+*.pem
+*.key
