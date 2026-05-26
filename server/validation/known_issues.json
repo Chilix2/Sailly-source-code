@@ -8460,6 +8460,24 @@
         "0/7 personas passing in scenarios with name collection",
         "All scenario attempts fail with this error in the scenario runner log"
       ]
+    },
+    {
+      "id": "AUTO_20260526_095051",
+      "title": "Failed scenario: B1.2_neutral",
+      "category": "auto_detected",
+      "severity": "medium",
+      "root_cause": "Wrong date confirmed | Address validation loop",
+      "achtung_flags": [
+        "DATUM_FALSCH",
+        "BOT_LOOP"
+      ],
+      "observed_examples": [
+        "demo-test-123"
+      ],
+      "first_seen": "2026-05-26T09:50:51.910195Z",
+      "source": "validation",
+      "composite_score_on_first_occurrence": 45.0,
+      "fix_attempts": []
     }
   ],
   "phase_summary": {
