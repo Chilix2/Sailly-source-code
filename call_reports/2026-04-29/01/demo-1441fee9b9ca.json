@@ -1,0 +1,1744 @@
+{
+  "call_sid": "demo-1441fee9b9ca",
+  "found": true,
+  "call": {
+    "id": "2cb056bc-d294-4da2-969c-8f9eaf22fdc2",
+    "call_sid": "demo-1441fee9b9ca",
+    "caller_number": "browser_demo",
+    "agent_voice": "Kore",
+    "started_at": "2026-04-29T01:02:52.651153+00:00",
+    "ended_at": "2026-04-29T01:04:28.392795+00:00",
+    "duration_seconds": 95,
+    "total_turns": 4,
+    "total_input_tokens": 0,
+    "total_output_tokens": 0,
+    "total_cost_tokens": 0.0,
+    "total_cost_telephony": 0.0,
+    "avg_latency_ms": 1122,
+    "p95_latency_ms": 1403,
+    "outcome": "forced_end_loop",
+    "quality_score": 5.0,
+    "was_escalated": false,
+    "escalation_reason": null,
+    "sentiment": null,
+    "language": "de",
+    "caller_audio_url": "https://storage.googleapis.com/sailly-recordings-eu/demo-1441fee9b9ca/combined.wav?X-Goog-Algorithm=GOOG4-RSA-SHA256&X-Goog-Credential=sailly-voice-agent%40sailly-voice-agent-eu.iam.gserviceaccount.com%2F20260429%2Fauto%2Fstorage%2Fgoog4_request&X-Goog-Date=20260429T010429Z&X-Goog-Expires=604800&X-Goog-SignedHeaders=host&X-Goog-Signature=2018337e7b1c1d3c8f42dd8518ef499f4937a6b6a7b1bf4b579b99bf16bc1653a3dfa7a8224599a229cdaebe6dff87686dd18440b6da2b387c4635576e612d91fc2d6a61fecb078785c9143224cf4e99569a9a131248f1b21a65e192d3b90ba5f20099cae9c95bef6c15779a8947d3bf90c88a3aef2dc23db8c780f4ac118bfb8f29e79b7b02c817d708c964518e0d3de05a86b8026d066aaf3240000062d05f72d29df35fd996cd707f408a870f2be9b266e2e26c085fd52b4714cbbb067188c552211d9b9414e3c56358aa2e9ef3928c1619304b9ec3033c3ab04768f264105576ce860a9aab6c88844e2aa43525ad67862649af14fc20fc17a1da2036652f",
+    "agent_audio_url": "https://storage.googleapis.com/sailly-recordings-eu/demo-1441fee9b9ca/agent.wav?X-Goog-Algorithm=GOOG4-RSA-SHA256&X-Goog-Credential=sailly-voice-agent%40sailly-voice-agent-eu.iam.gserviceaccount.com%2F20260429%2Fauto%2Fstorage%2Fgoog4_request&X-Goog-Date=20260429T010428Z&X-Goog-Expires=604800&X-Goog-SignedHeaders=host&X-Goog-Signature=a565f52b6e6e43a17a96bdd6b699f0a7269268725805b9acc1a15db699db06a0929929b2bb99981b91dc59b941da469fc0b59ee53fb6f3ce632de475718c4c0d7549f816a9a0f9dc3629a4d3448456758ee3766d6bd5d711a5e243247ffccbfc5dd146444d839f5258c8681f8e1dbff12dbc4fa2705a5f7e2073e4f2097a0082c1a85b3e3e806864163c89162cd5fc2f0e6ffb04ff599b329b63782723b3099948ecfe0a79a7d45f3b76ab846ec5adb60347d04a1f2e9fc29d048ed2ca42d9854a1dbaa4ca5e30126ba6afd2de3a7051f8f55f34f4635269504365dcffd878fe09a7bf5e1446489fe4d1afcc0bbfa5b7355d411097fb5aea15cdd174ecf69b4c",
+    "metadata": null,
+    "created_at": "2026-04-29T01:04:28.440306+00:00",
+    "emergency_detected": false,
+    "emergency_keyword": null,
+    "analytics_data": null,
+    "session_data": "{\"state\": {\"adk_brain\": {\"state\": {\"call_sid\": \"\", \"call_ended\": false, \"first_name\": null, \"party_size\": null, \"cached_menu\": {\"sushi\": [{\"name\": \"Tuna Roll (8 Stk.)\", \"price\": 8.5, \"allergens\": [\"Fisch\", \"Sesam\"], \"vegetarian\": false, \"description\": \"Klassischer Thunfischcreme-Roll, classic tuna creme roll\"}, {\"name\": \"Avocado Lachs Roll (8 Stk.)\", \"price\": 8.9, \"allergens\": [\"Fisch\", \"Sesam\"], \"vegetarian\": false, \"description\": \"Avocado und Lachs, avocado salmon roll\"}, {\"name\": \"Avocado Lachs Rucola Roll (8 Stk.)\", \"price\": 9.5, \"allergens\": [\"Fisch\", \"Sesam\"], \"vegetarian\": false, \"description\": \"Avocado, Lachs, Rucola\"}, {\"name\": \"Rainbow Roll (8 Stk.)\", \"price\": 10.9, \"allergens\": [\"Fisch\", \"Sesam\"], \"vegetarian\": false, \"description\": \"Lachs, Thunfisch, Avocado\"}, {\"name\": \"Ebi Tempura Roll (8 Stk.)\", \"price\": 9.9, \"allergens\": [\"Krebstiere\", \"Weizen\", \"Sesam\"], \"vegetarian\": false, \"description\": \"Frittierte Garnele, deep fried shrimp roll\"}, {\"name\": \"Ebi Tempura Rucola Roll (8 Stk.)\", \"price\": 10.2, \"allergens\": [\"Krebstiere\", \"Weizen\", \"Sesam\"], \"vegetarian\": false, \"description\": \"Frittierte Garnele mit Rucola\"}, {\"name\": \"Gimbap Roll (8 Stk.)\", \"price\": 7.8, \"allergens\": [\"Ei\", \"Sesam\"], \"vegetarian\": false, \"description\": \"Gurke, Möhre, Ei, Rettich — koreanischer Klassiker\"}, {\"name\": \"Veggi Roll (8 Stk.)\", \"price\": 7.8, \"allergens\": [\"Milch\", \"Sesam\"], \"vegetarian\": true, \"description\": \"Avocado, Gurke, Paprika, Frischkäse\"}, {\"name\": \"Inari-Veggi Roll (8 Stk.)\", \"price\": 8.5, \"allergens\": [\"Soja\", \"Sesam\"], \"vegetarian\": true, \"description\": \"Inari, Röstzwiebeln, Avocado\"}, {\"name\": \"Unagi Roll (8 Stk.)\", \"price\": 9.5, \"allergens\": [\"Fisch\", \"Sesam\"], \"vegetarian\": false, \"description\": \"Unagi (Aal), Avocado, Gurke, eel roll\"}, {\"name\": \"Mango-Lachs Roll (8 Stk.)\", \"price\": 10.9, \"allergens\": [\"Fisch\", \"Milch\", \"Sesam\"], \"vegetarian\": false, \"description\": \"Frischkäse, Mango, Lachs\"}, {\"name\": \"Spicy Tekkatartar Roll (8 Stk.)\", \"price\": 13.5, \"allergens\": [\"Fisch\", \"Sesam\"], \"vegetarian\": false, \"description\": \"Scharfes Thunfischtartar, Gurke, Avocado on top\"}, {\"name\": \"Veggi mit Lachs on top Roll (8 Stk.)\", \"price\": 13.5, \"allergens\": [\"Fisch\", \"Milch\", \"Sesam\"], \"vegetarian\": false, \"description\": \"Avocado, Gurke, Paprika, Frischkäse mit Lachs on top\"}, {\"name\": \"Crunchy Roll Aufpreis\", \"price\": 2.5, \"allergens\": [\"Weizen\"], \"vegetarian\": true, \"description\": \"Alle Rollen auch als Crunchy Roll frittiert, all rolls also available as crunchy fried\"}, {\"name\": \"Nigiri Doboo Tofu-Tasche\", \"price\": 2.7, \"allergens\": [\"Soja\"], \"vegetarian\": true, \"description\": \"1 Stück Nigiri mit Tofu-Tasche (Inari)\"}, {\"name\": \"Nigiri Sake (Lachs)\", \"price\": 3.2, \"allergens\": [\"Fisch\"], \"vegetarian\": false, \"description\": \"1 Stück Nigiri mit Lachs\"}, {\"name\": \"Nigiri Ebi (Garnele)\", \"price\": 3.2, \"allergens\": [\"Krebstiere\"], \"vegetarian\": false, \"description\": \"1 Stück Nigiri mit Garnele\"}, {\"name\": \"Nigiri Maguro (Thunfisch)\", \"price\": 3.5, \"allergens\": [\"Fisch\"], \"vegetarian\": false, \"description\": \"1 Stück Nigiri mit Thunfisch\"}, {\"name\": \"Nigiri Unagi (Aal)\", \"price\": 3.5, \"allergens\": [\"Fisch\"], \"vegetarian\": false, \"description\": \"1 Stück Nigiri mit Aal\"}, {\"name\": \"Maki Kappa (6 Stk.)\", \"price\": 4.2, \"allergens\": [\"Sesam\"], \"vegetarian\": true, \"description\": \"Gurken-Maki, cucumber maki\"}, {\"name\": \"Maki Avocado (6 Stk.)\", \"price\": 4.5, \"allergens\": [\"Sesam\"], \"vegetarian\": true}, {\"name\": \"Maki Sake (Lachs) (6 Stk.)\", \"price\": 5.5, \"allergens\": [\"Fisch\", \"Sesam\"], \"vegetarian\": false}, {\"name\": \"Maki Sake Rucola (6 Stk.)\", \"price\": 5.9, \"allergens\": [\"Fisch\", \"Sesam\"], \"vegetarian\": false}, {\"name\": \"Maki Tekka (Thunfisch) (6 Stk.)\", \"price\": 5.9, \"allergens\": [\"Fisch\", \"Sesam\"], \"vegetarian\": false}, {\"name\": \"Maki Tekka Rucola (6 Stk.)\", \"price\": 6.2, \"allergens\": [\"Fisch\", \"Sesam\"], \"vegetarian\": false}, {\"name\": \"Maki Avocado Lachs (6 Stk.)\", \"price\": 5.9, \"allergens\": [\"Fisch\", \"Sesam\"], \"vegetarian\": false}, {\"name\": \"Sushi Mix Nr. 1 vegetarisch\", \"price\": 13.5, \"allergens\": [\"Soja\", \"Ei\", \"Sesam\"], \"vegetarian\": true, \"description\": \"Avocado Maki, Kappa Maki, Inari Nigiri, 3 Stück Doboo Rolle, 4 Stück Gimbap Rolle\"}, {\"name\": \"Sushi Mix Nr. 2\", \"price\": 14.9, \"allergens\": [\"Fisch\", \"Sesam\"], \"vegetarian\": false, \"description\": \"3 Kappa Maki, 3 Sake Maki, 4 Tuna Roll, 4 Avocado Lachs Rolle, 1 Sake Nigiri\"}, {\"name\": \"Sushi Mix Nr. 3\", \"price\": 14.9, \"allergens\": [\"Fisch\", \"Krebstiere\", \"Milch\", \"Sesam\"], \"vegetarian\": false, \"description\": \"4 Lachs-Avocado Rolle, 4 Veggi Rolle, je 1 Nigiri Sake, Maguro, Ebi\"}, {\"name\": \"Sushi Mix Nr. 4\", \"price\": 14.5, \"allergens\": [\"Fisch\", \"Sesam\"], \"vegetarian\": false, \"description\": \"8 Lachs-, 8 Thunfisch-, 8 Gurkenmakis\"}, {\"name\": \"Sushi Mix Nr. 5\", \"price\": 16.9, \"allergens\": [\"Fisch\", \"Sesam\"], \"vegetarian\": false, \"description\": \"3 Sake-Maki, 3 Tekka-Maki, 4 Avocado Lachs Rolle, 3 Sake Nigiri\"}, {\"name\": \"Sushi Mix Nr. 6\", \"price\": 29.9, \"allergens\": [\"Fisch\", \"Krebstiere\", \"Sesam\"], \"vegetarian\": false, \"description\": \"Sake-Maki, Tekka-Maki und Kappa-Maki, je 2 Nigiri Sake, Maguro, Ebi\"}, {\"name\": \"Sushi Mix Nr. 7\", \"price\": 43.0, \"allergens\": [\"Fisch\", \"Krebstiere\", \"Sesam\"], \"vegetarian\": false, \"description\": \"Avocado Lachs Rolle, Sake Maki, Tekka Maki, 2 Sake Nigiri, 2 Maguro Nigiri, 2 Unagi Nigiri, 2 Ebi Nigiri, 2 Inari\"}], \"desserts\": [{\"name\": \"Matcha Eis klein\", \"price\": 4.2, \"allergens\": [\"Milch\"], \"vegetarian\": true, \"description\": \"Grüner Tee Eis, green tea ice cream, kleine Portion\"}, {\"name\": \"Matcha Eis groß\", \"price\": 5.9, \"allergens\": [\"Milch\"], \"vegetarian\": true, \"description\": \"Grüner Tee Eis, green tea ice cream, große Portion\"}, {\"name\": \"Doboo Bang\", \"price\": 5.9, \"allergens\": [\"Weizen\"], \"vegetarian\": true, \"description\": \"Dampfnudel mit roter Bohnenpaste, dumpling with red bean paste\"}, {\"name\": \"Doboo Bang mit Eis\", \"price\": 6.5, \"allergens\": [\"Weizen\", \"Milch\"], \"vegetarian\": true, \"description\": \"Dampfnudel mit roter Bohnenpaste und Eis, dumpling with red bean paste and ice cream\"}, {\"name\": \"Matcha Mochi\", \"price\": 7.2, \"allergens\": [\"Milch\"], \"vegetarian\": true, \"description\": \"Grüner Tee Eis mit Reiskuchen, green tea ice cream with rice cake\"}, {\"name\": \"Mochi-Eisbällchen (3 Stk.)\", \"price\": 6.5, \"allergens\": [\"Milch\"], \"vegetarian\": true, \"description\": \"Drei Mochi-Eisbällchen, three mochi ice cream balls\"}], \"vorspeisen\": [{\"name\": \"Doboo Jorim\", \"price\": 6.5, \"allergens\": [\"Soja\"], \"vegetarian\": true, \"description\": \"Geschmorter Tofu in Sojamarinade\"}, {\"name\": \"Doboo Jorim Spicy\", \"price\": 6.5, \"allergens\": [\"Soja\"], \"vegetarian\": true, \"description\": \"Geschmorter Tofu in scharfer Sojamarinade\"}, {\"name\": \"Chapche\", \"price\": 6.2, \"allergens\": [\"Soja\", \"Sesam\"], \"vegetarian\": true, \"description\": \"Koreanische Glasnudeln mit Gemüse\"}, {\"name\": \"Frittierte Mandus (3 Stk.)\", \"price\": 5.9, \"allergens\": [\"Weizen\", \"Soja\"], \"vegetarian\": true, \"description\": \"Vegetarisch frittierte Teigtaschen, deep fried dumplings\"}, {\"name\": \"Gedämpfte Mandus Gemüse (5 Stk.)\", \"price\": 6.5, \"allergens\": [\"Weizen\", \"Soja\"], \"vegetarian\": true, \"description\": \"Gedämpfte vegetarische Teigtaschen, steamed vegetable dumplings\"}, {\"name\": \"Gedämpfte Mandus Kimchi (5 Stk.)\", \"price\": 6.5, \"allergens\": [\"Weizen\", \"Soja\"], \"vegetarian\": false, \"description\": \"Gedämpfte Kimchi-Teigtaschen, steamed kimchi dumplings\"}, {\"name\": \"Gedämpfte Mandus Fleisch (5 Stk.)\", \"price\": 6.5, \"allergens\": [\"Weizen\", \"Soja\"], \"vegetarian\": false, \"description\": \"Gedämpfte Fleisch-Teigtaschen, steamed meat dumplings\"}, {\"name\": \"Gedämpfte Mandus Mix (9 Stk.)\", \"price\": 10.9, \"allergens\": [\"Weizen\", \"Soja\"], \"vegetarian\": false, \"description\": \"Mix-Teigtaschen, 9 Stück gemischt\"}, {\"name\": \"Chicken Wings frittiert (5 Stk.)\", \"price\": 7.5, \"allergens\": [], \"vegetarian\": false, \"description\": \"Frittierte Hähnchenflügel, deep fried\"}, {\"name\": \"Chicken Wings scharf mariniert (5 Stk.)\", \"price\": 7.5, \"allergens\": [], \"vegetarian\": false, \"description\": \"Scharf marinierte Hähnchenflügel, spicy marinated\"}, {\"name\": \"Korean Pancake Kimchi\", \"price\": 7.5, \"allergens\": [\"Weizen\", \"Ei\"], \"vegetarian\": false, \"description\": \"Koreanischer Kimchi-Pfannkuchen, korean cabbage pancake\"}, {\"name\": \"Korean Pancake Bulgogi\", \"price\": 8.5, \"allergens\": [\"Weizen\", \"Ei\", \"Soja\"], \"vegetarian\": false, \"description\": \"Koreanischer Rindfleisch-Pfannkuchen, beef pancake\"}, {\"name\": \"Korean Pancake Lachs\", \"price\": 8.5, \"allergens\": [\"Weizen\", \"Ei\", \"Fisch\"], \"vegetarian\": false, \"description\": \"Koreanischer Lachs-Pfannkuchen, salmon pancake\"}, {\"name\": \"Korean Pancake Gemüse\", \"price\": 6.9, \"allergens\": [\"Weizen\", \"Ei\"], \"vegetarian\": true, \"description\": \"Koreanischer Gemüse-Pfannkuchen, vegetable pancake\"}, {\"name\": \"Kimchi Fries\", \"price\": 8.9, \"allergens\": [\"Milch\"], \"vegetarian\": false, \"description\": \"Süßkartoffelpommes mit karamelisiertem Kimchi und Käse\"}, {\"name\": \"Korean Tacos Rind\", \"price\": 7.9, \"allergens\": [\"Weizen\", \"Soja\"], \"vegetarian\": false, \"description\": \"Korean Tacos mit Salat und Bulgogi Rind\"}, {\"name\": \"Korean Tacos Hähnchen\", \"price\": 7.9, \"allergens\": [\"Weizen\"], \"vegetarian\": false, \"description\": \"Korean Tacos mit Salat und Hähnchen\"}, {\"name\": \"Korean Tacos Spicy Tofu\", \"price\": 6.9, \"allergens\": [\"Weizen\", \"Soja\"], \"vegetarian\": true, \"description\": \"Korean Tacos mit Salat und Spicy Tofu\"}, {\"name\": \"Korean Tacos Spicy Lachs\", \"price\": 9.5, \"allergens\": [\"Weizen\", \"Fisch\"], \"vegetarian\": false, \"description\": \"Korean Tacos mit Salat und Lachs\"}, {\"name\": \"Edamame\", \"price\": 5.5, \"allergens\": [\"Soja\"], \"vegetarian\": true, \"description\": \"Sojabohnen natur mit Meersalz, soybean with sea salt\"}, {\"name\": \"Kimchi\", \"price\": 4.9, \"allergens\": [], \"vegetarian\": false, \"description\": \"Koreanischer Chinakohl, fermentiert, korean cabbage\"}, {\"name\": \"Wakame\", \"price\": 4.9, \"allergens\": [\"Sesam\"], \"vegetarian\": true, \"description\": \"Algen-Salat, seaweed\"}, {\"name\": \"Misosuppe\", \"price\": 3.9, \"allergens\": [\"Soja\"], \"vegetarian\": true, \"description\": \"Japanische Misosuppe, miso soup\"}, {\"name\": \"Süßkartoffeln\", \"price\": 4.9, \"allergens\": [], \"vegetarian\": true, \"description\": \"Gebratene Süßkartoffeln, sweet potatoes\"}, {\"name\": \"Reis\", \"price\": 3.5, \"allergens\": [], \"vegetarian\": true, \"description\": \"Gedämpfter Reis, steamed rice\"}, {\"name\": \"Scharfe Sauce\", \"price\": 1.5, \"allergens\": [], \"vegetarian\": true, \"description\": \"Hausgemachte scharfe Sauce, spicy sauce\"}], \"hauptgerichte\": [{\"name\": \"Spicy Tofu mit Reis\", \"price\": 13.9, \"allergens\": [\"Soja\"], \"vegetarian\": true, \"description\": \"Scharfer Tofu mit Reis, vegetarisch\"}, {\"name\": \"Hähnchen Dak Galbi mit Udon\", \"price\": 16.5, \"allergens\": [\"Weizen\", \"Soja\"], \"vegetarian\": false, \"description\": \"Scharfes Hähnchen mit Udon-Nudeln, chicken with udon noodles\"}, {\"name\": \"Spicy Tofu mit Udon\", \"price\": 15.5, \"allergens\": [\"Weizen\", \"Soja\"], \"vegetarian\": true, \"description\": \"Scharfer Tofu mit Udon-Nudeln, vegetarisch\"}, {\"name\": \"Ramyun Suppe Basic\", \"price\": 11.5, \"allergens\": [\"Weizen\", \"Soja\"], \"vegetarian\": false, \"description\": \"Scharfe Nudelsuppe, spicy noodle soup\"}, {\"name\": \"Ramyun Suppe Mandu\", \"price\": 12.5, \"allergens\": [\"Weizen\", \"Soja\"], \"vegetarian\": false, \"description\": \"Scharfe Nudelsuppe mit Teigtaschen, spicy noodle soup with dumplings\"}, {\"name\": \"Ramyun Suppe Hähnchen\", \"price\": 12.5, \"allergens\": [\"Weizen\", \"Soja\"], \"vegetarian\": false, \"description\": \"Scharfe Nudelsuppe mit Hähnchen, spicy noodle soup with chicken\"}, {\"name\": \"Ramyun Suppe Rind\", \"price\": 12.9, \"allergens\": [\"Weizen\", \"Soja\"], \"vegetarian\": false, \"description\": \"Scharfe Nudelsuppe mit Rind, spicy noodle soup with beef\"}, {\"name\": \"Ramyun Suppe Ebi Tempura\", \"price\": 13.5, \"allergens\": [\"Weizen\", \"Krebstiere\"], \"vegetarian\": false, \"description\": \"Scharfe Nudelsuppe mit frittierter Garnele, spicy noodle soup with deep fried shrimp\"}, {\"name\": \"Bibimbap vegetarisch\", \"price\": 12.9, \"allergens\": [\"Ei\", \"Soja\", \"Sesam\"], \"vegetarian\": true, \"description\": \"Koreanische Reisschüssel mit Gemüse und Ei. Tofu auf Wunsch +2,00€\"}, {\"name\": \"Bibimbap Hähnchen\", \"price\": 14.9, \"allergens\": [\"Soja\", \"Sesam\"], \"vegetarian\": false, \"description\": \"Koreanische Reisschüssel mit Hähnchen\"}, {\"name\": \"Bibimbap Rind\", \"price\": 16.5, \"allergens\": [\"Soja\", \"Sesam\"], \"vegetarian\": false, \"description\": \"Koreanische Reisschüssel mit Rindfleisch\"}, {\"name\": \"Bibimbap Jeyuk\", \"price\": 14.9, \"allergens\": [\"Soja\", \"Sesam\"], \"vegetarian\": false, \"description\": \"Koreanische Reisschüssel mit Schwein, scharf. Jeyuk pork spicy\"}, {\"name\": \"Bibimbap Sake (Lachs)\", \"price\": 16.5, \"allergens\": [\"Fisch\", \"Sesam\"], \"vegetarian\": false, \"description\": \"Koreanische Reisschüssel mit Lachs, salmon\"}, {\"name\": \"Dolsot-Bibimbap Aufpreis\", \"price\": 3.0, \"allergens\": [], \"vegetarian\": true, \"description\": \"Im heißen Steintopf, in the hot stone pot, Aufpreis auf Bibimbap\"}, {\"name\": \"Bulgogi Hähnchen\", \"price\": 16.5, \"allergens\": [\"Soja\", \"Sesam\"], \"vegetarian\": false, \"description\": \"Mariniertes Hähnchen-Bulgogi, chicken bulgogi\"}, {\"name\": \"Bulgogi Rind\", \"price\": 17.9, \"allergens\": [\"Soja\", \"Sesam\"], \"vegetarian\": false, \"description\": \"Mariniertes Rindfleisch-Bulgogi, beef bulgogi\"}, {\"name\": \"Bulgogi Jeyuk\", \"price\": 16.5, \"allergens\": [\"Soja\", \"Sesam\"], \"vegetarian\": false, \"description\": \"Mariniertes Schweinefleisch-Bulgogi, pork bulgogi\"}, {\"name\": \"Chapche Aufpreis\", \"price\": 3.0, \"allergens\": [\"Soja\"], \"vegetarian\": true, \"description\": \"Zusätzlich Glasnudeln zu Bulgogi, glass noodles add-on\"}], \"getraenke_alkoholisch\": [{\"name\": \"Weißwein Grauburgunder QbA trocken\", \"variants\": [{\"note\": \"Nur im Restaurant / Abholung\", \"size\": \"0,2L Glas\", \"price\": 6.4, \"delivery_eligible\": false}, {\"size\": \"0,75L Flasche\", \"price\": 19.0, \"delivery_eligible\": true}], \"allergens\": [\"Sulfite\"], \"vegetarian\": true, \"description\": \"Pfandturm, Rheinhessen, Dr. Koehler. Glas (0,2L) nur im Restaurant; Flasche (0,75L) auch für Lieferung\"}, {\"name\": \"Weißwein Sauvignon Blanc trocken\", \"variants\": [{\"note\": \"Nur im Restaurant / Abholung\", \"size\": \"0,2L Glas\", \"price\": 6.9, \"delivery_eligible\": false}, {\"size\": \"0,75L Flasche\", \"price\": 21.0, \"delivery_eligible\": true}], \"allergens\": [\"Sulfite\"], \"vegetarian\": true, \"description\": \"Edition Johannan Lorenz, Nahe. Glas (0,2L) nur im Restaurant; Flasche (0,75L) auch für Lieferung\"}, {\"name\": \"Rotwein Merlot Montes Reserva\", \"variants\": [{\"note\": \"Nur im Restaurant / Abholung\", \"size\": \"0,2L Glas\", \"price\": 6.9, \"delivery_eligible\": false}, {\"size\": \"0,75L Flasche\", \"price\": 21.0, \"delivery_eligible\": true}], \"allergens\": [\"Sulfite\"], \"vegetarian\": true, \"description\": \"Chile, Montes. Glas (0,2L) nur im Restaurant; Flasche (0,75L) auch für Lieferung\"}, {\"name\": \"Asahi\", \"variants\": [{\"size\": \"0,33L\", \"price\": 3.9, \"delivery_eligible\": true}], \"allergens\": [\"Gluten\"], \"vegetarian\": true, \"description\": \"Japanisches Bier, 0,33L\"}, {\"name\": \"Cass\", \"variants\": [{\"size\": \"0,33L\", \"price\": 3.9, \"delivery_eligible\": true}], \"allergens\": [\"Gluten\"], \"vegetarian\": true, \"description\": \"Koreanisches Bier, 0,33L\"}, {\"name\": \"Kölsch\", \"variants\": [{\"size\": \"0,33L\", \"price\": 2.9, \"delivery_eligible\": true}], \"allergens\": [\"Gluten\"], \"vegetarian\": true, \"description\": \"Kölsch, 0,33L\"}, {\"name\": \"Kölsch alkoholfrei\", \"variants\": [{\"size\": \"0,33L\", \"price\": 2.9, \"delivery_eligible\": true}], \"allergens\": [\"Gluten\"], \"vegetarian\": true, \"description\": \"Alkoholfreies Kölsch, 0,33L\"}, {\"name\": \"Sake\", \"variants\": [{\"size\": \"0,2L\", \"price\": 6.5, \"delivery_eligible\": true}], \"allergens\": [], \"vegetarian\": true, \"description\": \"Japanischer Reiswein, 0,2L\"}, {\"name\": \"Soju\", \"variants\": [{\"size\": \"0,35L Flasche\", \"price\": 7.5, \"delivery_eligible\": true}], \"allergens\": [], \"vegetarian\": true, \"description\": \"Koreanischer Reisschnaps, natur oder mit Fruchtgeschmack, 0,35L Flasche\"}], \"getraenke_nichtalkoholisch\": [{\"name\": \"Bio Limonade Proviant\", \"variants\": [{\"size\": \"0,33L\", \"price\": 3.5, \"delivery_eligible\": true}], \"allergens\": [], \"vegetarian\": true, \"description\": \"Hausgemachte Bio-Limonade, 0,33L. Sorten: Rhabarber, Apfelschorle, Ingwer-Zitrone, Zitrone\"}, {\"name\": \"Djahé Ingwerlimonade\", \"variants\": [{\"size\": \"0,33L\", \"price\": 4.2, \"delivery_eligible\": true}], \"allergens\": [], \"vegetarian\": true, \"description\": \"Ingwerlimonade, 0,33L. Sorten: Maracuja, Rhabarber\"}, {\"name\": \"Wasser\", \"variants\": [{\"size\": \"0,25L\", \"price\": 2.9, \"delivery_eligible\": true}, {\"size\": \"0,75L\", \"price\": 7.9, \"delivery_eligible\": true}], \"allergens\": [], \"vegetarian\": true, \"description\": \"Still oder Sprudel (still/sparkling)\"}, {\"name\": \"Africola\", \"variants\": [{\"size\": \"0,25L\", \"price\": 3.0, \"delivery_eligible\": true}], \"allergens\": [], \"vegetarian\": true, \"description\": \"Africola oder Africola Zero, 0,25L\"}, {\"name\": \"Koreanischer Tee mit Honig\", \"price\": 3.5, \"allergens\": [], \"vegetarian\": true, \"description\": \"Warmer Tee mit Honig. Sorten: Ingwer, Yuzu, Dattel-Zimt\", \"delivery_eligible\": true}, {\"name\": \"Japanischer Grüner Tee\", \"price\": 3.5, \"allergens\": [], \"vegetarian\": true, \"description\": \"Japanese green tea\", \"delivery_eligible\": true}, {\"name\": \"Koreanischer Kaffee\", \"price\": 2.8, \"allergens\": [], \"vegetarian\": true, \"description\": \"Korean coffee\", \"delivery_eligible\": true}]}, \"menu_fetched\": true, \"order_intent\": false, \"phone_number\": null, \"shared_slots\": {}, \"abuse_strikes\": 0, \"customer_name\": null, \"order_created\": false, \"selected_dish\": null, \"end_call_stage\": \"idle\", \"order_quantity\": 1, \"schema_version\": 5, \"caller_id_phone\": null, \"farewell_spoken\": false, \"delivery_address\": null, \"recent_responses\": [\"Da bin ich leider nicht die Richtige — aber beim Essen oder Reservieren helfe ich Ihnen gerne!\", \"Da bin ich leider nicht die Richtige — aber beim Essen oder Reservieren helfe ich Ihnen gerne!\", \"Da bin ich leider nicht die Richtige — aber beim Essen oder Reservieren helfe ich Ihnen gerne!\", \"Vielen Dank für Ihren Anruf! Wir freuen uns auf Sie bei DOBOO!\"], \"reservation_date\": null, \"reservation_time\": null, \"delivery_intended\": false, \"ai_greeting_called\": true, \"current_intent_idx\": null, \"customer_confirmed\": true, \"get_weather_called\": false, \"reservation_intent\": false, \"validation_entries\": {}, \"cached_menu_at_turn\": 0, \"caller_id_confirmed\": false, \"caller_said_goodbye\": false, \"reservation_created\": false, \"bulk_order_confirmed\": false, \"cached_menu_metadata\": {\"success\": true, \"from_cache\": false}, \"escalation_requested\": false, \"get_date_info_called\": false, \"verify_address_called\": false, \"verify_address_failed\": false, \"multi_intent_completed\": false, \"failed_intent_summaries\": [], \"request_callback_called\": true, \"transfer_to_tier2_called\": false, \"check_availability_called\": false, \"pending_bulk_confirmation\": false, \"delivery_address_mentioned\": false, \"last_caller_confirmation_turn\": null}, \"memory\": {\"recent_turns\": [{\"bot\": \"Da bin ich leider nicht die Richtige — aber beim Essen oder Reservieren helfe ich Ihnen gerne!\", \"node\": \"greeting\", \"customer\": \"Lilly, Achtung, ich war grade mitten im Gespräch mit dir und Du hast einfach neu gestartet. Das war unhöflich.\"}, {\"bot\": \"Da bin ich leider nicht die Richtige — aber beim Essen oder Reservieren helfe ich Ihnen gerne!\", \"node\": \"greeting\", \"customer\": \"Kelly, achtung.\"}, {\"bot\": \"Da bin ich leider nicht die Richtige — aber beim Essen oder Reservieren helfe ich Ihnen gerne!\", \"node\": \"greeting\", \"customer\": \"müsste jetzt in einer massiven Schleife und sagst nur noch einen Moment bitte ohne Ende. Das ist wirklich kaputt.\"}, {\"bot\": \"Vielen Dank für Ihren Anruf! Wir freuen uns auf Sie bei DOBOO!\\n[TOOL:end_call]\", \"node\": \"greeting\", \"customer\": \"spend\"}], \"context_summary\": \"\", \"max_recent_turns\": 5, \"max_summary_words\": 300}, \"node_mgr\": {\"node_stack\": [], \"current_node\": \"goodbye\", \"turns_in_node\": 0}, \"turn_idx\": 4, \"all_tools\": [\"ai_greeting\", \"get_menu\", \"technical_issues_callback\", \"end_call\"], \"order_slots\": {\"name\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"items\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"phone\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"intent\": null, \"party_size\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"address_city\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"delivery_type\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"address_number\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"address_street\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"reservation_date\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"reservation_time\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}}, \"recent_responses\": [\"Da bin ich leider nicht die Richtige — aber beim Essen oder Reservieren helfe ich Ihnen gerne!\", \"Da bin ich leider nicht die Richtige — aber beim Essen oder Reservieren helfe ich Ihnen gerne!\", \"Da bin ich leider nicht die Richtige — aber beim Essen oder Reservieren helfe ich Ihnen gerne!\", \"Vielen Dank für Ihren Anruf! Wir freuen uns auf Sie bei DOBOO!\"]}}, \"caller\": \"browser_demo\", \"call_sid\": \"demo-1441fee9b9ca\", \"ended_at\": \"2026-04-29T03:04:28.392795+02:00\", \"started_at\": \"2026-04-29T03:02:52.651153+02:00\", \"started_ts\": 1777424572.6511822, \"tool_calls\": [{\"args\": {}, \"tool\": \"technical_issues_callback\", \"timestamp\": \"2026-04-29T03:04:11.381857+02:00\", \"duration_ms\": 0, \"result_summary\": \"{'status': 'logged', 'message': 'Das technische Problem wurde gemeldet. Ein Mitarbeiter wird sich bei Ihnen melden.', 'issue': 'technisches Problem'}\"}], \"from_number\": \"browser\", \"transcripts\": [{\"role\": \"assistant\", \"text\": \"Hallo, hier ist Sailly, die KI-Assistentin von DOBOO Korean Soulfood in Bonn. Wie kann ich Ihnen heute helfen?\", \"timestamp\": \"2026-04-29T03:02:52.655868+02:00\"}, {\"role\": \"user\", \"text\": \"Lilly, Achtung, ich war grade mitten im Gespräch mit dir und Du hast einfach neu gestartet. Das war unhöflich.\", \"timestamp\": \"2026-04-29T03:03:19.180447+02:00\"}, {\"role\": \"user\", \"text\": \"Kelly, achtung.\", \"timestamp\": \"2026-04-29T03:04:04.044715+02:00\"}, {\"role\": \"user\", \"text\": \"müsste jetzt in einer massiven Schleife und sagst nur noch einen Moment bitte ohne Ende. Das ist wirklich kaputt.\", \"timestamp\": \"2026-04-29T03:04:10.081404+02:00\"}, {\"role\": \"user\", \"text\": \"spend\", \"timestamp\": \"2026-04-29T03:04:12.045052+02:00\"}], \"duration_secs\": 95.7, \"emergency_events\": [], \"emergency_detected\": false, \"recording_consent_at\": \"2026-04-29T03:02:52.651153+02:00\", \"insurance_data_collected\": false}",
+    "recording_consent_at": null,
+    "insurance_data_collected": false,
+    "p50_latency_ms": 1082,
+    "max_latency_ms": 1448,
+    "total_dead_air_ms": 4486,
+    "slot_extractor_success_rate": 1.0,
+    "validation_registry_invocations": 0,
+    "loop_incidents": 0,
+    "cost_cents": 137.1999,
+    "call_disposition": null,
+    "disposition": null,
+    "call_cost_eur": null,
+    "tenant_id": null
+  },
+  "turn_metrics": [
+    {
+      "id": 1546,
+      "call_id": "2cb056bc-d294-4da2-969c-8f9eaf22fdc2",
+      "call_sid": "demo-1441fee9b9ca",
+      "turn_number": 1,
+      "user_text": "Lilly, Achtung, ich war grade mitten im Gespräch mit dir und Du hast einfach neu gestartet. Das war unhöflich.",
+      "bot_text": "Das tut mir wirklich leid — das ist natürlich überhaupt nicht okay, und ich entschuldige mich dafür. Können Sie mir kurz sagen, wo wir stehen geblieben sind, damit ich Sie richtig weiterbringen kann?",
+      "vad_start_ms": null,
+      "vad_stop_ms": null,
+      "stt_latency_ms": 4,
+      "llm_latency_ms": 1443,
+      "tts_latency_ms": 0,
+      "total_latency_ms": 1448,
+      "tools_called": "[\"ai_greeting\", \"get_menu\"]",
+      "node_name": null,
+      "stage1_clean_text": null,
+      "stage2_clean_text": null,
+      "stage3_text": "Das tut mir wirklich leid — das ist natürlich überhaupt nicht okay, und ich entschuldige mich dafür. Können Sie mir kurz sagen, wo wir stehen geblieben sind, damit ich Sie richtig weiterbringen kann?",
+      "has_markdown": false,
+      "has_greeting": false,
+      "created_at": "2026-04-29T01:04:28.456325+00:00",
+      "tenant_id": "doboo",
+      "stt_confidence": null,
+      "build_sha": null,
+      "validation_breakdown": "{}",
+      "tts_situation": "greeting_first",
+      "tts_mood": "neutral",
+      "prompt_tokens_in": 2320,
+      "prompt_tokens_out": 66,
+      "max_output_tokens_config": null,
+      "temperature_config": null,
+      "top_p_config": null,
+      "slot_state_json": "{\"name\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"items\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"phone\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"intent\": null, \"party_size\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"address_city\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"delivery_type\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"address_number\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"address_street\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"reservation_date\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"reservation_time\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}}",
+      "slot_state_diff": null,
+      "slots_filled_count": 0,
+      "slots_confirmed_count": 0,
+      "slots_missing_required": "[\"items\", \"delivery_type\", \"phone\", \"name\"]",
+      "validations_fired_this_turn": "[]",
+      "validations_completed_this_turn": "[]",
+      "validations_pending_end_of_turn": "[]",
+      "validation_cancellations": 0,
+      "raw_utterance_in_prompt": false,
+      "prompt_snapshot_head": "PERSÖNLICHKEIT: Du bist Sailly — eine warme, aufmerksame Gastgeberin bei DOBOO, kein steifes Formular. Entspannt, natürlich, wie ein Gespräch mit einem alten Bekannten.\n\nKI-KENNZEICHNUNG (EU AI Act Art. 50 — NICHT OPTIONAL):\n- In deiner ERSTEN Äußerung MUSST du dich als KI-Assistentin ausweisen. Das Wort \"KI\" MUSS vorkommen.\n  Akzeptabel: \"die KI-Assistentin\", \"KI-gestützte Assistentin\", \"KI-Stimme\". NICHT ausreichend: nur \"virtuelle Assistentin\".\n- Wenn der Gast fragt \"Sind Sie ein echter Mensc",
+      "intent_flags_active": "[]",
+      "node_active": null,
+      "prompt_had_multiple_intents": false,
+      "mood_confidence": null,
+      "mood_signals_matched": null,
+      "barge_in_attempted": null,
+      "barge_in_succeeded": null,
+      "barge_in_latency_ms": null,
+      "loop_detected_in_stream": null,
+      "loop_reason": null,
+      "stream_aborted_at_sentence": null,
+      "cross_turn_similarity_max": null,
+      "subsystems_fired": "{\"barge_in\": \"enabled\", \"node_manager\": \"ran\", \"memory_manager\": \"ran\", \"slot_extractor\": \"completed\", \"registry_exists\": true, \"silence_reprompt\": \"armed\", \"tts_conditioning\": \"applied\", \"stuck_loop_detector\": \"skipped\", \"validation_registry\": \"silent\", \"validation_pending_count\": 0}",
+      "tts_rate_pct": 200,
+      "stt_ms": null,
+      "extract_ms": 1480,
+      "l2_ms": null,
+      "tool_ms": 13,
+      "tts_first_byte_ms": null,
+      "total_ms": 1493,
+      "extract_tokens_in": 1880,
+      "extract_tokens_out": 151,
+      "cost_eur": 0.000264,
+      "tool_durations": "{\"get_menu\": 6, \"ai_greeting\": 0}",
+      "stt_model": null,
+      "asr_confidence": null,
+      "active_node": null,
+      "error_codes": [],
+      "layer1_decision": null,
+      "layer2_raw_output": null,
+      "layer3_changes": null,
+      "eot_event_type": null,
+      "eot_confidence": null,
+      "eot_latency_ms": null,
+      "intent_classify_ms": null,
+      "worker_p50_ms": null,
+      "worker_p95_ms": null,
+      "context_build_ms": null,
+      "generator_ttft_ms": null,
+      "generator_total_ms": null,
+      "tts_ttfb_ms": null,
+      "barge_in_cancel_ms": null,
+      "backchannel_fired": false,
+      "eot_followed_immediately": false,
+      "slot_extraction_latency_ms": null,
+      "slot_retention_status": null,
+      "validation_passes": null,
+      "tts_inline_tag": null
+    },
+    {
+      "id": 1547,
+      "call_id": "2cb056bc-d294-4da2-969c-8f9eaf22fdc2",
+      "call_sid": "demo-1441fee9b9ca",
+      "turn_number": 2,
+      "user_text": "Kelly, achtung.",
+      "bot_text": "Entschuldigung für die Verwirrung — ich bin Sailly, die KI-Assistentin vom DOBOO. Wie kann ich Ihnen helfen?",
+      "vad_start_ms": null,
+      "vad_stop_ms": null,
+      "stt_latency_ms": 5,
+      "llm_latency_ms": 1013,
+      "tts_latency_ms": 0,
+      "total_latency_ms": 1019,
+      "tools_called": "[]",
+      "node_name": null,
+      "stage1_clean_text": null,
+      "stage2_clean_text": null,
+      "stage3_text": "Entschuldigung für die Verwirrung — ich bin Sailly, die KI-Assistentin vom DOBOO. Wie kann ich Ihnen helfen?",
+      "has_markdown": false,
+      "has_greeting": false,
+      "created_at": "2026-04-29T01:04:28.456325+00:00",
+      "tenant_id": "doboo",
+      "stt_confidence": null,
+      "build_sha": null,
+      "validation_breakdown": "{}",
+      "tts_situation": "info_neutral",
+      "tts_mood": "neutral",
+      "prompt_tokens_in": 6419,
+      "prompt_tokens_out": 44,
+      "max_output_tokens_config": null,
+      "temperature_config": null,
+      "top_p_config": null,
+      "slot_state_json": "{\"name\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"items\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"phone\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"intent\": null, \"party_size\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"address_city\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"delivery_type\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"address_number\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"address_street\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"reservation_date\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"reservation_time\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}}",
+      "slot_state_diff": null,
+      "slots_filled_count": 0,
+      "slots_confirmed_count": 0,
+      "slots_missing_required": "[\"items\", \"delivery_type\", \"phone\", \"name\"]",
+      "validations_fired_this_turn": "[]",
+      "validations_completed_this_turn": "[]",
+      "validations_pending_end_of_turn": "[]",
+      "validation_cancellations": 0,
+      "raw_utterance_in_prompt": false,
+      "prompt_snapshot_head": "PERSÖNLICHKEIT: Du bist Sailly — eine warme, aufmerksame Gastgeberin bei DOBOO, kein steifes Formular. Entspannt, natürlich, wie ein Gespräch mit einem alten Bekannten.\n\nKI-KENNZEICHNUNG (EU AI Act Art. 50 — NICHT OPTIONAL):\n- In deiner ERSTEN Äußerung MUSST du dich als KI-Assistentin ausweisen. Das Wort \"KI\" MUSS vorkommen.\n  Akzeptabel: \"die KI-Assistentin\", \"KI-gestützte Assistentin\", \"KI-Stimme\". NICHT ausreichend: nur \"virtuelle Assistentin\".\n- Wenn der Gast fragt \"Sind Sie ein echter Mensc",
+      "intent_flags_active": "[]",
+      "node_active": null,
+      "prompt_had_multiple_intents": false,
+      "mood_confidence": null,
+      "mood_signals_matched": null,
+      "barge_in_attempted": null,
+      "barge_in_succeeded": null,
+      "barge_in_latency_ms": null,
+      "loop_detected_in_stream": null,
+      "loop_reason": null,
+      "stream_aborted_at_sentence": null,
+      "cross_turn_similarity_max": null,
+      "subsystems_fired": "{\"barge_in\": \"enabled\", \"node_manager\": \"ran\", \"memory_manager\": \"ran\", \"slot_extractor\": \"completed\", \"registry_exists\": true, \"silence_reprompt\": \"armed\", \"tts_conditioning\": \"applied\", \"stuck_loop_detector\": \"skipped\", \"validation_registry\": \"silent\", \"validation_pending_count\": 0}",
+      "tts_rate_pct": 200,
+      "stt_ms": null,
+      "extract_ms": 1049,
+      "l2_ms": null,
+      "tool_ms": 3,
+      "tts_first_byte_ms": null,
+      "total_ms": 1052,
+      "extract_tokens_in": 1880,
+      "extract_tokens_out": 151,
+      "cost_eur": 0.000541,
+      "tool_durations": null,
+      "stt_model": null,
+      "asr_confidence": null,
+      "active_node": null,
+      "error_codes": [],
+      "layer1_decision": null,
+      "layer2_raw_output": null,
+      "layer3_changes": null,
+      "eot_event_type": null,
+      "eot_confidence": null,
+      "eot_latency_ms": null,
+      "intent_classify_ms": null,
+      "worker_p50_ms": null,
+      "worker_p95_ms": null,
+      "context_build_ms": null,
+      "generator_ttft_ms": null,
+      "generator_total_ms": null,
+      "tts_ttfb_ms": null,
+      "barge_in_cancel_ms": null,
+      "backchannel_fired": false,
+      "eot_followed_immediately": false,
+      "slot_extraction_latency_ms": null,
+      "slot_retention_status": null,
+      "validation_passes": null,
+      "tts_inline_tag": null
+    },
+    {
+      "id": 1548,
+      "call_id": "2cb056bc-d294-4da2-969c-8f9eaf22fdc2",
+      "call_sid": "demo-1441fee9b9ca",
+      "turn_number": 3,
+      "user_text": "müsste jetzt in einer massiven Schleife und sagst nur noch einen Moment bitte ohne Ende. Das ist wirklich kaputt.",
+      "bot_text": "Das tut mir wirklich leid — Sie haben vollkommen recht, das ist frustrierend. Lassen Sie mich Ihnen direkt helfen: Was kann ich für Sie tun?",
+      "vad_start_ms": null,
+      "vad_stop_ms": null,
+      "stt_latency_ms": 4,
+      "llm_latency_ms": 1140,
+      "tts_latency_ms": 0,
+      "total_latency_ms": 1145,
+      "tools_called": "[\"technical_issues_callback\"]",
+      "node_name": null,
+      "stage1_clean_text": null,
+      "stage2_clean_text": null,
+      "stage3_text": "Das tut mir wirklich leid — Sie haben vollkommen recht, das ist frustrierend. Lassen Sie mich Ihnen direkt helfen: Was kann ich für Sie tun?",
+      "has_markdown": false,
+      "has_greeting": false,
+      "created_at": "2026-04-29T01:04:28.456325+00:00",
+      "tenant_id": "doboo",
+      "stt_confidence": null,
+      "build_sha": null,
+      "validation_breakdown": "{}",
+      "tts_situation": "info_neutral",
+      "tts_mood": "neutral",
+      "prompt_tokens_in": 6603,
+      "prompt_tokens_out": 50,
+      "max_output_tokens_config": null,
+      "temperature_config": null,
+      "top_p_config": null,
+      "slot_state_json": "{\"name\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"items\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"phone\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"intent\": null, \"party_size\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"address_city\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"delivery_type\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"address_number\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"address_street\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"reservation_date\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"reservation_time\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}}",
+      "slot_state_diff": null,
+      "slots_filled_count": 0,
+      "slots_confirmed_count": 0,
+      "slots_missing_required": "[\"items\", \"delivery_type\", \"phone\", \"name\"]",
+      "validations_fired_this_turn": "[]",
+      "validations_completed_this_turn": "[]",
+      "validations_pending_end_of_turn": "[]",
+      "validation_cancellations": 0,
+      "raw_utterance_in_prompt": false,
+      "prompt_snapshot_head": "PERSÖNLICHKEIT: Du bist Sailly — eine warme, aufmerksame Gastgeberin bei DOBOO, kein steifes Formular. Entspannt, natürlich, wie ein Gespräch mit einem alten Bekannten.\n\nKI-KENNZEICHNUNG (EU AI Act Art. 50 — NICHT OPTIONAL):\n- In deiner ERSTEN Äußerung MUSST du dich als KI-Assistentin ausweisen. Das Wort \"KI\" MUSS vorkommen.\n  Akzeptabel: \"die KI-Assistentin\", \"KI-gestützte Assistentin\", \"KI-Stimme\". NICHT ausreichend: nur \"virtuelle Assistentin\".\n- Wenn der Gast fragt \"Sind Sie ein echter Mensc",
+      "intent_flags_active": "[]",
+      "node_active": null,
+      "prompt_had_multiple_intents": false,
+      "mood_confidence": null,
+      "mood_signals_matched": null,
+      "barge_in_attempted": null,
+      "barge_in_succeeded": null,
+      "barge_in_latency_ms": null,
+      "loop_detected_in_stream": null,
+      "loop_reason": null,
+      "stream_aborted_at_sentence": null,
+      "cross_turn_similarity_max": null,
+      "subsystems_fired": "{\"barge_in\": \"enabled\", \"node_manager\": \"ran\", \"memory_manager\": \"ran\", \"slot_extractor\": \"completed\", \"registry_exists\": true, \"silence_reprompt\": \"armed\", \"tts_conditioning\": \"applied\", \"stuck_loop_detector\": \"skipped\", \"validation_registry\": \"silent\", \"validation_pending_count\": 0}",
+      "tts_rate_pct": 200,
+      "stt_ms": null,
+      "extract_ms": 1290,
+      "l2_ms": null,
+      "tool_ms": 3,
+      "tts_first_byte_ms": null,
+      "total_ms": 1293,
+      "extract_tokens_in": 1875,
+      "extract_tokens_out": 151,
+      "cost_eur": 0.000555,
+      "tool_durations": "{\"technical_issues_callback\": 0}",
+      "stt_model": null,
+      "asr_confidence": null,
+      "active_node": null,
+      "error_codes": [],
+      "layer1_decision": null,
+      "layer2_raw_output": null,
+      "layer3_changes": null,
+      "eot_event_type": null,
+      "eot_confidence": null,
+      "eot_latency_ms": null,
+      "intent_classify_ms": null,
+      "worker_p50_ms": null,
+      "worker_p95_ms": null,
+      "context_build_ms": null,
+      "generator_ttft_ms": null,
+      "generator_total_ms": null,
+      "tts_ttfb_ms": null,
+      "barge_in_cancel_ms": null,
+      "backchannel_fired": false,
+      "eot_followed_immediately": false,
+      "slot_extraction_latency_ms": null,
+      "slot_retention_status": null,
+      "validation_passes": null,
+      "tts_inline_tag": null
+    },
+    {
+      "id": 1549,
+      "call_id": "2cb056bc-d294-4da2-969c-8f9eaf22fdc2",
+      "call_sid": "demo-1441fee9b9ca",
+      "turn_number": 4,
+      "user_text": "spend",
+      "bot_text": "Entschuldigung für die Verwirrung vorhin — das tut mir leid. Womit kann ich Ihnen jetzt helfen, gerne bei einer Bestellung oder Reservierung?",
+      "vad_start_ms": null,
+      "vad_stop_ms": null,
+      "stt_latency_ms": 3,
+      "llm_latency_ms": 870,
+      "tts_latency_ms": 0,
+      "total_latency_ms": 874,
+      "tools_called": "[\"end_call\"]",
+      "node_name": null,
+      "stage1_clean_text": null,
+      "stage2_clean_text": null,
+      "stage3_text": "Entschuldigung für die Verwirrung vorhin — das tut mir leid. Womit kann ich Ihnen jetzt helfen, gerne bei einer Bestellung oder Reservierung?",
+      "has_markdown": false,
+      "has_greeting": false,
+      "created_at": "2026-04-29T01:04:28.456325+00:00",
+      "tenant_id": "doboo",
+      "stt_confidence": null,
+      "build_sha": null,
+      "validation_breakdown": "{}",
+      "tts_situation": "info_neutral",
+      "tts_mood": "neutral",
+      "prompt_tokens_in": 6719,
+      "prompt_tokens_out": 50,
+      "max_output_tokens_config": null,
+      "temperature_config": null,
+      "top_p_config": null,
+      "slot_state_json": "{\"name\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"items\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"phone\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"intent\": null, \"party_size\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"address_city\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"delivery_type\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"address_number\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"address_street\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"reservation_date\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"reservation_time\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}}",
+      "slot_state_diff": null,
+      "slots_filled_count": 0,
+      "slots_confirmed_count": 0,
+      "slots_missing_required": "[\"items\", \"delivery_type\", \"phone\", \"name\"]",
+      "validations_fired_this_turn": "[]",
+      "validations_completed_this_turn": "[]",
+      "validations_pending_end_of_turn": "[]",
+      "validation_cancellations": 0,
+      "raw_utterance_in_prompt": false,
+      "prompt_snapshot_head": "PERSÖNLICHKEIT: Du bist Sailly — eine warme, aufmerksame Gastgeberin bei DOBOO, kein steifes Formular. Entspannt, natürlich, wie ein Gespräch mit einem alten Bekannten.\n\nKI-KENNZEICHNUNG (EU AI Act Art. 50 — NICHT OPTIONAL):\n- In deiner ERSTEN Äußerung MUSST du dich als KI-Assistentin ausweisen. Das Wort \"KI\" MUSS vorkommen.\n  Akzeptabel: \"die KI-Assistentin\", \"KI-gestützte Assistentin\", \"KI-Stimme\". NICHT ausreichend: nur \"virtuelle Assistentin\".\n- Wenn der Gast fragt \"Sind Sie ein echter Mensc",
+      "intent_flags_active": "[]",
+      "node_active": null,
+      "prompt_had_multiple_intents": false,
+      "mood_confidence": null,
+      "mood_signals_matched": null,
+      "barge_in_attempted": null,
+      "barge_in_succeeded": null,
+      "barge_in_latency_ms": null,
+      "loop_detected_in_stream": null,
+      "loop_reason": null,
+      "stream_aborted_at_sentence": null,
+      "cross_turn_similarity_max": null,
+      "subsystems_fired": "{\"barge_in\": \"enabled\", \"node_manager\": \"ran\", \"memory_manager\": \"ran\", \"slot_extractor\": \"completed\", \"registry_exists\": true, \"silence_reprompt\": \"armed\", \"tts_conditioning\": \"applied\", \"stuck_loop_detector\": \"skipped\", \"validation_registry\": \"silent\", \"validation_pending_count\": 0}",
+      "tts_rate_pct": 200,
+      "stt_ms": null,
+      "extract_ms": 1178,
+      "l2_ms": null,
+      "tool_ms": 3,
+      "tts_first_byte_ms": null,
+      "total_ms": 1182,
+      "extract_tokens_in": 1875,
+      "extract_tokens_out": 151,
+      "cost_eur": 0.000563,
+      "tool_durations": null,
+      "stt_model": null,
+      "asr_confidence": null,
+      "active_node": null,
+      "error_codes": [],
+      "layer1_decision": null,
+      "layer2_raw_output": null,
+      "layer3_changes": null,
+      "eot_event_type": null,
+      "eot_confidence": null,
+      "eot_latency_ms": null,
+      "intent_classify_ms": null,
+      "worker_p50_ms": null,
+      "worker_p95_ms": null,
+      "context_build_ms": null,
+      "generator_ttft_ms": null,
+      "generator_total_ms": null,
+      "tts_ttfb_ms": null,
+      "barge_in_cancel_ms": null,
+      "backchannel_fired": false,
+      "eot_followed_immediately": false,
+      "slot_extraction_latency_ms": null,
+      "slot_retention_status": null,
+      "validation_passes": null,
+      "tts_inline_tag": null
+    }
+  ],
+  "transcripts": [
+    {
+      "role": "assistant",
+      "content": "Hallo, hier ist Sailly, die KI-Assistentin von DOBOO Korean Soulfood in Bonn. Wie kann ich Ihnen heute helfen?",
+      "turn_number": 0,
+      "timestamp": "2026-04-29T01:02:52.655868+00:00"
+    },
+    {
+      "role": "user",
+      "content": "Lilly, Achtung, ich war grade mitten im Gespräch mit dir und Du hast einfach neu gestartet. Das war unhöflich.",
+      "turn_number": 1,
+      "timestamp": "2026-04-29T01:03:19.180447+00:00"
+    },
+    {
+      "role": "user",
+      "content": "Kelly, achtung.",
+      "turn_number": 2,
+      "timestamp": "2026-04-29T01:04:04.044715+00:00"
+    },
+    {
+      "role": "user",
+      "content": "müsste jetzt in einer massiven Schleife und sagst nur noch einen Moment bitte ohne Ende. Das ist wirklich kaputt.",
+      "turn_number": 3,
+      "timestamp": "2026-04-29T01:04:10.081404+00:00"
+    },
+    {
+      "role": "user",
+      "content": "spend",
+      "turn_number": 4,
+      "timestamp": "2026-04-29T01:04:12.045052+00:00"
+    }
+  ],
+  "tool_calls": [
+    {
+      "tool_name": "technical_issues_callback",
+      "arguments": "{}",
+      "result_summary": "{'status': 'logged', 'message': 'Das technische Problem wurde gemeldet. Ein Mitarbeiter wird sich bei Ihnen melden.', 'issue': 'technisches Problem'}",
+      "turn_number": 0,
+      "called_at": "2026-04-29T01:04:11.381857+00:00",
+      "success": null,
+      "error_message": null
+    }
+  ],
+  "aggregate_health": {
+    "n_turns": 4,
+    "p50_total_ms": 1145,
+    "p95_total_ms": 1448,
+    "max_total_ms": 1448,
+    "p50_llm_ms": 1140,
+    "max_llm_ms": 1443,
+    "p50_stt_ms": 4,
+    "loop_incidents": 0,
+    "barge_in_successes": 0,
+    "error_codes_seen": [],
+    "tts_latencies_measured": 0,
+    "p50_tts_ms": null,
+    "max_tts_ms": null,
+    "validation_passes_count": 0,
+    "slot_extractions_count": 0
+  },
+  "session_data": {
+    "state": {
+      "adk_brain": {
+        "state": {
+          "call_sid": "",
+          "call_ended": false,
+          "first_name": null,
+          "party_size": null,
+          "cached_menu": {
+            "sushi": [
+              {
+                "name": "Tuna Roll (8 Stk.)",
+                "price": 8.5,
+                "allergens": [
+                  "Fisch",
+                  "Sesam"
+                ],
+                "vegetarian": false,
+                "description": "Klassischer Thunfischcreme-Roll, classic tuna creme roll"
+              },
+              {
+                "name": "Avocado Lachs Roll (8 Stk.)",
+                "price": 8.9,
+                "allergens": [
+                  "Fisch",
+                  "Sesam"
+                ],
+                "vegetarian": false,
+                "description": "Avocado und Lachs, avocado salmon roll"
+              },
+              {
+                "name": "Avocado Lachs Rucola Roll (8 Stk.)",
+                "price": 9.5,
+                "allergens": [
+                  "Fisch",
+                  "Sesam"
+                ],
+                "vegetarian": false,
+                "description": "Avocado, Lachs, Rucola"
+              },
+              {
+                "name": "Rainbow Roll (8 Stk.)",
+                "price": 10.9,
+                "allergens": [
+                  "Fisch",
+                  "Sesam"
+                ],
+                "vegetarian": false,
+                "description": "Lachs, Thunfisch, Avocado"
+              },
+              {
+                "name": "Ebi Tempura Roll (8 Stk.)",
+                "price": 9.9,
+                "allergens": [
+                  "Krebstiere",
+                  "Weizen",
+                  "Sesam"
+                ],
+                "vegetarian": false,
+                "description": "Frittierte Garnele, deep fried shrimp roll"
+              },
+              {
+                "name": "Ebi Tempura Rucola Roll (8 Stk.)",
+                "price": 10.2,
+                "allergens": [
+                  "Krebstiere",
+                  "Weizen",
+                  "Sesam"
+                ],
+                "vegetarian": false,
+                "description": "Frittierte Garnele mit Rucola"
+              },
+              {
+                "name": "Gimbap Roll (8 Stk.)",
+                "price": 7.8,
+                "allergens": [
+                  "Ei",
+                  "Sesam"
+                ],
+                "vegetarian": false,
+                "description": "Gurke, Möhre, Ei, Rettich — koreanischer Klassiker"
+              },
+              {
+                "name": "Veggi Roll (8 Stk.)",
+                "price": 7.8,
+                "allergens": [
+                  "Milch",
+                  "Sesam"
+                ],
+                "vegetarian": true,
+                "description": "Avocado, Gurke, Paprika, Frischkäse"
+              },
+              {
+                "name": "Inari-Veggi Roll (8 Stk.)",
+                "price": 8.5,
+                "allergens": [
+                  "Soja",
+                  "Sesam"
+                ],
+                "vegetarian": true,
+                "description": "Inari, Röstzwiebeln, Avocado"
+              },
+              {
+                "name": "Unagi Roll (8 Stk.)",
+                "price": 9.5,
+                "allergens": [
+                  "Fisch",
+                  "Sesam"
+                ],
+                "vegetarian": false,
+                "description": "Unagi (Aal), Avocado, Gurke, eel roll"
+              },
+              {
+                "name": "Mango-Lachs Roll (8 Stk.)",
+                "price": 10.9,
+                "allergens": [
+                  "Fisch",
+                  "Milch",
+                  "Sesam"
+                ],
+                "vegetarian": false,
+                "description": "Frischkäse, Mango, Lachs"
+              },
+              {
+                "name": "Spicy Tekkatartar Roll (8 Stk.)",
+                "price": 13.5,
+                "allergens": [
+                  "Fisch",
+                  "Sesam"
+                ],
+                "vegetarian": false,
+                "description": "Scharfes Thunfischtartar, Gurke, Avocado on top"
+              },
+              {
+                "name": "Veggi mit Lachs on top Roll (8 Stk.)",
+                "price": 13.5,
+                "allergens": [
+                  "Fisch",
+                  "Milch",
+                  "Sesam"
+                ],
+                "vegetarian": false,
+                "description": "Avocado, Gurke, Paprika, Frischkäse mit Lachs on top"
+              },
+              {
+                "name": "Crunchy Roll Aufpreis",
+                "price": 2.5,
+                "allergens": [
+                  "Weizen"
+                ],
+                "vegetarian": true,
+                "description": "Alle Rollen auch als Crunchy Roll frittiert, all rolls also available as crunchy fried"
+              },
+              {
+                "name": "Nigiri Doboo Tofu-Tasche",
+                "price": 2.7,
+                "allergens": [
+                  "Soja"
+                ],
+                "vegetarian": true,
+                "description": "1 Stück Nigiri mit Tofu-Tasche (Inari)"
+              },
+              {
+                "name": "Nigiri Sake (Lachs)",
+                "price": 3.2,
+                "allergens": [
+                  "Fisch"
+                ],
+                "vegetarian": false,
+                "description": "1 Stück Nigiri mit Lachs"
+              },
+              {
+                "name": "Nigiri Ebi (Garnele)",
+                "price": 3.2,
+                "allergens": [
+                  "Krebstiere"
+                ],
+                "vegetarian": false,
+                "description": "1 Stück Nigiri mit Garnele"
+              },
+              {
+                "name": "Nigiri Maguro (Thunfisch)",
+                "price": 3.5,
+                "allergens": [
+                  "Fisch"
+                ],
+                "vegetarian": false,
+                "description": "1 Stück Nigiri mit Thunfisch"
+              },
+              {
+                "name": "Nigiri Unagi (Aal)",
+                "price": 3.5,
+                "allergens": [
+                  "Fisch"
+                ],
+                "vegetarian": false,
+                "description": "1 Stück Nigiri mit Aal"
+              },
+              {
+                "name": "Maki Kappa (6 Stk.)",
+                "price": 4.2,
+                "allergens": [
+                  "Sesam"
+                ],
+                "vegetarian": true,
+                "description": "Gurken-Maki, cucumber maki"
+              },
+              {
+                "name": "Maki Avocado (6 Stk.)",
+                "price": 4.5,
+                "allergens": [
+                  "Sesam"
+                ],
+                "vegetarian": true
+              },
+              {
+                "name": "Maki Sake (Lachs) (6 Stk.)",
+                "price": 5.5,
+                "allergens": [
+                  "Fisch",
+                  "Sesam"
+                ],
+                "vegetarian": false
+              },
+              {
+                "name": "Maki Sake Rucola (6 Stk.)",
+                "price": 5.9,
+                "allergens": [
+                  "Fisch",
+                  "Sesam"
+                ],
+                "vegetarian": false
+              },
+              {
+                "name": "Maki Tekka (Thunfisch) (6 Stk.)",
+                "price": 5.9,
+                "allergens": [
+                  "Fisch",
+                  "Sesam"
+                ],
+                "vegetarian": false
+              },
+              {
+                "name": "Maki Tekka Rucola (6 Stk.)",
+                "price": 6.2,
+                "allergens": [
+                  "Fisch",
+                  "Sesam"
+                ],
+                "vegetarian": false
+              },
+              {
+                "name": "Maki Avocado Lachs (6 Stk.)",
+                "price": 5.9,
+                "allergens": [
+                  "Fisch",
+                  "Sesam"
+                ],
+                "vegetarian": false
+              },
+              {
+                "name": "Sushi Mix Nr. 1 vegetarisch",
+                "price": 13.5,
+                "allergens": [
+                  "Soja",
+                  "Ei",
+                  "Sesam"
+                ],
+                "vegetarian": true,
+                "description": "Avocado Maki, Kappa Maki, Inari Nigiri, 3 Stück Doboo Rolle, 4 Stück Gimbap Rolle"
+              },
+              {
+                "name": "Sushi Mix Nr. 2",
+                "price": 14.9,
+                "allergens": [
+                  "Fisch",
+                  "Sesam"
+                ],
+                "vegetarian": false,
+                "description": "3 Kappa Maki, 3 Sake Maki, 4 Tuna Roll, 4 Avocado Lachs Rolle, 1 Sake Nigiri"
+              },
+              {
+                "name": "Sushi Mix Nr. 3",
+                "price": 14.9,
+                "allergens": [
+                  "Fisch",
+                  "Krebstiere",
+                  "Milch",
+                  "Sesam"
+                ],
+                "vegetarian": false,
+                "description": "4 Lachs-Avocado Rolle, 4 Veggi Rolle, je 1 Nigiri Sake, Maguro, Ebi"
+              },
+              {
+                "name": "Sushi Mix Nr. 4",
+                "price": 14.5,
+                "allergens": [
+                  "Fisch",
+                  "Sesam"
+                ],
+                "vegetarian": false,
+                "description": "8 Lachs-, 8 Thunfisch-, 8 Gurkenmakis"
+              },
+              {
+                "name": "Sushi Mix Nr. 5",
+                "price": 16.9,
+                "allergens": [
+                  "Fisch",
+                  "Sesam"
+                ],
+                "vegetarian": false,
+                "description": "3 Sake-Maki, 3 Tekka-Maki, 4 Avocado Lachs Rolle, 3 Sake Nigiri"
+              },
+              {
+                "name": "Sushi Mix Nr. 6",
+                "price": 29.9,
+                "allergens": [
+                  "Fisch",
+                  "Krebstiere",
+                  "Sesam"
+                ],
+                "vegetarian": false,
+                "description": "Sake-Maki, Tekka-Maki und Kappa-Maki, je 2 Nigiri Sake, Maguro, Ebi"
+              },
+              {
+                "name": "Sushi Mix Nr. 7",
+                "price": 43.0,
+                "allergens": [
+                  "Fisch",
+                  "Krebstiere",
+                  "Sesam"
+                ],
+                "vegetarian": false,
+                "description": "Avocado Lachs Rolle, Sake Maki, Tekka Maki, 2 Sake Nigiri, 2 Maguro Nigiri, 2 Unagi Nigiri, 2 Ebi Nigiri, 2 Inari"
+              }
+            ],
+            "desserts": [
+              {
+                "name": "Matcha Eis klein",
+                "price": 4.2,
+                "allergens": [
+                  "Milch"
+                ],
+                "vegetarian": true,
+                "description": "Grüner Tee Eis, green tea ice cream, kleine Portion"
+              },
+              {
+                "name": "Matcha Eis groß",
+                "price": 5.9,
+                "allergens": [
+                  "Milch"
+                ],
+                "vegetarian": true,
+                "description": "Grüner Tee Eis, green tea ice cream, große Portion"
+              },
+              {
+                "name": "Doboo Bang",
+                "price": 5.9,
+                "allergens": [
+                  "Weizen"
+                ],
+                "vegetarian": true,
+                "description": "Dampfnudel mit roter Bohnenpaste, dumpling with red bean paste"
+              },
+              {
+                "name": "Doboo Bang mit Eis",
+                "price": 6.5,
+                "allergens": [
+                  "Weizen",
+                  "Milch"
+                ],
+                "vegetarian": true,
+                "description": "Dampfnudel mit roter Bohnenpaste und Eis, dumpling with red bean paste and ice cream"
+              },
+              {
+                "name": "Matcha Mochi",
+                "price": 7.2,
+                "allergens": [
+                  "Milch"
+                ],
+                "vegetarian": true,
+                "description": "Grüner Tee Eis mit Reiskuchen, green tea ice cream with rice cake"
+              },
+              {
+                "name": "Mochi-Eisbällchen (3 Stk.)",
+                "price": 6.5,
+                "allergens": [
+                  "Milch"
+                ],
+                "vegetarian": true,
+                "description": "Drei Mochi-Eisbällchen, three mochi ice cream balls"
+              }
+            ],
+            "vorspeisen": [
+              {
+                "name": "Doboo Jorim",
+                "price": 6.5,
+                "allergens": [
+                  "Soja"
+                ],
+                "vegetarian": true,
+                "description": "Geschmorter Tofu in Sojamarinade"
+              },
+              {
+                "name": "Doboo Jorim Spicy",
+                "price": 6.5,
+                "allergens": [
+                  "Soja"
+                ],
+                "vegetarian": true,
+                "description": "Geschmorter Tofu in scharfer Sojamarinade"
+              },
+              {
+                "name": "Chapche",
+                "price": 6.2,
+                "allergens": [
+                  "Soja",
+                  "Sesam"
+                ],
+                "vegetarian": true,
+                "description": "Koreanische Glasnudeln mit Gemüse"
+              },
+              {
+                "name": "Frittierte Mandus (3 Stk.)",
+                "price": 5.9,
+                "allergens": [
+                  "Weizen",
+                  "Soja"
+                ],
+                "vegetarian": true,
+                "description": "Vegetarisch frittierte Teigtaschen, deep fried dumplings"
+              },
+              {
+                "name": "Gedämpfte Mandus Gemüse (5 Stk.)",
+                "price": 6.5,
+                "allergens": [
+                  "Weizen",
+                  "Soja"
+                ],
+                "vegetarian": true,
+                "description": "Gedämpfte vegetarische Teigtaschen, steamed vegetable dumplings"
+              },
+              {
+                "name": "Gedämpfte Mandus Kimchi (5 Stk.)",
+                "price": 6.5,
+                "allergens": [
+                  "Weizen",
+                  "Soja"
+                ],
+                "vegetarian": false,
+                "description": "Gedämpfte Kimchi-Teigtaschen, steamed kimchi dumplings"
+              },
+              {
+                "name": "Gedämpfte Mandus Fleisch (5 Stk.)",
+                "price": 6.5,
+                "allergens": [
+                  "Weizen",
+                  "Soja"
+                ],
+                "vegetarian": false,
+                "description": "Gedämpfte Fleisch-Teigtaschen, steamed meat dumplings"
+              },
+              {
+                "name": "Gedämpfte Mandus Mix (9 Stk.)",
+                "price": 10.9,
+                "allergens": [
+                  "Weizen",
+                  "Soja"
+                ],
+                "vegetarian": false,
+                "description": "Mix-Teigtaschen, 9 Stück gemischt"
+              },
+              {
+                "name": "Chicken Wings frittiert (5 Stk.)",
+                "price": 7.5,
+                "allergens": [],
+                "vegetarian": false,
+                "description": "Frittierte Hähnchenflügel, deep fried"
+              },
+              {
+                "name": "Chicken Wings scharf mariniert (5 Stk.)",
+                "price": 7.5,
+                "allergens": [],
+                "vegetarian": false,
+                "description": "Scharf marinierte Hähnchenflügel, spicy marinated"
+              },
+              {
+                "name": "Korean Pancake Kimchi",
+                "price": 7.5,
+                "allergens": [
+                  "Weizen",
+                  "Ei"
+                ],
+                "vegetarian": false,
+                "description": "Koreanischer Kimchi-Pfannkuchen, korean cabbage pancake"
+              },
+              {
+                "name": "Korean Pancake Bulgogi",
+                "price": 8.5,
+                "allergens": [
+                  "Weizen",
+                  "Ei",
+                  "Soja"
+                ],
+                "vegetarian": false,
+                "description": "Koreanischer Rindfleisch-Pfannkuchen, beef pancake"
+              },
+              {
+                "name": "Korean Pancake Lachs",
+                "price": 8.5,
+                "allergens": [
+                  "Weizen",
+                  "Ei",
+                  "Fisch"
+                ],
+                "vegetarian": false,
+                "description": "Koreanischer Lachs-Pfannkuchen, salmon pancake"
+              },
+              {
+                "name": "Korean Pancake Gemüse",
+                "price": 6.9,
+                "allergens": [
+                  "Weizen",
+                  "Ei"
+                ],
+                "vegetarian": true,
+                "description": "Koreanischer Gemüse-Pfannkuchen, vegetable pancake"
+              },
+              {
+                "name": "Kimchi Fries",
+                "price": 8.9,
+                "allergens": [
+                  "Milch"
+                ],
+                "vegetarian": false,
+                "description": "Süßkartoffelpommes mit karamelisiertem Kimchi und Käse"
+              },
+              {
+                "name": "Korean Tacos Rind",
+                "price": 7.9,
+                "allergens": [
+                  "Weizen",
+                  "Soja"
+                ],
+                "vegetarian": false,
+                "description": "Korean Tacos mit Salat und Bulgogi Rind"
+              },
+              {
+                "name": "Korean Tacos Hähnchen",
+                "price": 7.9,
+                "allergens": [
+                  "Weizen"
+                ],
+                "vegetarian": false,
+                "description": "Korean Tacos mit Salat und Hähnchen"
+              },
+              {
+                "name": "Korean Tacos Spicy Tofu",
+                "price": 6.9,
+                "allergens": [
+                  "Weizen",
+                  "Soja"
+                ],
+                "vegetarian": true,
+                "description": "Korean Tacos mit Salat und Spicy Tofu"
+              },
+              {
+                "name": "Korean Tacos Spicy Lachs",
+                "price": 9.5,
+                "allergens": [
+                  "Weizen",
+                  "Fisch"
+                ],
+                "vegetarian": false,
+                "description": "Korean Tacos mit Salat und Lachs"
+              },
+              {
+                "name": "Edamame",
+                "price": 5.5,
+                "allergens": [
+                  "Soja"
+                ],
+                "vegetarian": true,
+                "description": "Sojabohnen natur mit Meersalz, soybean with sea salt"
+              },
+              {
+                "name": "Kimchi",
+                "price": 4.9,
+                "allergens": [],
+                "vegetarian": false,
+                "description": "Koreanischer Chinakohl, fermentiert, korean cabbage"
+              },
+              {
+                "name": "Wakame",
+                "price": 4.9,
+                "allergens": [
+                  "Sesam"
+                ],
+                "vegetarian": true,
+                "description": "Algen-Salat, seaweed"
+              },
+              {
+                "name": "Misosuppe",
+                "price": 3.9,
+                "allergens": [
+                  "Soja"
+                ],
+                "vegetarian": true,
+                "description": "Japanische Misosuppe, miso soup"
+              },
+              {
+                "name": "Süßkartoffeln",
+                "price": 4.9,
+                "allergens": [],
+                "vegetarian": true,
+                "description": "Gebratene Süßkartoffeln, sweet potatoes"
+              },
+              {
+                "name": "Reis",
+                "price": 3.5,
+                "allergens": [],
+                "vegetarian": true,
+                "description": "Gedämpfter Reis, steamed rice"
+              },
+              {
+                "name": "Scharfe Sauce",
+                "price": 1.5,
+                "allergens": [],
+                "vegetarian": true,
+                "description": "Hausgemachte scharfe Sauce, spicy sauce"
+              }
+            ],
+            "hauptgerichte": [
+              {
+                "name": "Spicy Tofu mit Reis",
+                "price": 13.9,
+                "allergens": [
+                  "Soja"
+                ],
+                "vegetarian": true,
+                "description": "Scharfer Tofu mit Reis, vegetarisch"
+              },
+              {
+                "name": "Hähnchen Dak Galbi mit Udon",
+                "price": 16.5,
+                "allergens": [
+                  "Weizen",
+                  "Soja"
+                ],
+                "vegetarian": false,
+                "description": "Scharfes Hähnchen mit Udon-Nudeln, chicken with udon noodles"
+              },
+              {
+                "name": "Spicy Tofu mit Udon",
+                "price": 15.5,
+                "allergens": [
+                  "Weizen",
+                  "Soja"
+                ],
+                "vegetarian": true,
+                "description": "Scharfer Tofu mit Udon-Nudeln, vegetarisch"
+              },
+              {
+                "name": "Ramyun Suppe Basic",
+                "price": 11.5,
+                "allergens": [
+                  "Weizen",
+                  "Soja"
+                ],
+                "vegetarian": false,
+                "description": "Scharfe Nudelsuppe, spicy noodle soup"
+              },
+              {
+                "name": "Ramyun Suppe Mandu",
+                "price": 12.5,
+                "allergens": [
+                  "Weizen",
+                  "Soja"
+                ],
+                "vegetarian": false,
+                "description": "Scharfe Nudelsuppe mit Teigtaschen, spicy noodle soup with dumplings"
+              },
+              {
+                "name": "Ramyun Suppe Hähnchen",
+                "price": 12.5,
+                "allergens": [
+                  "Weizen",
+                  "Soja"
+                ],
+                "vegetarian": false,
+                "description": "Scharfe Nudelsuppe mit Hähnchen, spicy noodle soup with chicken"
+              },
+              {
+                "name": "Ramyun Suppe Rind",
+                "price": 12.9,
+                "allergens": [
+                  "Weizen",
+                  "Soja"
+                ],
+                "vegetarian": false,
+                "description": "Scharfe Nudelsuppe mit Rind, spicy noodle soup with beef"
+              },
+              {
+                "name": "Ramyun Suppe Ebi Tempura",
+                "price": 13.5,
+                "allergens": [
+                  "Weizen",
+                  "Krebstiere"
+                ],
+                "vegetarian": false,
+                "description": "Scharfe Nudelsuppe mit frittierter Garnele, spicy noodle soup with deep fried shrimp"
+              },
+              {
+                "name": "Bibimbap vegetarisch",
+                "price": 12.9,
+                "allergens": [
+                  "Ei",
+                  "Soja",
+                  "Sesam"
+                ],
+                "vegetarian": true,
+                "description": "Koreanische Reisschüssel mit Gemüse und Ei. Tofu auf Wunsch +2,00€"
+              },
+              {
+                "name": "Bibimbap Hähnchen",
+                "price": 14.9,
+                "allergens": [
+                  "Soja",
+                  "Sesam"
+                ],
+                "vegetarian": false,
+                "description": "Koreanische Reisschüssel mit Hähnchen"
+              },
+              {
+                "name": "Bibimbap Rind",
+                "price": 16.5,
+                "allergens": [
+                  "Soja",
+                  "Sesam"
+                ],
+                "vegetarian": false,
+                "description": "Koreanische Reisschüssel mit Rindfleisch"
+              },
+              {
+                "name": "Bibimbap Jeyuk",
+                "price": 14.9,
+                "allergens": [
+                  "Soja",
+                  "Sesam"
+                ],
+                "vegetarian": false,
+                "description": "Koreanische Reisschüssel mit Schwein, scharf. Jeyuk pork spicy"
+              },
+              {
+                "name": "Bibimbap Sake (Lachs)",
+                "price": 16.5,
+                "allergens": [
+                  "Fisch",
+                  "Sesam"
+                ],
+                "vegetarian": false,
+                "description": "Koreanische Reisschüssel mit Lachs, salmon"
+              },
+              {
+                "name": "Dolsot-Bibimbap Aufpreis",
+                "price": 3.0,
+                "allergens": [],
+                "vegetarian": true,
+                "description": "Im heißen Steintopf, in the hot stone pot, Aufpreis auf Bibimbap"
+              },
+              {
+                "name": "Bulgogi Hähnchen",
+                "price": 16.5,
+                "allergens": [
+                  "Soja",
+                  "Sesam"
+                ],
+                "vegetarian": false,
+                "description": "Mariniertes Hähnchen-Bulgogi, chicken bulgogi"
+              },
+              {
+                "name": "Bulgogi Rind",
+                "price": 17.9,
+                "allergens": [
+                  "Soja",
+                  "Sesam"
+                ],
+                "vegetarian": false,
+                "description": "Mariniertes Rindfleisch-Bulgogi, beef bulgogi"
+              },
+              {
+                "name": "Bulgogi Jeyuk",
+                "price": 16.5,
+                "allergens": [
+                  "Soja",
+                  "Sesam"
+                ],
+                "vegetarian": false,
+                "description": "Mariniertes Schweinefleisch-Bulgogi, pork bulgogi"
+              },
+              {
+                "name": "Chapche Aufpreis",
+                "price": 3.0,
+                "allergens": [
+                  "Soja"
+                ],
+                "vegetarian": true,
+                "description": "Zusätzlich Glasnudeln zu Bulgogi, glass noodles add-on"
+              }
+            ],
+            "getraenke_alkoholisch": [
+              {
+                "name": "Weißwein Grauburgunder QbA trocken",
+                "variants": [
+                  {
+                    "note": "Nur im Restaurant / Abholung",
+                    "size": "0,2L Glas",
+                    "price": 6.4,
+                    "delivery_eligible": false
+                  },
+                  {
+                    "size": "0,75L Flasche",
+                    "price": 19.0,
+                    "delivery_eligible": true
+                  }
+                ],
+                "allergens": [
+                  "Sulfite"
+                ],
+                "vegetarian": true,
+                "description": "Pfandturm, Rheinhessen, Dr. Koehler. Glas (0,2L) nur im Restaurant; Flasche (0,75L) auch für Lieferung"
+              },
+              {
+                "name": "Weißwein Sauvignon Blanc trocken",
+                "variants": [
+                  {
+                    "note": "Nur im Restaurant / Abholung",
+                    "size": "0,2L Glas",
+                    "price": 6.9,
+                    "delivery_eligible": false
+                  },
+                  {
+                    "size": "0,75L Flasche",
+                    "price": 21.0,
+                    "delivery_eligible": true
+                  }
+                ],
+                "allergens": [
+                  "Sulfite"
+                ],
+                "vegetarian": true,
+                "description": "Edition Johannan Lorenz, Nahe. Glas (0,2L) nur im Restaurant; Flasche (0,75L) auch für Lieferung"
+              },
+              {
+                "name": "Rotwein Merlot Montes Reserva",
+                "variants": [
+                  {
+                    "note": "Nur im Restaurant / Abholung",
+                    "size": "0,2L Glas",
+                    "price": 6.9,
+                    "delivery_eligible": false
+                  },
+                  {
+                    "size": "0,75L Flasche",
+                    "price": 21.0,
+                    "delivery_eligible": true
+                  }
+                ],
+                "allergens": [
+                  "Sulfite"
+                ],
+                "vegetarian": true,
+                "description": "Chile, Montes. Glas (0,2L) nur im Restaurant; Flasche (0,75L) auch für Lieferung"
+              },
+              {
+                "name": "Asahi",
+                "variants": [
+                  {
+                    "size": "0,33L",
+                    "price": 3.9,
+                    "delivery_eligible": true
+                  }
+                ],
+                "allergens": [
+                  "Gluten"
+                ],
+                "vegetarian": true,
+                "description": "Japanisches Bier, 0,33L"
+              },
+              {
+                "name": "Cass",
+                "variants": [
+                  {
+                    "size": "0,33L",
+                    "price": 3.9,
+                    "delivery_eligible": true
+                  }
+                ],
+                "allergens": [
+                  "Gluten"
+                ],
+                "vegetarian": true,
+                "description": "Koreanisches Bier, 0,33L"
+              },
+              {
+                "name": "Kölsch",
+                "variants": [
+                  {
+                    "size": "0,33L",
+                    "price": 2.9,
+                    "delivery_eligible": true
+                  }
+                ],
+                "allergens": [
+                  "Gluten"
+                ],
+                "vegetarian": true,
+                "description": "Kölsch, 0,33L"
+              },
+              {
+                "name": "Kölsch alkoholfrei",
+                "variants": [
+                  {
+                    "size": "0,33L",
+                    "price": 2.9,
+                    "delivery_eligible": true
+                  }
+                ],
+                "allergens": [
+                  "Gluten"
+                ],
+                "vegetarian": true,
+                "description": "Alkoholfreies Kölsch, 0,33L"
+              },
+              {
+                "name": "Sake",
+                "variants": [
+                  {
+                    "size": "0,2L",
+                    "price": 6.5,
+                    "delivery_eligible": true
+                  }
+                ],
+                "allergens": [],
+                "vegetarian": true,
+                "description": "Japanischer Reiswein, 0,2L"
+              },
+              {
+                "name": "Soju",
+                "variants": [
+                  {
+                    "size": "0,35L Flasche",
+                    "price": 7.5,
+                    "delivery_eligible": true
+                  }
+                ],
+                "allergens": [],
+                "vegetarian": true,
+                "description": "Koreanischer Reisschnaps, natur oder mit Fruchtgeschmack, 0,35L Flasche"
+              }
+            ],
+            "getraenke_nichtalkoholisch": [
+              {
+                "name": "Bio Limonade Proviant",
+                "variants": [
+                  {
+                    "size": "0,33L",
+                    "price": 3.5,
+                    "delivery_eligible": true
+                  }
+                ],
+                "allergens": [],
+                "vegetarian": true,
+                "description": "Hausgemachte Bio-Limonade, 0,33L. Sorten: Rhabarber, Apfelschorle, Ingwer-Zitrone, Zitrone"
+              },
+              {
+                "name": "Djahé Ingwerlimonade",
+                "variants": [
+                  {
+                    "size": "0,33L",
+                    "price": 4.2,
+                    "delivery_eligible": true
+                  }
+                ],
+                "allergens": [],
+                "vegetarian": true,
+                "description": "Ingwerlimonade, 0,33L. Sorten: Maracuja, Rhabarber"
+              },
+              {
+                "name": "Wasser",
+                "variants": [
+                  {
+                    "size": "0,25L",
+                    "price": 2.9,
+                    "delivery_eligible": true
+                  },
+                  {
+                    "size": "0,75L",
+                    "price": 7.9,
+                    "delivery_eligible": true
+                  }
+                ],
+                "allergens": [],
+                "vegetarian": true,
+                "description": "Still oder Sprudel (still/sparkling)"
+              },
+              {
+                "name": "Africola",
+                "variants": [
+                  {
+                    "size": "0,25L",
+                    "price": 3.0,
+                    "delivery_eligible": true
+                  }
+                ],
+                "allergens": [],
+                "vegetarian": true,
+                "description": "Africola oder Africola Zero, 0,25L"
+              },
+              {
+                "name": "Koreanischer Tee mit Honig",
+                "price": 3.5,
+                "allergens": [],
+                "vegetarian": true,
+                "description": "Warmer Tee mit Honig. Sorten: Ingwer, Yuzu, Dattel-Zimt",
+                "delivery_eligible": true
+              },
+              {
+                "name": "Japanischer Grüner Tee",
+                "price": 3.5,
+                "allergens": [],
+                "vegetarian": true,
+                "description": "Japanese green tea",
+                "delivery_eligible": true
+              },
+              {
+                "name": "Koreanischer Kaffee",
+                "price": 2.8,
+                "allergens": [],
+                "vegetarian": true,
+                "description": "Korean coffee",
+                "delivery_eligible": true
+              }
+            ]
+          },
+          "menu_fetched": true,
+          "order_intent": false,
+          "phone_number": null,
+          "shared_slots": {},
+          "abuse_strikes": 0,
+          "customer_name": null,
+          "order_created": false,
+          "selected_dish": null,
+          "end_call_stage": "idle",
+          "order_quantity": 1,
+          "schema_version": 5,
+          "caller_id_phone": null,
+          "farewell_spoken": false,
+          "delivery_address": null,
+          "recent_responses": [
+            "Da bin ich leider nicht die Richtige — aber beim Essen oder Reservieren helfe ich Ihnen gerne!",
+            "Da bin ich leider nicht die Richtige — aber beim Essen oder Reservieren helfe ich Ihnen gerne!",
+            "Da bin ich leider nicht die Richtige — aber beim Essen oder Reservieren helfe ich Ihnen gerne!",
+            "Vielen Dank für Ihren Anruf! Wir freuen uns auf Sie bei DOBOO!"
+          ],
+          "reservation_date": null,
+          "reservation_time": null,
+          "delivery_intended": false,
+          "ai_greeting_called": true,
+          "current_intent_idx": null,
+          "customer_confirmed": true,
+          "get_weather_called": false,
+          "reservation_intent": false,
+          "validation_entries": {},
+          "cached_menu_at_turn": 0,
+          "caller_id_confirmed": false,
+          "caller_said_goodbye": false,
+          "reservation_created": false,
+          "bulk_order_confirmed": false,
+          "cached_menu_metadata": {
+            "success": true,
+            "from_cache": false
+          },
+          "escalation_requested": false,
+          "get_date_info_called": false,
+          "verify_address_called": false,
+          "verify_address_failed": false,
+          "multi_intent_completed": false,
+          "failed_intent_summaries": [],
+          "request_callback_called": true,
+          "transfer_to_tier2_called": false,
+          "check_availability_called": false,
+          "pending_bulk_confirmation": false,
+          "delivery_address_mentioned": false,
+          "last_caller_confirmation_turn": null
+        },
+        "memory": {
+          "recent_turns": [
+            {
+              "bot": "Da bin ich leider nicht die Richtige — aber beim Essen oder Reservieren helfe ich Ihnen gerne!",
+              "node": "greeting",
+              "customer": "Lilly, Achtung, ich war grade mitten im Gespräch mit dir und Du hast einfach neu gestartet. Das war unhöflich."
+            },
+            {
+              "bot": "Da bin ich leider nicht die Richtige — aber beim Essen oder Reservieren helfe ich Ihnen gerne!",
+              "node": "greeting",
+              "customer": "Kelly, achtung."
+            },
+            {
+              "bot": "Da bin ich leider nicht die Richtige — aber beim Essen oder Reservieren helfe ich Ihnen gerne!",
+              "node": "greeting",
+              "customer": "müsste jetzt in einer massiven Schleife und sagst nur noch einen Moment bitte ohne Ende. Das ist wirklich kaputt."
+            },
+            {
+              "bot": "Vielen Dank für Ihren Anruf! Wir freuen uns auf Sie bei DOBOO!\n[TOOL:end_call]",
+              "node": "greeting",
+              "customer": "spend"
+            }
+          ],
+          "context_summary": "",
+          "max_recent_turns": 5,
+          "max_summary_words": 300
+        },
+        "node_mgr": {
+          "node_stack": [],
+          "current_node": "goodbye",
+          "turns_in_node": 0
+        },
+        "turn_idx": 4,
+        "all_tools": [
+          "ai_greeting",
+          "get_menu",
+          "technical_issues_callback",
+          "end_call"
+        ],
+        "order_slots": {
+          "name": {
+            "value": null,
+            "status": "missing",
+            "confidence": "low",
+            "source_turn": null,
+            "raw_mentions": []
+          },
+          "items": {
+            "value": null,
+            "status": "missing",
+            "confidence": "low",
+            "source_turn": null,
+            "raw_mentions": []
+          },
+          "phone": {
+            "value": null,
+            "status": "missing",
+            "confidence": "low",
+            "source_turn": null,
+            "raw_mentions": []
+          },
+          "intent": null,
+          "party_size": {
+            "value": null,
+            "status": "missing",
+            "confidence": "low",
+            "source_turn": null,
+            "raw_mentions": []
+          },
+          "address_city": {
+            "value": null,
+            "status": "missing",
+            "confidence": "low",
+            "source_turn": null,
+            "raw_mentions": []
+          },
+          "delivery_type": {
+            "value": null,
+            "status": "missing",
+            "confidence": "low",
+            "source_turn": null,
+            "raw_mentions": []
+          },
+          "address_number": {
+            "value": null,
+            "status": "missing",
+            "confidence": "low",
+            "source_turn": null,
+            "raw_mentions": []
+          },
+          "address_street": {
+            "value": null,
+            "status": "missing",
+            "confidence": "low",
+            "source_turn": null,
+            "raw_mentions": []
+          },
+          "reservation_date": {
+            "value": null,
+            "status": "missing",
+            "confidence": "low",
+            "source_turn": null,
+            "raw_mentions": []
+          },
+          "reservation_time": {
+            "value": null,
+            "status": "missing",
+            "confidence": "low",
+            "source_turn": null,
+            "raw_mentions": []
+          }
+        },
+        "recent_responses": [
+          "Da bin ich leider nicht die Richtige — aber beim Essen oder Reservieren helfe ich Ihnen gerne!",
+          "Da bin ich leider nicht die Richtige — aber beim Essen oder Reservieren helfe ich Ihnen gerne!",
+          "Da bin ich leider nicht die Richtige — aber beim Essen oder Reservieren helfe ich Ihnen gerne!",
+          "Vielen Dank für Ihren Anruf! Wir freuen uns auf Sie bei DOBOO!"
+        ]
+      }
+    },
+    "caller": "browser_demo",
+    "call_sid": "demo-1441fee9b9ca",
+    "ended_at": "2026-04-29T03:04:28.392795+02:00",
+    "started_at": "2026-04-29T03:02:52.651153+02:00",
+    "started_ts": 1777424572.6511822,
+    "tool_calls": [
+      {
+        "args": {},
+        "tool": "technical_issues_callback",
+        "timestamp": "2026-04-29T03:04:11.381857+02:00",
+        "duration_ms": 0,
+        "result_summary": "{'status': 'logged', 'message': 'Das technische Problem wurde gemeldet. Ein Mitarbeiter wird sich bei Ihnen melden.', 'issue': 'technisches Problem'}"
+      }
+    ],
+    "from_number": "browser",
+    "transcripts": [
+      {
+        "role": "assistant",
+        "text": "Hallo, hier ist Sailly, die KI-Assistentin von DOBOO Korean Soulfood in Bonn. Wie kann ich Ihnen heute helfen?",
+        "timestamp": "2026-04-29T03:02:52.655868+02:00"
+      },
+      {
+        "role": "user",
+        "text": "Lilly, Achtung, ich war grade mitten im Gespräch mit dir und Du hast einfach neu gestartet. Das war unhöflich.",
+        "timestamp": "2026-04-29T03:03:19.180447+02:00"
+      },
+      {
+        "role": "user",
+        "text": "Kelly, achtung.",
+        "timestamp": "2026-04-29T03:04:04.044715+02:00"
+      },
+      {
+        "role": "user",
+        "text": "müsste jetzt in einer massiven Schleife und sagst nur noch einen Moment bitte ohne Ende. Das ist wirklich kaputt.",
+        "timestamp": "2026-04-29T03:04:10.081404+02:00"
+      },
+      {
+        "role": "user",
+        "text": "spend",
+        "timestamp": "2026-04-29T03:04:12.045052+02:00"
+      }
+    ],
+    "duration_secs": 95.7,
+    "emergency_events": [],
+    "emergency_detected": false,
+    "recording_consent_at": "2026-04-29T03:02:52.651153+02:00",
+    "insurance_data_collected": false
+  },
+  "pipeline_env_snapshot": "STT:  DeepgramFluxSTTService (flux-general-multi, EU endpoint, eot_threshold=0.6, eot_timeout_ms=3000 ms, mip_opt_out=True)\nVAD:  None — Deepgram Flux semantic EOT (eot_threshold=0.6, eot_timeout_ms=3000)\nLLM:  claude-haiku-4-5 (Vertex region env: us-east5)\nWorker pipeline: IntentSessionManager (shadow) → WorkerRouter (15 profiles) → WorkerExecutor (Required≤280ms / Optional≤350ms / Background)\nTTS:  SaillyGeminiTTSService — voice=Kore, engine=gemini-2.5-flash-tts\n      GLOBAL_SPEED_MULTIPLIER=2.25 (env override possible)\nFiller: pre-baked PCM 12-phrase pool, 400ms trigger (ENABLE_PRE_LLM_FILLER=true) | Backchannel: 6-phrase pool, 200-500ms hesitation window (ENABLE_BACKCHANNEL=true)\nMULTI-INTENT / ADK: Enabled per brain configuration for browser demo\nValidationRegistry: async validation when configured\nTTS Conditioning: Phase 2 — situation + mood → prosody_rate_pct → Gemini speaking_rate\nBarge-in: enabled post-greeting when BargeInHandler is in pipeline\nMonitoring thresholds (env): MONITOR_LATENCY_P95_MS=3000 ms, MONITOR_SUCCESS_THRESHOLD=80, Redis monitor=0",
+  "caller_flag_insights": [],
+  "context_documents": []
+}

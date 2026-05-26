@@ -1,0 +1,13 @@
+{
+  "base_script_id": "A2.5",
+  "difficulty": "D5",
+  "attempt": 3,
+  "passed": 0,
+  "total": 0,
+  "pass_rate": 0.0,
+  "call_sids": [],
+  "grok_report": null,
+  "haiku_fixes": null,
+  "fixes_applied": false,
+  "duration_s": 0.0012063980102539062
+}

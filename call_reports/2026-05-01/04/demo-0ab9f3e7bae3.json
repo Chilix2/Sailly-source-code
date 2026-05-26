@@ -1,0 +1,238 @@
+{
+  "call_sid": "demo-0ab9f3e7bae3",
+  "found": true,
+  "call": {
+    "id": "e8494cbc-bd37-48d5-97ef-c7c3156c9ef4",
+    "call_sid": "demo-0ab9f3e7bae3",
+    "caller_number": "browser_demo",
+    "agent_voice": "Kore",
+    "started_at": "2026-05-01T04:06:28.905285+00:00",
+    "ended_at": "2026-05-01T04:07:02.918827+00:00",
+    "duration_seconds": 34,
+    "total_turns": 0,
+    "total_input_tokens": 0,
+    "total_output_tokens": 0,
+    "total_cost_tokens": 0.0,
+    "total_cost_telephony": 0.0,
+    "avg_latency_ms": null,
+    "p95_latency_ms": null,
+    "outcome": "client_hangup",
+    "quality_score": 5.0,
+    "was_escalated": false,
+    "escalation_reason": null,
+    "sentiment": null,
+    "language": "de",
+    "caller_audio_url": "https://storage.googleapis.com/sailly-recordings-eu/demo-0ab9f3e7bae3/combined.wav?X-Goog-Algorithm=GOOG4-RSA-SHA256&X-Goog-Credential=sailly-voice-agent%40sailly-voice-agent-eu.iam.gserviceaccount.com%2F20260501%2Fauto%2Fstorage%2Fgoog4_request&X-Goog-Date=20260501T040716Z&X-Goog-Expires=604800&X-Goog-SignedHeaders=host&X-Goog-Signature=650786cb1fa93c707a0e8e539464f1498fd8e0ec3f4313bf9449951d3c639641f8359e480c191908fd508a459d5bb6a9609f5d668399c363121ae4894b36a7f19b57bb2030713d17149ef23db11acc08a973c42036083317c53972893c102a2bdd93f65a1a1fe33ac5e8c91c9b600e36f97b6056f4fe91cd63bf1ce3cf4e7568fd386d912fa2ed0c5cdb8a242239d4d1e7d713dd1d5d3f9f0b8213916816a1e6ec34991e8f43b35e2e3e38276045962d788a7ece9a54517fc7c93a0e3d8391929483152bc5f6308ae39a01750db9fade7dc30a356d4ad5f334867c2e40d153c68d2286fb5b9e03906dfb147565e32c5acaac3ae5b0f3b35694d0f365b9d7ff1a",
+    "agent_audio_url": "https://storage.googleapis.com/sailly-recordings-eu/demo-0ab9f3e7bae3/agent.wav?X-Goog-Algorithm=GOOG4-RSA-SHA256&X-Goog-Credential=sailly-voice-agent%40sailly-voice-agent-eu.iam.gserviceaccount.com%2F20260501%2Fauto%2Fstorage%2Fgoog4_request&X-Goog-Date=20260501T040715Z&X-Goog-Expires=604800&X-Goog-SignedHeaders=host&X-Goog-Signature=7b21f34dcb397086458bcc643295e2b80aacb6a1923c5b5e9ba77e2549c8fe44c24a3afe493c6b8f758a3bc8d9af06484d2fbf14e509d7acee8822a0ad3739fb50954863064e17b01a05339b9b3cf87abcd209be7e2c8ee0aab99a672417ed67080c513d0c5a2d3a86777d3a371e3a80ba4ca1adc005edacc3476b64f6ada2063a3619734ad3e5c1d33a9598baec875f53359e56a22ce30363d99e98b3f11dbabe39a0eeebaa6cb1e115ce45373969b7d7b2116b6219b6c8afcc88c2c16d9acf99adebf542cde0938fa019a2273195afbac69285336b9ef39417812757d56d98e64bdc00fb8ae7c46970aa1a838cf1872780225b961f95544f7e863fd9746957",
+    "metadata": null,
+    "created_at": "2026-05-01T04:07:02.966716+00:00",
+    "emergency_detected": false,
+    "emergency_keyword": null,
+    "analytics_data": null,
+    "session_data": "{\"state\": {\"adk_brain\": {\"state\": {\"call_sid\": \"\", \"call_ended\": false, \"first_name\": null, \"party_size\": null, \"cached_menu\": null, \"menu_fetched\": false, \"order_intent\": false, \"phone_number\": null, \"shared_slots\": {}, \"abuse_strikes\": 0, \"customer_name\": null, \"order_created\": false, \"selected_dish\": null, \"end_call_stage\": \"idle\", \"order_quantity\": 1, \"schema_version\": 5, \"caller_id_phone\": null, \"farewell_spoken\": false, \"delivery_address\": null, \"recent_responses\": [\"Willkommen bei DOBOO Korean Soulfood in Bonn! Wie kann ich Ihnen heute helfen?\"], \"reservation_date\": null, \"reservation_time\": null, \"delivery_intended\": false, \"ai_greeting_called\": false, \"current_intent_idx\": null, \"customer_confirmed\": false, \"get_weather_called\": false, \"reservation_intent\": false, \"validation_entries\": {}, \"cached_menu_at_turn\": null, \"caller_id_confirmed\": false, \"caller_said_goodbye\": false, \"reservation_created\": false, \"bulk_order_confirmed\": false, \"cached_menu_metadata\": {}, \"escalation_requested\": false, \"get_date_info_called\": false, \"verify_address_called\": false, \"verify_address_failed\": false, \"multi_intent_completed\": false, \"failed_intent_summaries\": [], \"request_callback_called\": false, \"transfer_to_tier2_called\": false, \"check_availability_called\": false, \"pending_bulk_confirmation\": false, \"delivery_address_mentioned\": false, \"last_caller_confirmation_turn\": null}, \"memory\": {\"recent_turns\": [{\"bot\": \"Willkommen bei DOBOO Korean Soulfood in Bonn! Wie kann ich Ihnen heute helfen?\", \"node\": \"greeting\", \"customer\": \"<call_start>\"}], \"context_summary\": \"\", \"max_recent_turns\": 5, \"max_summary_words\": 300}, \"node_mgr\": {\"node_stack\": [], \"current_node\": \"greeting\", \"turns_in_node\": 0}, \"turn_idx\": 1, \"all_tools\": [\"ai_greeting\", \"get_date_info\"], \"order_slots\": {\"name\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"items\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"phone\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"intent\": null, \"party_size\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"address_city\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"delivery_type\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"address_number\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"address_street\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"reservation_date\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}, \"reservation_time\": {\"value\": null, \"status\": \"missing\", \"confidence\": \"low\", \"source_turn\": null, \"raw_mentions\": []}}, \"recent_responses\": [\"Willkommen bei DOBOO Korean Soulfood in Bonn! Wie kann ich Ihnen heute helfen?\"]}}, \"caller\": \"browser_demo\", \"call_sid\": \"demo-0ab9f3e7bae3\", \"ended_at\": \"2026-05-01T06:07:02.918827+02:00\", \"started_at\": \"2026-05-01T06:06:28.905285+02:00\", \"started_ts\": 1777608388.9052896, \"tool_calls\": [], \"from_number\": \"browser\", \"transcripts\": [], \"duration_secs\": 34.0, \"emergency_events\": [], \"emergency_detected\": false, \"recording_consent_at\": \"2026-05-01T06:06:28.905285+02:00\", \"insurance_data_collected\": false}",
+    "recording_consent_at": null,
+    "insurance_data_collected": false,
+    "p50_latency_ms": null,
+    "max_latency_ms": null,
+    "total_dead_air_ms": 0,
+    "slot_extractor_success_rate": null,
+    "validation_registry_invocations": 0,
+    "loop_incidents": 0,
+    "cost_cents": 48.4103,
+    "call_disposition": null,
+    "disposition": null,
+    "call_cost_eur": null,
+    "tenant_id": null
+  },
+  "turn_metrics": [],
+  "transcripts": [],
+  "tool_calls": [],
+  "aggregate_health": {
+    "n_turns": 0,
+    "p50_total_ms": null,
+    "p95_total_ms": null,
+    "max_total_ms": null,
+    "p50_llm_ms": null,
+    "max_llm_ms": null,
+    "p50_stt_ms": null,
+    "loop_incidents": 0,
+    "barge_in_successes": 0,
+    "error_codes_seen": [],
+    "tts_latencies_measured": 0,
+    "p50_tts_ms": null,
+    "max_tts_ms": null,
+    "validation_passes_count": 0,
+    "slot_extractions_count": 0
+  },
+  "session_data": {
+    "state": {
+      "adk_brain": {
+        "state": {
+          "call_sid": "",
+          "call_ended": false,
+          "first_name": null,
+          "party_size": null,
+          "cached_menu": null,
+          "menu_fetched": false,
+          "order_intent": false,
+          "phone_number": null,
+          "shared_slots": {},
+          "abuse_strikes": 0,
+          "customer_name": null,
+          "order_created": false,
+          "selected_dish": null,
+          "end_call_stage": "idle",
+          "order_quantity": 1,
+          "schema_version": 5,
+          "caller_id_phone": null,
+          "farewell_spoken": false,
+          "delivery_address": null,
+          "recent_responses": [
+            "Willkommen bei DOBOO Korean Soulfood in Bonn! Wie kann ich Ihnen heute helfen?"
+          ],
+          "reservation_date": null,
+          "reservation_time": null,
+          "delivery_intended": false,
+          "ai_greeting_called": false,
+          "current_intent_idx": null,
+          "customer_confirmed": false,
+          "get_weather_called": false,
+          "reservation_intent": false,
+          "validation_entries": {},
+          "cached_menu_at_turn": null,
+          "caller_id_confirmed": false,
+          "caller_said_goodbye": false,
+          "reservation_created": false,
+          "bulk_order_confirmed": false,
+          "cached_menu_metadata": {},
+          "escalation_requested": false,
+          "get_date_info_called": false,
+          "verify_address_called": false,
+          "verify_address_failed": false,
+          "multi_intent_completed": false,
+          "failed_intent_summaries": [],
+          "request_callback_called": false,
+          "transfer_to_tier2_called": false,
+          "check_availability_called": false,
+          "pending_bulk_confirmation": false,
+          "delivery_address_mentioned": false,
+          "last_caller_confirmation_turn": null
+        },
+        "memory": {
+          "recent_turns": [
+            {
+              "bot": "Willkommen bei DOBOO Korean Soulfood in Bonn! Wie kann ich Ihnen heute helfen?",
+              "node": "greeting",
+              "customer": "<call_start>"
+            }
+          ],
+          "context_summary": "",
+          "max_recent_turns": 5,
+          "max_summary_words": 300
+        },
+        "node_mgr": {
+          "node_stack": [],
+          "current_node": "greeting",
+          "turns_in_node": 0
+        },
+        "turn_idx": 1,
+        "all_tools": [
+          "ai_greeting",
+          "get_date_info"
+        ],
+        "order_slots": {
+          "name": {
+            "value": null,
+            "status": "missing",
+            "confidence": "low",
+            "source_turn": null,
+            "raw_mentions": []
+          },
+          "items": {
+            "value": null,
+            "status": "missing",
+            "confidence": "low",
+            "source_turn": null,
+            "raw_mentions": []
+          },
+          "phone": {
+            "value": null,
+            "status": "missing",
+            "confidence": "low",
+            "source_turn": null,
+            "raw_mentions": []
+          },
+          "intent": null,
+          "party_size": {
+            "value": null,
+            "status": "missing",
+            "confidence": "low",
+            "source_turn": null,
+            "raw_mentions": []
+          },
+          "address_city": {
+            "value": null,
+            "status": "missing",
+            "confidence": "low",
+            "source_turn": null,
+            "raw_mentions": []
+          },
+          "delivery_type": {
+            "value": null,
+            "status": "missing",
+            "confidence": "low",
+            "source_turn": null,
+            "raw_mentions": []
+          },
+          "address_number": {
+            "value": null,
+            "status": "missing",
+            "confidence": "low",
+            "source_turn": null,
+            "raw_mentions": []
+          },
+          "address_street": {
+            "value": null,
+            "status": "missing",
+            "confidence": "low",
+            "source_turn": null,
+            "raw_mentions": []
+          },
+          "reservation_date": {
+            "value": null,
+            "status": "missing",
+            "confidence": "low",
+            "source_turn": null,
+            "raw_mentions": []
+          },
+          "reservation_time": {
+            "value": null,
+            "status": "missing",
+            "confidence": "low",
+            "source_turn": null,
+            "raw_mentions": []
+          }
+        },
+        "recent_responses": [
+          "Willkommen bei DOBOO Korean Soulfood in Bonn! Wie kann ich Ihnen heute helfen?"
+        ]
+      }
+    },
+    "caller": "browser_demo",
+    "call_sid": "demo-0ab9f3e7bae3",
+    "ended_at": "2026-05-01T06:07:02.918827+02:00",
+    "started_at": "2026-05-01T06:06:28.905285+02:00",
+    "started_ts": 1777608388.9052896,
+    "tool_calls": [],
+    "from_number": "browser",
+    "transcripts": [],
+    "duration_secs": 34.0,
+    "emergency_events": [],
+    "emergency_detected": false,
+    "recording_consent_at": "2026-05-01T06:06:28.905285+02:00",
+    "insurance_data_collected": false
+  },
+  "pipeline_env_snapshot": "STT:  DeepgramFluxSTTService (flux-general-multi, EU endpoint, eot_threshold=0.6, eot_timeout_ms=3000 ms, mip_opt_out=True)\nVAD:  None — Deepgram Flux semantic EOT (eot_threshold=0.6, eot_timeout_ms=3000)\nLLM:  claude-haiku-4-5 (Vertex region env: us-east5)\nWorker pipeline: IntentSessionManager (shadow) → WorkerRouter (15 profiles) → WorkerExecutor (Required≤280ms / Optional≤350ms / Background)\nTTS:  SaillyGeminiTTSService — voice=Kore, engine=gemini-2.5-flash-tts\n      GLOBAL_SPEED_MULTIPLIER=2.25 (env override possible)\nFiller: pre-baked PCM 12-phrase pool, 400ms trigger (ENABLE_PRE_LLM_FILLER=true) | Backchannel: 6-phrase pool, 200-500ms hesitation window (ENABLE_BACKCHANNEL=true)\nMULTI-INTENT / ADK: Enabled per brain configuration for browser demo\nValidationRegistry: async validation when configured\nTTS Conditioning: Phase 2 — situation + mood → prosody_rate_pct → Gemini speaking_rate\nBarge-in: enabled post-greeting when BargeInHandler is in pipeline\nMonitoring thresholds (env): MONITOR_LATENCY_P95_MS=3000 ms, MONITOR_SUCCESS_THRESHOLD=80, Redis monitor=0",
+  "caller_flag_insights": [],
+  "context_documents": []
+}

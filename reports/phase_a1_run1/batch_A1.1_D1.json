@@ -1,0 +1,145 @@
+{
+  "batch": "A1.1_D1",
+  "passed": 4,
+  "total": 7,
+  "results": [
+    {
+      "id": "A1.1_D1_neutral",
+      "persona": "neutral",
+      "passed": false,
+      "call_sid": "headless-a4db5e6f",
+      "elapsed": 23.450758934020996,
+      "failure_reason": null,
+      "turns": [
+        {
+          "user": "Hallo",
+          "bot": "Hallo! Ich bin Sailly von DOBOO Korean Soulfood in Bonn \u2013 wie kann ich Ihnen heute helfen?",
+          "tools": []
+        },
+        {
+          "user": "",
+          "bot": "Ich w\u00fcrde 2 Personen f\u00fcr Heute um 19:00 Uhr auf den Namen Claudia M\u00fcller reservieren. Stimmt das so?",
+          "tools": []
+        },
+        {
+          "user": "",
+          "bot": "Ich habe 2 Personen f\u00fcr Heute um 19:00 Uhr auf den Namen Claudia M\u00fcller reserviert. Wir freuen uns auf Sie. Auf Wiederh\u00f6ren!",
+          "tools": [
+            "check_availability",
+            "create_reservation"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "A1.1_D1_busy",
+      "persona": "busy",
+      "passed": true,
+      "call_sid": "headless-132c6732",
+      "elapsed": 34.49244832992554,
+      "failure_reason": null,
+      "turns": [
+        {
+          "user": "Hallo",
+          "bot": "Hallo! Ich bin Sailly, die KI-Assistentin von DOBOO Korean Soulfood in Bonn \u2013 wie kann ich Sie heute unterst\u00fctzen?",
+          "tools": []
+        },
+        {
+          "user": "",
+          "bot": "Ja, wir haben noch einen Tisch f\u00fcr 2 Personen um 19:00 Uhr verf\u00fcgbar. Auf welchen Namen darf ich reservieren?",
+          "tools": [
+            "check_availability"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "A1.1_D1_elderly",
+      "persona": "elderly",
+      "passed": true,
+      "call_sid": "headless-61ac45e6",
+      "elapsed": 43.26628351211548,
+      "failure_reason": null,
+      "turns": [
+        {
+          "user": "Hallo",
+          "bot": "Hallo! Ich bin Sailly von DOBOO Korean Soulfood in Bonn \u2013 wie kann ich Ihnen heute helfen?",
+          "tools": []
+        },
+        {
+          "user": "",
+          "bot": "Ja, wir haben noch einen Tisch f\u00fcr 2 Personen um 19:00 Uhr verf\u00fcgbar. Auf welchen Namen darf ich reservieren?",
+          "tools": [
+            "check_availability"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "A1.1_D1_skeptical",
+      "persona": "skeptical",
+      "passed": false,
+      "call_sid": null,
+      "elapsed": 75.01324915885925,
+      "failure_reason": "timeout"
+    },
+    {
+      "id": "A1.1_D1_impatient",
+      "persona": "impatient",
+      "passed": true,
+      "call_sid": "headless-ab118328",
+      "elapsed": 40.67722415924072,
+      "failure_reason": null,
+      "turns": [
+        {
+          "user": "Hallo",
+          "bot": "Hallo! Willkommen bei DOBOO Korean Soulfood in Bonn \u2013 wie kann ich Sie heute unterst\u00fctzen?",
+          "tools": []
+        },
+        {
+          "user": "",
+          "bot": "Ja, wir haben noch einen Tisch f\u00fcr 2 Personen um 19:00 Uhr verf\u00fcgbar. Auf welchen Namen darf ich reservieren?",
+          "tools": [
+            "check_availability"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "A1.1_D1_rude",
+      "persona": "rude",
+      "passed": false,
+      "call_sid": null,
+      "elapsed": 75.0144259929657,
+      "failure_reason": "timeout"
+    },
+    {
+      "id": "A1.1_D1_indecisive",
+      "persona": "indecisive",
+      "passed": true,
+      "call_sid": "headless-19e91aab",
+      "elapsed": 53.946040630340576,
+      "failure_reason": null,
+      "turns": [
+        {
+          "user": "Hallo",
+          "bot": "Hallo! Ich bin Sailly von DOBOO Korean Soulfood in Bonn \u2013 wie kann ich Sie heute helfen?",
+          "tools": []
+        },
+        {
+          "user": "",
+          "bot": "Ich w\u00fcrde 2 Personen f\u00fcr Heute um 19:00 Uhr auf den Namen Claudia M\u00fcller reservieren. Stimmt das so?",
+          "tools": []
+        },
+        {
+          "user": "",
+          "bot": "Ich habe 2 Personen f\u00fcr Heute um 19:00 Uhr auf den Namen Claudia M\u00fcller reserviert. Wir freuen uns auf Sie. Auf Wiederh\u00f6ren!",
+          "tools": [
+            "check_availability",
+            "create_reservation"
+          ]
+        }
+      ]
+    }
+  ]
+}

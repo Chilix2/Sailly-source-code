@@ -1,0 +1,41 @@
+{
+  "base_script_id": "B1.1",
+  "difficulty": "D1",
+  "attempt": 1,
+  "passed": 0,
+  "total": 7,
+  "pass_rate": 0.0,
+  "call_sids": [
+    "headless-2c51af80",
+    "headless-99ed1034",
+    "headless-ccd7ae08",
+    "headless-05350585",
+    "headless-579ea9a7",
+    "headless-5b8af2fd",
+    "headless-09c55a1d"
+  ],
+  "grok_report": {
+    "call_sids": [
+      "headless-2c51af80",
+      "headless-99ed1034",
+      "headless-ccd7ae08",
+      "headless-05350585",
+      "headless-579ea9a7",
+      "headless-5b8af2fd",
+      "headless-09c55a1d"
+    ],
+    "metric_scores": {
+      "tool_accuracy": 100,
+      "flow": 50,
+      "linguistic": 80,
+      "deterministic": 100
+    },
+    "composite_score": 82.0,
+    "improvements": "1. Ensure the agent provides clear readback of orders to confirm details like name, time, and items; 2. Improve conversation flow by having the agent respond actively to user inputs rather than only processing silently; 3. Add natural transitions in agent responses to avoid abrupt ends; 4. Verify that the agent uses the correct Sie-form consistently in all interactions; 5. Include price and availability checks in the response to make it more comprehensive.",
+    "tool_analysis": "No tool calls are evident in the provided transcripts, and 'FAILED TOOL CALLS: None' indicates that any tools used (e.g., for order processing) likely fired correctly without spurious or missing invocations. However, based on the incomplete conversations, tools for confirmation or readback (e.g., order summary tool) should have fired after user inputs to ensure proper flow, but they did not appear in the transcripts.",
+    "achtung_flags": []
+  },
+  "haiku_fixes": null,
+  "fixes_applied": false,
+  "duration_s": 54.55962586402893
+}

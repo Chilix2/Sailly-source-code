@@ -1,0 +1,131 @@
+# Sailly — Full Call Analysis Report
+## Call ID: `demo-8d5a15beea6b`
+_Generated: 2026-05-02 16:05 UTC | Source: Postgres (`google_*`) + runtime env snapshot
+
+---
+
+## 1. Call Overview
+
+| Parameter | Value |
+|-----------|-------|
+| **Call SID** | `demo-8d5a15beea6b` |
+| **Caller / channel** | `[validation:A4_basic_order_froehlich]` |
+| **Started** | 2026-05-01 04:30:58 UTC |
+| **Ended** | 2026-05-01 04:32:07 UTC |
+| **Duration** | **69 seconds (1:09 min)** |
+| **Total DB turns** | 0 |
+| **Outcome / reason** | `client_disconnect` |
+| **Quality score** | 5.0 / 10 |
+| **Avg latency (stored)** | None ms |
+| **p95 latency (stored)** | None ms |
+| **Max latency (stored)** | None ms |
+| **Was escalated** | False |
+| **Tenant** | `—` |
+| **Est. cost (stored)** | 98.2445 ¢ |
+
+### Pipeline configuration (runtime snapshot)
+
+```
+STT:  DeepgramFluxSTTService (flux-general-multi, EU endpoint, eot_threshold=0.6, eot_timeout_ms=3000 ms, mip_opt_out=True)
+VAD:  None — Deepgram Flux semantic EOT (eot_threshold=0.6, eot_timeout_ms=3000)
+LLM:  claude-haiku-4-5 (Vertex region env: us-east5)
+Worker pipeline: IntentSessionManager (shadow) → WorkerRouter (15 profiles) → WorkerExecutor (Required≤280ms / Optional≤350ms / Background)
+TTS:  SaillyGeminiTTSService — voice=Kore, engine=gemini-2.5-flash-tts
+      GLOBAL_SPEED_MULTIPLIER=2.25 (env override possible)
+Filler: pre-baked PCM 12-phrase pool, 400ms trigger (ENABLE_PRE_LLM_FILLER=true) | Backchannel: 6-phrase pool, 200-500ms hesitation window (ENABLE_BACKCHANNEL=true)
+MULTI-INTENT / ADK: Enabled per brain configuration for browser demo
+ValidationRegistry: async validation when configured
+TTS Conditioning: Phase 2 — situation + mood → prosody_rate_pct → Gemini speaking_rate
+Barge-in: enabled post-greeting when BargeInHandler is in pipeline
+Monitoring thresholds (env): MONITOR_LATENCY_P95_MS=3000 ms, MONITOR_SUCCESS_THRESHOLD=80, Redis monitor=0
+```
+
+---
+
+## 2. Aggregate health (from `google_turn_metrics`)
+
+| Check | Value | Notes |
+|-------|-------|-------|
+| Latency p50 / p95 / max (total) | None / None / None ms | Alert threshold env `MONITOR_LATENCY_P95_MS=3000` |
+| LLM span (approx) p50 / max | None / None ms | From `llm_latency_ms` column |
+| STT p50 | None ms | From `stt_latency_ms` |
+| Loop incidents | 0 | `loop_detected_in_stream` |
+| Barge-in successes | 0 | `barge_in_succeeded` |
+| Error codes (distinct) | — | `error_codes` |
+| **[Phase 3] TTS latency** p50 / max | None / None ms (0 turns) | From `tts_latency_ms` |
+| **[Phase 2] Validation passes** | 0 turns | From `validation_passes` |
+| **[Phase 1] Slot extractions** | 0 turns | From `slot_retention_status` |
+| Call-level observability (stored on `google_calls`) | validation_registry_invocations=0, loop_incidents=0 | From `persist_call_aggregates` |
+
+---
+
+## 3. Caller-flag insights (`Achtung Sailly: …` / `Attention Sailly: …`)
+
+_Test harness, caller-bot, or human reviewer: phrases like **Achtung Sailly:** (also **Attention Sailly:** / **Warnung Sailly:**) mark what Sailly did **wrong** — use this for qualitative issues that **latency and tool metrics may not show**._
+
+_No matching caller markers in `google_transcripts` (non-assistant roles), `session_data.transcripts`, or `user_text` in turn metrics._
+## 4. Per-turn breakdown (DB)
+
+_No rows in `google_turn_metrics` for this call._
+
+## 5. Timeline table (compact)
+
+| Turn | total_ms | llm_ms | stt_ms | eot_type | intent | tts_rate_pct | situation | mood | tag | tools | flags |
+|------|----------|--------|--------|----------|--------|--------------|-----------|------|-----|-------|-------|
+| — | — | — | — | — | — | — | — | — | — | — |
+
+---
+
+## 6. Transcripts (`google_transcripts`)
+
+_No transcript rows._
+
+---
+
+## 7. Tool calls (`google_tool_calls`)
+
+_No tool call rows._
+
+---
+
+## 8. Session blob excerpt (`google_calls.session_data`)
+
+```json
+{
+  "state": {},
+  "caller": "browser_demo",
+  "call_sid": "demo-8d5a15beea6b",
+  "ended_at": "2026-05-01T06:32:07.732216+02:00",
+  "started_at": "2026-05-01T06:30:58.072725+02:00",
+  "started_ts": 1777609858.072731,
+  "tool_calls": [],
+  "from_number": "browser",
+  "transcripts": [],
+  "duration_secs": 69.7,
+  "emergency_events": [],
+  "emergency_detected": false,
+  "recording_consent_at": "2026-05-01T06:30:58.072725+02:00",
+  "insurance_data_collected": false
+}
+```
+
+---
+
+## 8.5 Intent Session (`google_context_documents`)
+
+```python
+# v4 pipeline live for all intents — MIGRATED_PROFILES = set(_PROFILES.keys())
+# (no context documents for this call — predates v4 migration)
+```
+
+_(no context documents for this call — predates v4 migration)_
+
+---
+
+## 9. Auto-generated observations
+
+- **Missing metrics**: no `google_turn_metrics` rows — pipeline may not have flushed metrics or call predates instrumentation.
+
+---
+
+_Report end._

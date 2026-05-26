@@ -1,0 +1,40 @@
+{
+  "base_script_id": "B1.1",
+  "difficulty": "D1",
+  "attempt": 3,
+  "passed": 7,
+  "total": 7,
+  "pass_rate": 1.0,
+  "call_sids": [
+    "headless-7250793e",
+    "headless-9d6800e3",
+    "headless-5c2a5b05",
+    "headless-cb1eae44",
+    "headless-2704aa7b",
+    "headless-814e14e9",
+    "headless-65283724"
+  ],
+  "grok_report": {
+    "call_sids": [
+      "headless-7250793e",
+      "headless-9d6800e3",
+      "headless-5c2a5b05",
+      "headless-cb1eae44",
+      "headless-2704aa7b",
+      "headless-814e14e9",
+      "headless-65283724"
+    ],
+    "metric_scores": {
+      "tool_accuracy": 50,
+      "flow": 50,
+      "linguistic": 50,
+      "deterministic": 50
+    },
+    "composite_score": 50.0,
+    "improvements": "Audit failed \u2014 unable to analyze",
+    "tool_analysis": ""
+  },
+  "haiku_fixes": null,
+  "fixes_applied": false,
+  "duration_s": 30.968028783798218
+}
