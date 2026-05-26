@@ -26,6 +26,14 @@ TOOL_NAME = "verify_address"
 MAPS_AUTO_ACCEPT_CONFIDENCE = 0.90
 
 
+def _format_address_for_speech(address: str) -> str:
+    text = (address or "").strip()
+    for suffix in (", Germany", ", Deutschland", ", DE"):
+        if text.endswith(suffix):
+            return text[: -len(suffix)].strip().rstrip(",")
+    return text
+
+
 async def handle(args: dict, ctx: ToolContext) -> ToolResult:
     """
     Args:
@@ -50,10 +58,11 @@ async def handle(args: dict, ctx: ToolContext) -> ToolResult:
     confidence = maps_result.get("confidence", 1.0)
 
     if confidence >= MAPS_AUTO_ACCEPT_CONFIDENCE:
+        canonical = _format_address_for_speech(maps_result.get("formatted_address", raw_address))
         return ToolResult(
             ok=True,
             data={
-                "canonical_address": maps_result.get("formatted_address", raw_address),
+                "canonical_address": canonical,
                 "in_delivery_zone": in_zone,
                 "confidence": confidence,
                 "needs_caller_confirm": False,
@@ -63,7 +72,7 @@ async def handle(args: dict, ctx: ToolContext) -> ToolResult:
         )
 
     # Low confidence — ask caller to confirm canonical form
-    canonical = maps_result.get("formatted_address", raw_address)
+    canonical = _format_address_for_speech(maps_result.get("formatted_address", raw_address))
     return ToolResult(
         ok=True,
         data={
@@ -196,28 +205,28 @@ def _dev_fallback_geocode(address: str, city: str = "") -> Optional[dict]:
     # Known addresses in Bonn (approximate coordinates)
     known_addresses = {
         "bonner bogen": {
-            "formatted_address": "Bonner Bogen 20, 53227 Bonn, Germany",
+            "formatted_address": "Bonner Bogen 20, 53227 Bonn",
             "confidence": 0.90,
             "latitude": 50.7376,
             "longitude": 7.1111,
             "location_type": "RANGE_INTERPOLATED",
         },
         "bogen": {
-            "formatted_address": "Bonner Bogen 20, 53227 Bonn, Germany",
+            "formatted_address": "Bonner Bogen 20, 53227 Bonn",
             "confidence": 0.85,
             "latitude": 50.7376,
             "longitude": 7.1111,
             "location_type": "GEOMETRIC_CENTER",
         },
         "friedrich-ebert": {
-            "formatted_address": "Friedrich-Ebert-Allee 69, 53113 Bonn, Germany",
+            "formatted_address": "Friedrich-Ebert-Allee 69, 53113 Bonn",
             "confidence": 0.95,
             "latitude": 50.7323,
             "longitude": 7.0954,
             "location_type": "ROOFTOP",
         },
         "hauptbahnhof": {
-            "formatted_address": "Hauptbahnhof, 53111 Bonn, Germany",
+            "formatted_address": "Hauptbahnhof, 53111 Bonn",
             "confidence": 0.92,
             "latitude": 50.7408,
             "longitude": 7.0993,
@@ -239,7 +248,7 @@ def _dev_fallback_geocode(address: str, city: str = "") -> Optional[dict]:
         street = match.group(1).strip() if match else address
         number = match.group(2) if match else ""
         return {
-            "formatted_address": f"{street} {number}, Bonn, Germany".strip(),
+            "formatted_address": f"{street} {number}, Bonn".strip(),
             "confidence": 0.75,
             "latitude": 50.7323,
             "longitude": 7.0954,

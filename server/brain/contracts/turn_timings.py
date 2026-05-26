@@ -81,10 +81,22 @@ class TurnTimings:
         return max(0, int((self.tool_done_at - self.l2_done_at) * 1000))
 
     def tts_first_byte_ms(self) -> int:
+        """Latency from l2_done (or tool_done) to first audio byte (TTS synthesis + network)."""
         if not self.tts_first_byte_at:
             return 0
         ref = self.l2_done_at or self.tool_done_at or self.turn_started_at
         return max(0, int((self.tts_first_byte_at - ref) * 1000))
+
+    def tts_ttfb_ms(self) -> int:
+        """Time-to-first-audio (TTFB) from brain start to first audio byte.
+        
+        This measures end-to-end latency from when the brain starts processing
+        (after STT final) to when the first audio chunk is sent to the client.
+        Includes: LLM processing + TTS synthesis + network delay.
+        """
+        if not self.tts_first_byte_at or not self.stt_done_at:
+            return 0
+        return max(0, int((self.tts_first_byte_at - self.stt_done_at) * 1000))
 
     def total_ms(self) -> int:
         end = (
@@ -106,6 +118,7 @@ class TurnTimings:
             "l2_ms": self.l2_ms() or None,
             "tool_ms": self.tool_ms() or None,
             "tts_first_byte_ms": self.tts_first_byte_ms() or None,
+            "tts_ttfb_ms": self.tts_ttfb_ms() or None,  # Brain start to first audio
             "total_ms": self.total_ms() or None,
             "tool_durations": self.tool_durations or None,
             "prompt_tokens_in": self.prompt_tokens_in or None,

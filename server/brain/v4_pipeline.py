@@ -89,6 +89,15 @@ def _split_tts_sentence_chunks(text: str) -> list[str]:
     return chunks
 
 
+def format_address_for_speech(address: str) -> str:
+    """Remove country suffixes that are unnecessary in local restaurant speech."""
+    text = (address or "").strip()
+    for suffix in (", Germany", ", Deutschland", ", DE"):
+        if text.endswith(suffix):
+            return text[: -len(suffix)].strip().rstrip(",")
+    return text
+
+
 def _iso_to_spoken_german(iso: str) -> str:
     """Convert an ISO date string (YYYY-MM-DD) to spoken German, e.g. 'Donnerstag, dem 7. Mai'."""
     import datetime
@@ -192,6 +201,12 @@ def _is_confirmation_v4(text: str) -> bool:
             if w in _lower_words:
                 return True
     return False
+
+
+def _format_phone_for_readback(phone: str) -> str:
+    """Make phone digits easier to verify over TTS."""
+    digits = re.sub(r"\D+", "", phone or "")
+    return " ".join(digits) if digits else (phone or "")
 
 
 def _semantic_confirmation_value(state) -> str:
@@ -522,7 +537,7 @@ def _build_order_overview_v4(state, *, final: bool = False) -> dict:
     state.order_total = f"{total:.2f}"
 
     name = getattr(state, "customer_name", None) or getattr(state, "first_name", None) or ""
-    address = getattr(state, "delivery_address", None)
+    address = format_address_for_speech(getattr(state, "delivery_address", None) or "")
     name_clause = f" auf den Namen {name}" if name else ""
     fulfillment_clause = f", Lieferung an {address}" if address else " zur Abholung"
     total_clause = f" Gesamtbetrag: {total:.2f} Euro."
@@ -645,6 +660,7 @@ async def process_turn_v4(
     caller_phone: str = "",
     intent_result: Optional[IntentResult] = None,
     speculative_worker_results: Optional[dict[str, WorkerOutput]] = None,
+    speculative_generator_result: Optional[dict] = None,
 ) -> dict:
     """Run one turn through the deterministic v4 pipeline.
 
@@ -1237,6 +1253,8 @@ async def process_turn_v4(
     # For FAQ/opening-hours questions we need the actual result.
     if tool_results is None:
         tool_results = {}
+    _pre_ctx_menu_data = ""
+    _pre_ctx_menu_availability_defense = ""
     _text_lo = user_text.lower()
     _is_hours_question = any(w in _text_lo for w in ("öffnungszeit", "geöffnet", "wann", "uhrzeit", "offen", "aufmachen", "zumachen", "noch auf", "heute auf", "noch offen", "noch geöffnet"))
     # Menu FAQ: fire when intent is FAQ/dietary and profile is business_info
@@ -1397,7 +1415,7 @@ async def process_turn_v4(
                                     if _ilabel and _iprice is not None:
                                         _menu_lines.append(f"{_ilabel}: {_iprice:.2f}€")
                     if _menu_lines:
-                        ctx_doc.resolved_entities["menu_data"] = "Speisekarte: " + " | ".join(_menu_lines[:15])
+                        _pre_ctx_menu_data = "Speisekarte: " + " | ".join(_menu_lines[:15])
                         logger.info("[v4_pipeline] Menu loaded for dish validation (B2.3_D3)")
                     # CRITICAL FIX H2.2_D3: Validate user's dish claim against actual menu
                     # When user says "Bibimbap steht nicht auf der Karte" but it IS in the menu,
@@ -1414,7 +1432,7 @@ async def process_turn_v4(
                         if _claimed_unavail:
                             # Item IS on menu — override intent to defend correct availability
                             logger.info("[v4_pipeline] T%d User falsely claims Bibimbap unavailable, but it IS on menu — forcing defense response", turn_idx)
-                            ctx_doc.resolved_entities["menu_availability_defense"] = "Bibimbap IS auf unserer Karte"
+                            _pre_ctx_menu_availability_defense = "Bibimbap IS auf unserer Karte"
         except Exception as _e_menu:
             logger.debug("[v4_pipeline] Critical get_menu call failed: %s", _e_menu)
     
@@ -1445,6 +1463,10 @@ async def process_turn_v4(
         execution_result=execution_result,
         current_state=_state_snapshot_for_gate(state),
     )
+    if _pre_ctx_menu_data:
+        ctx_doc.resolved_entities["menu_data"] = _pre_ctx_menu_data
+    if _pre_ctx_menu_availability_defense:
+        ctx_doc.resolved_entities["menu_availability_defense"] = _pre_ctx_menu_availability_defense
     # Persist worker-extracted slots to the real ConversationState immediately.
     # context_doc_builder only updates its local snapshot dict; calling this here
     # ensures slots (name, time, date, party_size) survive across turns.
@@ -1757,6 +1779,9 @@ async def process_turn_v4(
             # User confirmed — mark stage as idle and fall through to commit gate
             _order_readback_confirmed_now = end_call_stage == "order_pre_commit_readback"
             if _order_readback_confirmed_now:
+                state.items_confirmed = True
+                if getattr(state, "delivery_address", None):
+                    state.address_confirmed = True
                 state.mark_commit_readback_confirmed("create_order")
             else:
                 state.mark_commit_readback_confirmed("create_reservation")
@@ -1876,6 +1901,46 @@ async def process_turn_v4(
                         tools=[], next_action="clarify", should_end=False,
                     )
 
+    if end_call_stage == "phone_readback_pending":
+        phone_value = getattr(state, "phone_number", "") or ""
+        if _semantic_confirms_v4(state) or _is_confirmation_v4(user_text):
+            state.phone_confirmed = True
+            state.phone_readback_confirmed = True
+            state.end_call_stage = "idle"
+            end_call_stage = "idle"
+            _order_readback_confirmed_now = True
+            state.mark_commit_readback_confirmed("create_order")
+            logger.info("[v4_pipeline] T%d phone readback confirmed → proceeding to order commit", turn_idx)
+        elif re.sub(r"\D+", "", user_text or "") and phone_value:
+            readback = _format_phone_for_readback(phone_value)
+            state.end_call_stage = "phone_readback_pending"
+            phone_text = f"Ich habe als Telefonnummer {readback} verstanden. Stimmt die Nummer?"
+            if tts_callback:
+                try:
+                    await tts_callback(phone_text)
+                except Exception as _cb_err:
+                    logger.warning(f"[v4_pipeline] tts_callback raised: {_cb_err}")
+            return _quick_return(
+                phone_text, "order_start", intent_result, t0,
+                tools=[], next_action="clarify", should_end=False,
+            )
+        else:
+            state.phone_confirmed = False
+            state.phone_readback_confirmed = False
+            state.phone_number = None
+            state.end_call_stage = "idle"
+            state.last_field_asked = "phone"
+            phone_text = "Alles klar, welche Telefonnummer darf ich für die Bestellung notieren?"
+            if tts_callback:
+                try:
+                    await tts_callback(phone_text)
+                except Exception as _cb_err:
+                    logger.warning(f"[v4_pipeline] tts_callback raised: {_cb_err}")
+            return _quick_return(
+                phone_text, "order_start", intent_result, t0,
+                tools=[], next_action="clarify", should_end=False,
+            )
+
     # Guard: if reservation/order already confirmed, any further user speech
     # (e.g. "Vielen Dank") must produce a short farewell + end_call, NOT a new
     # confirmation phrase (which would be flagged as BOT_LOOP).
@@ -1993,6 +2058,40 @@ async def process_turn_v4(
         (end_call_stage == "idle" or _order_readback_confirmed_now or getattr(state, "_order_readback_confirmed", False))
         and _all_slots_present(state, "create_order")
     )
+
+    async def _ensure_order_menu_cached() -> None:
+        """Load menu once before any priced order readback."""
+        if getattr(state, "cached_menu", None):
+            return
+        try:
+            from tools.executor import execute_tool as _menu_exec
+
+            _menu_result = await _menu_exec("get_menu", {}, call_sid, tenant_id)
+            if isinstance(_menu_result, dict):
+                tool_results["get_menu"] = _menu_result
+                if "get_menu" not in scheduled_run:
+                    scheduled_run.append("get_menu")
+                _menu = _menu_result.get("menu") or _menu_result.get("items") or _menu_result
+                if isinstance(_menu, dict) and _menu:
+                    state.cached_menu = _menu
+                    _n_items = sum(len(v) for v in _menu.values() if isinstance(v, list))
+                    logger.info("[v4_pipeline] T%d loaded menu before order readback (%d items)", turn_idx, _n_items)
+                    return
+        except Exception as _menu_err:
+            logger.warning("[v4_pipeline] T%d get_menu before order readback failed (will use fallback): %s", turn_idx, _menu_err)
+        
+        # Fallback: load from tenant config if execute_tool failed or returned nothing
+        if not getattr(state, "cached_menu", None):
+            try:
+                from server.core.tenant_config import get_tenant_registry
+                _tenant_cfg = get_tenant_registry().load_tenant(tenant_id or "doboo")
+                if hasattr(_tenant_cfg, "menu") and _tenant_cfg.menu:
+                    state.cached_menu = _tenant_cfg.menu
+                    _n_items = sum(len(v) for v in _tenant_cfg.menu.values() if isinstance(v, list))
+                    logger.info("[v4_pipeline] T%d loaded menu from tenant config (%d items)", turn_idx, _n_items)
+            except Exception as _fallback_err:
+                logger.error("[v4_pipeline] T%d menu fallback also failed — readback will have no prices: %s", turn_idx, _fallback_err)
+
     _delivery_order_without_address = (
         _is_order_intent
         and _order_not_committed
@@ -2127,6 +2226,14 @@ async def process_turn_v4(
         isinstance(getattr(state, "pending_readback_slots", None), dict)
         and "delivery_address" in getattr(state, "pending_readback_slots", {})
     )
+    if _delivery_address_pending and not getattr(state, "delivery_address", None):
+        pending_raw = getattr(state, "pending_readback_slots", {}).get("delivery_address") or {}
+        pending_value = pending_raw.get("value") if isinstance(pending_raw, dict) else None
+        if pending_value:
+            state.delivery_address = str(pending_value).strip()
+            state.delivery_address_mentioned = True
+            state.delivery_intended = True
+
     _delivery_order_needs_address_confirmation = (
         _is_order_intent
         and _order_not_committed
@@ -2137,43 +2244,20 @@ async def process_turn_v4(
             or getattr(state, "delivery_address_mentioned", False) is True
         )
         and (
-            _delivery_address_pending
-            or (
-                getattr(state, "verify_address_failed", False) is True
-                and not getattr(state, "address_verified", False)
-            )
-            or (
-                bool(getattr(state, "delivery_address", None))
-                and not getattr(state, "address_verified", False)
-                and not getattr(state, "address_confirmed", False)
-            )
+            getattr(state, "verify_address_failed", False) is True
+            and not getattr(state, "address_verified", False)
         )
     )
     if _delivery_order_needs_address_confirmation:
-        pending_addr = None
-        if _delivery_address_pending:
-            pending_raw = getattr(state, "pending_readback_slots", {}).get("delivery_address") or {}
-            if isinstance(pending_raw, dict):
-                pending_addr = pending_raw.get("value")
-        if pending_addr:
-            address_prompt = f"Ich habe als Lieferadresse {pending_addr} verstanden. Stimmt das so?"
-        elif getattr(state, "delivery_address", None) and not getattr(state, "verify_address_failed", False):
-            state.pending_readback_slots["delivery_address"] = {
-                "value": getattr(state, "delivery_address"),
-                "confidence": 0.75,
-                "source": "state_readback",
-            }
-            address_prompt = f"Ich habe als Lieferadresse {state.delivery_address} verstanden. Stimmt das so?"
-        else:
-            state.delivery_address = None
-            state.address_verified = False
-            state.address_confirmed = False
-            state.verify_address_called = False
-            state.verify_address_failed = False
-            address_prompt = (
-                "Die Adresse konnte ich nicht sicher finden. Können Sie Straße, "
-                "Hausnummer und Stadt bitte noch einmal nennen?"
-            )
+        state.delivery_address = None
+        state.address_verified = False
+        state.address_confirmed = False
+        state.verify_address_called = False
+        state.verify_address_failed = False
+        address_prompt = (
+            "Die Adresse konnte ich nicht sicher finden. Können Sie Straße, "
+            "Hausnummer und Stadt bitte noch einmal nennen?"
+        )
         state._readback_already_shown = False
         state._order_readback_confirmed = False
         state.end_call_stage = "idle"
@@ -2242,6 +2326,7 @@ async def process_turn_v4(
         # CRITICAL: Once readback is shown, only show it again if user explicitly asks for correction
         if not getattr(state, '_readback_already_shown', False):
             # Show readback with items+prices this turn, return immediately
+            await _ensure_order_menu_cached()
             overview = _build_order_overview_v4(state)
             summary = _with_name_ack(overview["text"])
             if not overview["ok"]:
@@ -2276,6 +2361,9 @@ async def process_turn_v4(
         if state.end_call_stage == "order_pre_commit_readback" and getattr(state, '_readback_already_shown', False):
             if _semantic_confirms_v4(state) or _is_confirmation_v4(user_text):
                 # User confirmed readback → proceed to commit
+                state.items_confirmed = True
+                if getattr(state, "delivery_address", None):
+                    state.address_confirmed = True
                 state.mark_commit_readback_confirmed("create_order")
                 state.end_call_stage = "idle"
                 logger.info(f"[v4_pipeline] T{turn_idx} order readback CONFIRMED → executing create_order")
@@ -2372,6 +2460,7 @@ async def process_turn_v4(
             # Readback not yet shown—show it now and return (don't execute tool yet)
             state.order_pre_commit_shown = True
             state.end_call_stage = 'order_pre_commit_readback'
+            await _ensure_order_menu_cached()
             overview = _build_order_overview_v4(state)
             summary = overview["text"]
             if not overview["ok"]:
@@ -2398,6 +2487,45 @@ async def process_turn_v4(
                 summary, "order_start", intent_result, t0,
                 tools=scheduled_run, next_action="clarify", should_end=False,
             )
+        _phone_value = getattr(state, "phone_number", "") or ""
+        _phone_digits = re.sub(r"\D+", "", _phone_value)
+        _is_real_phone = bool(_phone_digits) and _phone_value != "browser_demo"
+        _caller_id_already_confirmed = bool(
+            getattr(state, "caller_id_confirmed", False)
+            and _phone_digits
+            and _phone_digits == re.sub(r"\D+", "", str(getattr(state, "caller_id_phone", "") or ""))
+        )
+        if _is_real_phone and not _caller_id_already_confirmed and not getattr(state, "phone_readback_confirmed", False):
+            state.end_call_stage = "phone_readback_pending"
+            state.phone_confirmed = False
+            phone_text = f"Ich habe als Telefonnummer {_format_phone_for_readback(_phone_value)} verstanden. Stimmt die Nummer?"
+            logger.info("[v4_pipeline] T%d phone readback required before create_order", turn_idx)
+            if tts_callback:
+                try:
+                    await tts_callback(phone_text)
+                except Exception as _cb_err:
+                    logger.warning(f"[v4_pipeline] tts_callback raised: {_cb_err}")
+            return _quick_return(
+                phone_text, "order_start", intent_result, t0,
+                tools=scheduled_run, next_action="clarify", should_end=False,
+            )
+        
+        # Safety gate: never attempt create_order without first showing a priced readback to the user.
+        # Intended flow: idle → (show readback) → order_pre_commit_readback → (user confirms) → commit → confirmed
+        # If readback has NOT been shown yet (_readback_already_shown is False), skip the entire commit block.
+        if state.end_call_stage == "idle" and not getattr(state, '_readback_already_shown', False):
+            logger.warning(
+                "[v4_pipeline] T%d safety gate triggered: end_call_stage=idle AND readback not yet shown. "
+                "Skipping commit block; readback must be shown first.",
+                turn_idx
+            )
+            # Return early to prevent premature order commitment (Turn 3 smalltalk scenario)
+            return _quick_return(
+                "Entschuldigung, das habe ich nicht verstanden. Können Sie das wiederholen?",
+                "order_start", intent_result, t0,
+                tools=scheduled_run, next_action="clarify", should_end=False,
+            )
+        
         commit_tools_run: list[str] = []
         try:
             from tools.executor import execute_tool
@@ -2412,8 +2540,30 @@ async def process_turn_v4(
             _is_delivery = getattr(state, "delivery_address_mentioned", False) or getattr(state, "delivery_intended", False)
             delivery_address = getattr(state, "delivery_address", "") or ""
 
+            state.sync_commit_gates_from_legacy_flags()
+            if not state.ready_for_commit("create_order"):
+                logger.warning("[v4_pipeline] T%d create_order blocked by hard confirmation gate before commit tools", turn_idx)
+                blocked_text = "Ich kann die Bestellung erst aufnehmen, wenn Sie die Zusammenfassung ausdrücklich bestätigen. Stimmt alles so?"
+                state.end_call_stage = "order_pre_commit_readback"
+                if tts_callback:
+                    try:
+                        await tts_callback(blocked_text)
+                    except Exception as _cb_err:
+                        logger.warning(f"[v4_pipeline] tts_callback raised: {_cb_err}")
+                return _quick_return(
+                    blocked_text, "order_start", intent_result, t0,
+                    tools=scheduled_run,
+                    next_action="clarify",
+                    should_end=False,
+                )
+
             # For delivery orders: call verify_address first
-            if _is_delivery and delivery_address and "verify_address" not in commit_tools_run:
+            if (
+                _is_delivery
+                and delivery_address
+                and "verify_address" not in commit_tools_run
+                and not getattr(state, "address_verified", False)
+            ):
                 try:
                     _tenant_city = (
                         getattr(_tcfg_top, "city", None)
@@ -2441,6 +2591,7 @@ async def process_turn_v4(
                         if _verify_success and _verified_address:
                             state.delivery_address = _verified_address
                             state.address_verified = True
+                            state.address_confirmed = True
                             state.verify_address_failed = False
                             delivery_address = state.delivery_address
                 except Exception as _va_err:
@@ -2449,6 +2600,9 @@ async def process_turn_v4(
             order_args = {
                 "name": getattr(state, "customer_name", "") or getattr(state, "first_name", "") or "",
                 "phone": getattr(state, "phone_number", "") or caller_phone or "",
+                "messaging_phone": getattr(state, "phone_number", "") or (
+                    caller_phone if caller_phone not in ("browser_demo", "", None) else ""
+                ),
                 "order_items": ", ".join(
                     [
                         f"{_item_quantity(item, state, _order_qty, idx)}× {item}" if _item_quantity(item, state, _order_qty, idx) > 1 else item
@@ -2483,6 +2637,22 @@ async def process_turn_v4(
             commit_tools_run.append("create_order")
             logger.info(f"[v4_pipeline] T{turn_idx} create_order → {order_result}")
 
+            if not isinstance(order_result, dict) or order_result.get("success") is False or order_result.get("blocked_by_guardian"):
+                logger.warning("[v4_pipeline] T%d create_order did not commit cleanly: %s", turn_idx, order_result)
+                blocked_text = "Ich konnte die Bestellung noch nicht sicher abschließen. Bitte bestätigen Sie die Zusammenfassung noch einmal mit Ja."
+                state.end_call_stage = "order_pre_commit_readback"
+                if tts_callback:
+                    try:
+                        await tts_callback(blocked_text)
+                    except Exception as _cb_err:
+                        logger.warning(f"[v4_pipeline] tts_callback raised: {_cb_err}")
+                return _quick_return(
+                    blocked_text, "order_start", intent_result, t0,
+                    tools=scheduled_run + commit_tools_run,
+                    next_action="clarify",
+                    should_end=False,
+                )
+
             state.order_created = True
             state.mark_commit_tool_succeeded("create_order")
             state.end_call_stage = "confirmed"
@@ -2512,10 +2682,20 @@ async def process_turn_v4(
                 )
                 logger.info(f"[v4_pipeline] T{turn_idx} ORDER COMMITTED (multi-intent, reservation pending) → readback: {readback!r}")
             else:
-                # Build order commit confirmation WITH items+prices so the caller bot sees them
-                overview = _build_order_overview_v4(state, final=True)
-                readback = overview["text"]
-                logger.info(f"[v4_pipeline] T{turn_idx} ORDER COMMITTED → readback: {readback!r}")
+                # SHORT post-commit confirmation — user already confirmed details in pre-commit readback.
+                # Avoid repetition of full order summary; just acknowledge receipt + include customer name if available.
+                # (This prevents the complaint "das hatten wir schon" / "we already said that")
+                name = getattr(state, "customer_name", None) or getattr(state, "first_name", None) or ""
+                name_clause = f" für {name}" if name else ""
+                
+                # Check if SMS will be sent (if messaging_phone is set)
+                messaging_phone = getattr(state, "phone_number", None) or (
+                    caller_phone if caller_phone not in ("browser_demo", "", None) else ""
+                )
+                sms_clause = " Sie erhalten eine SMS-Bestätigung." if messaging_phone else ""
+                
+                readback = f"Vielen Dank! Ihre Bestellung{name_clause} wird in Kürze vorbereitet.{sms_clause} Auf Wiederhören!"
+                logger.info(f"[v4_pipeline] T{turn_idx} ORDER COMMITTED → short readback: {readback!r}")
 
             if tts_callback:
                 try:
@@ -3043,27 +3223,37 @@ async def process_turn_v4(
             "v4_pipeline": True,
         }
     
-    try:
-        # Include the current user utterance as the last history entry so the
-        # generator sees what the user JUST said (not just previous exchanges).
-        turns_with_current = list(last_turns or [])
-        if user_text:
-            turns_with_current.append(("user", user_text))
-        spoken, json_meta = await generator.generate(
-            ctx_doc, turns_with_current, current_node_name=profile,
-            restaurant_identity=(
-                f"{_tcfg_top.restaurant_name} in {(_tcfg_top.location or {}).get('city') or _tcfg_top.city}"
-                if _tcfg_top and getattr(_tcfg_top, "restaurant_name", "")
-                else ""
-            ),
-        )
-    except Exception as gen_err:
-        logger.warning(
-            f"[v4_pipeline] TinyGenerator.generate() failed: {gen_err} "
-            f"(profile={profile}, turn_idx={turn_idx}); using fallback"
-        )
-        spoken = "Was darf ich für Sie tun?"
-        json_meta = {}
+    cached_generator_ok = (
+        isinstance(speculative_generator_result, dict)
+        and speculative_generator_result.get("profile") == profile
+        and speculative_generator_result.get("spoken")
+    )
+    if cached_generator_ok:
+        spoken = str(speculative_generator_result.get("spoken") or "")
+        json_meta = speculative_generator_result.get("json_meta") or {}
+        logger.info("[v4_pipeline] T%d reused speculative TinyGenerator profile=%s", turn_idx, profile)
+    else:
+        try:
+            # Include the current user utterance as the last history entry so the
+            # generator sees what the user JUST said (not just previous exchanges).
+            turns_with_current = list(last_turns or [])
+            if user_text:
+                turns_with_current.append(("user", user_text))
+            spoken, json_meta = await generator.generate(
+                ctx_doc, turns_with_current, current_node_name=profile,
+                restaurant_identity=(
+                    f"{_tcfg_top.restaurant_name} in {(_tcfg_top.location or {}).get('city') or _tcfg_top.city}"
+                    if _tcfg_top and getattr(_tcfg_top, "restaurant_name", "")
+                    else ""
+                ),
+            )
+        except Exception as gen_err:
+            logger.warning(
+                f"[v4_pipeline] TinyGenerator.generate() failed: {gen_err} "
+                f"(profile={profile}, turn_idx={turn_idx}); using fallback"
+            )
+            spoken = "Was darf ich für Sie tun?"
+            json_meta = {}
 
     # Inject weather data if present (Bug Fix: weather intent dropped in multi-intent)
     if ctx_doc.resolved_entities.get("weather_temp"):

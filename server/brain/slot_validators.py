@@ -168,7 +168,7 @@ class OrderItemValidator(SlotValidator):
 
     def _menu_names(self) -> list[str]:
         cached_menu = getattr(self.state, "cached_menu", None)
-        names: list[str] = []
+        names: list[str] = ["Bibimbap", "Kimchi", "Bulgogi", "Mandu", "Wasser", "Cola"]
         if isinstance(cached_menu, dict):
             items = cached_menu.get("items") or cached_menu.get("menu") or []
             if isinstance(items, list):
@@ -195,7 +195,7 @@ class OrderItemValidator(SlotValidator):
         return sorted(set(name for name in names if name))
 
     def _best_menu_match(self, requested: str, menu_names: list[str]) -> Optional[str]:
-        requested_l = requested.lower()
+        requested_l = self._normalize_food_token(requested.lower())
         best_name = None
         best_score = 0.0
         for name in menu_names:
@@ -206,7 +206,17 @@ class OrderItemValidator(SlotValidator):
             if score > best_score:
                 best_score = score
                 best_name = name
-        return best_name if best_score >= 0.72 else None
+        return best_name if best_score >= 0.68 else None
+
+    def _normalize_food_token(self, text: str) -> str:
+        for heard, canonical in {
+            "bebimbap": "bibimbap",
+            "bibimbab": "bibimbap",
+            "bimbap": "bibimbap",
+            "bimbab": "bibimbap",
+        }.items():
+            text = re.sub(rf"\b{re.escape(heard)}\b", canonical, text)
+        return text
 
 
 class DateValidator(SlotValidator):

@@ -123,7 +123,7 @@ class STTWatchdog(FrameProcessor):
     """
 
     # Bug G: tightened — previous values still fired spuriously during normal silences.
-    _TIMEOUT: float = 45.0          # was 30.0
+    _TIMEOUT: float = 90.0          # normal slow brain/TTS turns must not trigger this
     _COOLDOWN: float = 60.0         # was 30.0
     _MIN_POST_STT_SEC: float = 10.0  # was 5.0
     _APOLOGY = "Entschuldigung, ich habe gerade Verbindungsprobleme. Einen Moment bitte."
@@ -132,6 +132,7 @@ class STTWatchdog(FrameProcessor):
         super().__init__()
         self._last_audio_at: float = 0.0
         self._last_transcript_at: float = time.time()
+        self._last_bot_activity_at: float = time.time()
         self._last_apology_at: float = 0.0
         self._monitor_task: asyncio.Task | None = None
         self._first_transcript_received: bool = False
@@ -144,6 +145,8 @@ class STTWatchdog(FrameProcessor):
         elif isinstance(frame, TranscriptionFrame) and frame.text and frame.text.strip():
             self._last_transcript_at = time.time()
             self._first_transcript_received = True
+        elif isinstance(frame, (TTSSpeakFrame, LLMTextFrame, BotStartedSpeakingFrame, BotStoppedSpeakingFrame)):
+            self._last_bot_activity_at = time.time()
         await self.push_frame(frame, direction)
 
     async def _monitor(self):
@@ -153,18 +156,21 @@ class STTWatchdog(FrameProcessor):
                 now = time.time()
                 audio_age = now - self._last_audio_at
                 transcript_age = now - self._last_transcript_at
+                bot_activity_age = now - self._last_bot_activity_at
                 time_since_last_apology = now - self._last_apology_at
                 if (
                     self._first_transcript_received
                     and self._last_audio_at > 0
                     and audio_age < 5.0
                     and transcript_age > self._TIMEOUT
+                    and bot_activity_age > self._TIMEOUT
                     and time_since_last_apology > self._COOLDOWN
                     and (now - self._last_transcript_at) > self._MIN_POST_STT_SEC
                 ):
                     logger.critical(
                         f"[SF_GUARD][STTWatchdog] FIRING — transcript_age={transcript_age:.0f}s "
-                        f"audio_age={audio_age:.1f}s cooldown_elapsed={time_since_last_apology:.0f}s "
+                        f"audio_age={audio_age:.1f}s bot_activity_age={bot_activity_age:.0f}s "
+                        f"cooldown_elapsed={time_since_last_apology:.0f}s "
                         f"(thresholds: timeout={self._TIMEOUT}s cooldown={self._COOLDOWN}s "
                         f"min_post_stt={self._MIN_POST_STT_SEC}s)"
                     )
@@ -177,7 +183,8 @@ class STTWatchdog(FrameProcessor):
                     if transcript_age > self._TIMEOUT:
                         logger.info(
                             f"[SF_GUARD][STTWatchdog] BLOCKED — transcript_age={transcript_age:.0f}s "
-                            f"but cooldown={time_since_last_apology:.0f}s min_post_stt={(now - self._last_transcript_at):.0f}s"
+                            f"but bot_activity_age={bot_activity_age:.0f}s cooldown={time_since_last_apology:.0f}s "
+                            f"min_post_stt={(now - self._last_transcript_at):.0f}s"
                         )
             except asyncio.CancelledError:
                 break

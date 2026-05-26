@@ -52,6 +52,19 @@ async def handle(args: dict, ctx: ToolContext) -> ToolResult:
       total_price:             float (used for monetary cap check)
       quantity / order_quantity: int (per-item quantity for legacy form)
     """
+    ready_for_commit = getattr(ctx.state, "ready_for_commit", None) if ctx.state is not None else None
+    if ctx.state is None or not callable(ready_for_commit) or not ready_for_commit(TOOL_NAME):
+        logger.warning(
+            "[create_order] blocked before handler commit: readback_not_confirmed call_sid=%s",
+            ctx.call_sid,
+        )
+        return ToolResult(
+            ok=False,
+            data={"blocked_by_guardian": True, "reason": "readback_not_confirmed"},
+            error="readback_not_confirmed",
+            error_code=ErrorCode.TOOL_VALIDATION_FAILED,
+        )
+
     # ── 1. Quantity ceiling ───────────────────────────────────────────────────
     qty = _extract_quantity(args)
     if qty > HARD_QUANTITY_CEILING:

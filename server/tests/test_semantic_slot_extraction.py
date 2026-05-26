@@ -3,6 +3,26 @@ from __future__ import annotations
 import pytest
 
 
+def test_should_skip_semantic_on_pure_greeting():
+    from server.brain.conversation_state import ConversationState
+    from server.brain.slot_extraction_layer import should_run_semantic_extraction, slots_for_current_turn
+
+    state = ConversationState()
+
+    assert should_run_semantic_extraction(state, "Hallo") is False
+    assert slots_for_current_turn(state, "Hallo") == ["confirmation_intent"]
+
+
+def test_should_run_semantic_on_order_utterance():
+    from server.brain.conversation_state import ConversationState
+    from server.brain.slot_extraction_layer import should_run_semantic_extraction, slots_for_current_turn
+
+    state = ConversationState()
+
+    assert should_run_semantic_extraction(state, "Ich möchte ein Bibimbap bestellen") is True
+    assert "order_items" in slots_for_current_turn(state, "Ich möchte ein Bibimbap bestellen")
+
+
 @pytest.mark.asyncio
 async def test_semantic_layer_falls_back_to_deterministic_phone_and_confirmation():
     from server.brain.conversation_state import ConversationState
@@ -23,6 +43,33 @@ async def test_semantic_layer_falls_back_to_deterministic_phone_and_confirmation
     assert candidates.phone is not None
     assert "0179" in candidates.phone.value
     assert state.last_extraction["candidate_count"] >= 2
+    assert state.last_extraction["llm_skipped"] is True
+
+
+@pytest.mark.asyncio
+async def test_semantic_layer_extracts_bebimbap_deterministically_without_llm():
+    from server.brain.conversation_state import ConversationState
+    from server.brain.slot_extraction_layer import SlotExtractionLayer
+
+    state = ConversationState()
+    state.known_items = ["Kimchi", "Bibimbap Hähnchen", "Wasser"]
+    layer = SlotExtractionLayer(slot_extractor=None)
+
+    candidates = await layer.extract(
+        user_utterance=(
+            "Mijn naam is Markus Schneider. Ik shed gerne een kimchi, "
+            "een bebimbap und ein wasser."
+        ),
+        conversation_history=[],
+        current_state=state,
+        slots_to_extract=["order_items"],
+    )
+
+    assert candidates.order_items
+    assert candidates.order_items[0].value[0] == "Kimchi"
+    assert candidates.order_items[0].value[1].startswith("Bibimbap")
+    assert candidates.order_items[0].value[2] == "Wasser"
+    assert state.last_extraction["llm_skipped"] is True
 
 
 def test_conversation_state_promotes_high_confidence_semantic_slots():
@@ -53,6 +100,30 @@ def test_conversation_state_promotes_high_confidence_semantic_slots():
     assert state.delivery_address == "Bonner Bogen 20, Bonn"
     assert state.has_valid_address()
     assert state.semantic_slot_values["delivery_address"]["source"] == "llm"
+
+
+def test_conversation_state_merges_semantic_order_items_with_existing_cart():
+    from server.brain.conversation_state import ConversationState
+    from server.brain.slot_extraction_layer import SlotCandidate, SlotCandidates
+
+    state = ConversationState(order_intent=True, selected_dish="Kimchi")
+    state.order_items_extras = ["Wasser"]
+
+    candidates = SlotCandidates(
+        order_items=[
+            SlotCandidate(
+                slot_name="order_items",
+                value=["Bibimbap", "Wasser"],
+                confidence=0.95,
+                source="llm",
+            )
+        ]
+    )
+
+    applied = state.update_state_from_extracted_slots(candidates)
+
+    assert applied == ["order_items"]
+    assert state.selected_items == ["Kimchi", "Wasser", "Bibimbap"]
 
 
 def test_conversation_state_stages_medium_confidence_slots_for_readback():

@@ -152,13 +152,32 @@ def classify(text: str, turn_idx: int = 0) -> IntentResult:
 
     lower = text.lower().strip()
 
-    # ── Turn 0: Check for multi-intent or reservation before defaulting to greeting ──
+    # ── Turn 0: Order-intent-first detection with greeting tolerance ──────────────
+    # CRITICAL: On Turn 0, we must detect order/delivery intent even if a greeting
+    # like "Guten Tag" is present. Users often lead with greeting + order together,
+    # e.g., "Guten Tag, ich hätt gern ein Bibimbap geliefert auf..."
+    # 
+    # Strategy: Check for order/delivery signals FIRST, then fall back to greeting
+    # for truly greeting-only turns. This ensures the commit gate readback occurs on
+    # Turn 1/2, not deferred to Turn 4.
     if turn_idx == 0:
-        # If turn 0 has explicit reservation/order keywords, classify accordingly
-        # This allows multi-intent on first turn (e.g., "weather + reservation")
+        # Check for explicit order/reservation/FAQ signals
         has_reservation = _RESERVATION_RE.search(lower)
         has_order = _ORDER_RE.search(lower)
         has_faq = _FAQ_RE.search(lower)
+        
+        # Additional signals for order intent: delivery keywords or customer info
+        # that often accompanies ordering (name, address)
+        has_delivery_signal = re.search(
+            r"\b(liefern|lieferung|adresse|straße|strasse|plz|postleitzahl|"
+            r"wohnort|ort|stadteil|bezirk|bonner bogen)\b",
+            lower, re.I
+        )
+        has_customer_info = re.search(
+            r"\b(mein name|auf den namen|heisse|heiße|ich heiße|meine adresse|"
+            r"meine strasse|meine straße|wohne)\b",
+            lower, re.I
+        )
         
         # If both a transaction intent AND an info intent are present, prefer transaction
         # but signal multi-intent via ADD_INFORMATION turn_type for worker_router
@@ -178,6 +197,27 @@ def classify(text: str, turn_idx: int = 0) -> IntentResult:
                 worker_profile="order_start",
                 classifier_path="regex",
             )
+        
+        # PRIMARY DETECTION: Order intent (may have greeting prefix)
+        if has_order or has_delivery_signal or has_customer_info:
+            # Distinguish between delivery (geliefert/lieferung/adresse) and takeaway
+            is_delivery = bool(
+                re.search(r"\b(liefern|lieferung|adresse|straße|strasse|"
+                         r"plz|postleitzahl|wohnort|ort|stadteil|bezirk)\b", 
+                         lower, re.I)
+                or re.search(r"auf (die|einer)? ?adresse|zu (hause|mir|mir nach hause)", 
+                           lower, re.I)
+            )
+            intent_kind = IntentKind.DELIVERY if is_delivery else IntentKind.TAKEAWAY
+            return IntentResult(
+                intent=intent_kind,
+                turn_type=TurnType.ADD_INFORMATION,
+                confidence=0.85,
+                worker_profile="order_start",
+                classifier_path="regex",
+            )
+        
+        # SECONDARY DETECTION: Reservation intent (may have greeting prefix)
         if has_reservation:
             return IntentResult(
                 intent=IntentKind.RESERVATION,
@@ -186,15 +226,9 @@ def classify(text: str, turn_idx: int = 0) -> IntentResult:
                 worker_profile="reservation_start",
                 classifier_path="regex",
             )
-        if has_order:
-            return IntentResult(
-                intent=IntentKind.TAKEAWAY,
-                turn_type=TurnType.ADD_INFORMATION,
-                confidence=0.85,
-                worker_profile="order_start",
-                classifier_path="regex",
-            )
-        # Default: greeting
+        
+        # FALLBACK: Truly greeting-only turns (no order/reservation signals detected)
+        # e.g., "Hallo", "Guten Tag", "Grias" with no order context
         return IntentResult(
             intent=IntentKind.GREETING,
             turn_type=TurnType.START_INTENT,

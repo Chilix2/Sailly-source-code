@@ -88,3 +88,20 @@ async def test_executor_blocks_commit_without_confirmed_state():
     assert result["success"] is False
     assert result["blocked_by_guardian"] is True
     assert result["reason"] == "readback_not_confirmed"
+
+
+@pytest.mark.asyncio
+async def test_executor_blocks_commit_when_state_missing():
+    from tools.executor import execute_tool
+
+    result = await execute_tool(
+        "create_order",
+        {"order_items": "Bibimbap"},
+        call_sid="test-call",
+        tenant_id="doboo",
+        turn_number=5,
+    )
+
+    assert result["success"] is False
+    assert result["blocked_by_guardian"] is True
+    assert result["reason"] == "missing_conversation_state"

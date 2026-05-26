@@ -400,6 +400,8 @@ async def ensure_turn_metrics_table():
             "ALTER TABLE google_turn_metrics ADD COLUMN IF NOT EXISTS layer1_decision JSONB",
             "ALTER TABLE google_turn_metrics ADD COLUMN IF NOT EXISTS layer2_raw_output TEXT",
             "ALTER TABLE google_turn_metrics ADD COLUMN IF NOT EXISTS layer3_changes JSONB",
+            # TTS TTFB instrumentation: time from brain_start to first audio byte
+            "ALTER TABLE google_turn_metrics ADD COLUMN IF NOT EXISTS tts_ttfb_ms INTEGER",
         ):
             try:
                 await conn.execute(_col_ddl)

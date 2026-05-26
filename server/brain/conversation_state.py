@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass, field
+from difflib import SequenceMatcher
 from enum import Enum
 from typing import Any, Optional, List
 
@@ -1209,6 +1210,7 @@ class ConversationState:
     # phone_confirmed already exists below (line ~713); address/summary are new.
     address_confirmed: bool = False        # caller confirmed address readback
     order_summary_confirmed: bool = False  # caller confirmed batched items/name/delivery summary
+    phone_readback_confirmed: bool = False # caller confirmed the phone number readback once
 
     # Sprint 1.5: per-slot confirmation flags — set on affirmative reply to a
     # readback. Read by memory_manager._compose_next_step_instruction so the
@@ -1537,6 +1539,27 @@ class ConversationState:
                 items.append(extra)
         return items
 
+    def has_all_order_data_for_one_shot(self) -> bool:
+        """True when order summary can confirm all collected delivery data at once."""
+        has_items = bool(self.selected_items or self.all_order_items())
+        has_name = bool((self.customer_name or "").strip() or (self.first_name or "").strip())
+        if not has_items or not has_name:
+            return False
+        if self.delivery_intended is True:
+            return bool((self.delivery_address or "").strip())
+        return True
+
+    def skip_confirmed_slots(self) -> List[str]:
+        """Return slots already confirmed by a previous readback."""
+        skipped: List[str] = []
+        if self.items_confirmed:
+            skipped.append("order_items")
+        if self.address_confirmed:
+            skipped.append("delivery_address")
+        if self.phone_confirmed:
+            skipped.append("phone")
+        return skipped
+
     def cart_subtotal(self) -> float:
         """Sum of prices for all cart items using get_cached_dish_price. Returns 0.0 on total lookup failure."""
         total = 0.0
@@ -1635,16 +1658,27 @@ class ConversationState:
                     self.address_confirmed = True
                 applied.append(slot_name)
             elif slot_name == "phone":
-                self.phone_number = str(value).strip()
+                new_phone = str(value).strip()
+                if self.phone_number and _digits_only(self.phone_number) != _digits_only(new_phone):
+                    self.phone_readback_confirmed = False
+                    self.reset_commit_readback("create_order", "phone_corrected")
+                self.phone_number = new_phone
                 self.phone_confirmed = confidence >= 0.85
                 applied.append(slot_name)
             elif slot_name == "order_items":
                 items = value if isinstance(value, list) else [value]
                 cleaned = [str(item).strip() for item in items if str(item).strip()]
                 if cleaned:
-                    self.selected_dish = cleaned[0]
-                    self.order_items_extras = cleaned[1:]
-                    self.selected_items = cleaned
+                    if getattr(candidate, "correction", False):
+                        merged_items = cleaned
+                    else:
+                        merged_items = []
+                        for item in self.all_order_items() + cleaned:
+                            if item and not any(existing.lower() == item.lower() for existing in merged_items):
+                                merged_items.append(item)
+                    self.selected_dish = merged_items[0]
+                    self.order_items_extras = merged_items[1:]
+                    self.selected_items = list(merged_items)
                     self.order_intent = True
                     applied.append(slot_name)
             elif slot_name == "delivery_date":
@@ -1937,6 +1971,7 @@ class ConversationState:
             "name_confirmed": self.name_confirmed,
             "delivery_confirmed": self.delivery_confirmed,
             "phone_confirmed": self.phone_confirmed,
+            "phone_readback_confirmed": self.phone_readback_confirmed,
             "address_verified": self.address_verified,
         }
 
@@ -2058,6 +2093,7 @@ class ConversationState:
             name_confirmed=data.get("name_confirmed", False),
             delivery_confirmed=data.get("delivery_confirmed", False),
             phone_confirmed=data.get("phone_confirmed", False),
+            phone_readback_confirmed=data.get("phone_readback_confirmed", False),
             address_verified=data.get("address_verified", False),
         )
 
@@ -2329,7 +2365,7 @@ def _extract_all_dishes(text: str, items: Optional[List[str]] = None) -> List[st
         items = _KNOWN_ITEMS
     if not items:
         items = []
-    lower = text.lower()
+    lower = _normalize_food_tokens(text.lower())
     found: List[tuple[int, str]] = []
 
     # --- Pass 1: full substring match (exact, longest first to avoid short matches) ---
@@ -2394,6 +2430,30 @@ def _extract_all_dishes(text: str, items: Optional[List[str]] = None) -> List[st
             if not any(d.lower() == fallback_l for _, d in found):
                 found.append((lower.find(fallback_l), fallback))
 
+    # --- Pass 3: STT-tolerant single-token fallback ---
+    # Deepgram can produce near-miss dish tokens ("bebimbap" for "bibimbap").
+    # Match only short aliases/base names to avoid accepting broad fuzzy matches
+    # against long menu item titles.
+    fuzzy_aliases = _dish_fuzzy_aliases(items)
+    _found_first_words = {dish.lower().split()[0] for _, dish in found if dish}
+    for token_match in re.finditer(r"[a-zäöüß]{4,}", lower, re.IGNORECASE):
+        token = token_match.group(0).lower()
+        if token in _found_first_words:
+            continue
+        best_alias = ""
+        best_score = 0.0
+        for alias in fuzzy_aliases:
+            score = SequenceMatcher(None, token, alias.lower()).ratio()
+            if score > best_score:
+                best_score = score
+                best_alias = alias
+        if best_alias and best_score >= 0.84:
+            alias_fw = best_alias.lower().split()[0]
+            if alias_fw in _found_first_words:
+                continue
+            found.append((token_match.start(), best_alias))
+            _found_first_words.add(alias_fw)
+
     # Sort by position in text, deduplicate, return names only
     found.sort(key=lambda t: t[0])
     result: List[str] = []
@@ -2406,6 +2466,34 @@ def _extract_all_dishes(text: str, items: Optional[List[str]] = None) -> List[st
             continue
         if dish not in result:
             result.append(dish)
+    return result
+
+
+_FOOD_TOKEN_NORMALIZATIONS = {
+    "bebimbap": "bibimbap",
+    "bibimbab": "bibimbap",
+    "bimbap": "bibimbap",
+    "bimbab": "bibimbap",
+}
+
+
+def _normalize_food_tokens(text: str) -> str:
+    normalized = text
+    for heard, canonical in _FOOD_TOKEN_NORMALIZATIONS.items():
+        normalized = re.sub(rf"\b{re.escape(heard)}\b", canonical, normalized, flags=re.IGNORECASE)
+    return normalized
+
+
+def _dish_fuzzy_aliases(items: Optional[List[str]]) -> List[str]:
+    aliases = ["Bibimbap", "Kimchi", "Bulgogi", "Mandu", "Wasser", "Cola"]
+    for dish in items or []:
+        first = str(dish).strip().split()[0] if str(dish).strip() else ""
+        if len(first) >= 4:
+            aliases.append(first)
+    result: List[str] = []
+    for alias in aliases:
+        if alias and alias not in result:
+            result.append(alias)
     return result
 
 
@@ -2670,6 +2758,7 @@ def update_state_from_utterance(state: ConversationState, utterance: str) -> Non
         digits = _digits_only(raw)
         if len(digits) >= 8:
             if state.phone_number and _digits_only(state.phone_number) != digits:
+                state.phone_readback_confirmed = False
                 state.reset_commit_readback("create_order", "phone_corrected")
             state.phone_number = raw
             # A freshly spoken phone overrides an unconfirmed caller-ID prefill:
@@ -2708,6 +2797,7 @@ def update_state_from_utterance(state: ConversationState, utterance: str) -> Non
         elif any(a in _tokens for a in _cid_affirm) or any(a in lower for a in _cid_affirm):
             state.caller_id_confirmed = True
             state.phone_number = state.caller_id_phone
+            state.phone_readback_confirmed = True
             logger.info(
                 f"[CALLER-ID] Confirmed by caller — "
                 f"phone_number={state.phone_number!r}"
@@ -3246,6 +3336,7 @@ def update_state_from_utterance(state: ConversationState, utterance: str) -> Non
             state.phone_number = phone_digits
             state.phone_is_landline = not phone_digits.startswith(("015", "016", "017", "014", "018", "019"))
             state.phone_confirmed = True
+            state.phone_readback_confirmed = False
             state.field_attempts["phone"] = 0
             state.phone_digits_buffer = ""
             logger.info(f"[PHONE_EXTRACT] single-turn: {phone_digits} (landline={state.phone_is_landline})")
@@ -3302,6 +3393,7 @@ def update_state_from_utterance(state: ConversationState, utterance: str) -> Non
                 state.phone_number = buffered
                 state.phone_is_landline = not buffered.startswith(("015", "016", "017", "014", "018", "019"))
                 state.phone_confirmed = True
+                state.phone_readback_confirmed = False
                 state.field_attempts["phone"] = 0
                 state.phone_digits_buffer = ""
                 logger.info(f"[PHONE_EXTRACT] cross-turn buffer completed: {buffered} (landline={state.phone_is_landline})")

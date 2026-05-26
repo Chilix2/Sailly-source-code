@@ -9,6 +9,7 @@ Usage (both callers change ONE import line):
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from dataclasses import dataclass, field
@@ -123,6 +124,14 @@ class V4TurnProcessor:
         self._last_slot_retention_status: Optional[dict] = None
         self._last_validation_passes: Optional[list] = None
         self._semantic_tools_called_this_turn: list[str] = []
+        self._speculative_semantic_task: Optional[asyncio.Task] = None
+        self._speculative_semantic_partial: str = ""
+        self._speculative_semantic_slots: list[str] = []
+        self._speculative_semantic_turn_idx: Optional[int] = None
+        self._speculative_generator_task: Optional[asyncio.Task] = None
+        self._speculative_generator_partial: str = ""
+        self._speculative_generator_profile: str = ""
+        self._speculative_generator_turn_idx: Optional[int] = None
 
         # Anthropic client for TinyGenerator
         self._llm_client = AsyncAnthropic(
@@ -138,6 +147,152 @@ class V4TurnProcessor:
             logger.warning("[V4Turn] semantic slot extraction disabled: %s", exc)
             self.slot_extractor = None
             self.slot_extraction_layer = None
+
+    async def start_speculative_semantic_extraction(self, partial_text: str) -> None:
+        """Start semantic slot extraction on Flux partial text without mutating durable state."""
+        if os.environ.get("SEMANTIC_SPECULATIVE_ENABLED", "true").lower() not in ("1", "true", "yes"):
+            return
+        if not partial_text or self.slot_extraction_layer is None:
+            return
+        from server.brain.slot_extraction_layer import should_run_semantic_extraction, slots_for_current_turn
+
+        if not should_run_semantic_extraction(self.state, partial_text):
+            return
+        existing = self._speculative_semantic_task
+        if existing is not None and not existing.done():
+            return
+        slots = slots_for_current_turn(self.state, partial_text)
+        self._speculative_semantic_partial = partial_text
+        self._speculative_semantic_slots = slots
+        self._speculative_semantic_turn_idx = self.turn_idx
+        self._speculative_semantic_task = asyncio.create_task(
+            self.slot_extraction_layer.extract(
+                user_utterance=partial_text,
+                conversation_history=self.last_turns + ([("user", partial_text)] if partial_text else []),
+                current_state=self.state,
+                slots_to_extract=slots,
+            )
+        )
+        logger.info(
+            "[V4Turn] started speculative semantic extraction turn=%s partial_chars=%s",
+            self.turn_idx,
+            len(partial_text),
+        )
+
+    async def start_speculative_generator(self, partial_text: str) -> None:
+        """Start cache-only TinyGenerator work on Flux partial text."""
+        if os.environ.get("SPECULATIVE_GENERATOR_ENABLED", "false").lower() not in ("1", "true", "yes"):
+            return
+        if not partial_text or self._speculative_generator_task is not None:
+            return
+        lower = partial_text.lower()
+        recognizable = (
+            getattr(self.state, "end_call_stage", "idle") in {"idle", "readback_pending"}
+            and any(signal in lower for signal in ("hallo", "karte", "offen", "öffnungszeit", "preis", "haben sie"))
+        )
+        if not recognizable:
+            return
+
+        async def _generate() -> Optional[dict]:
+            try:
+                from server.brain.context_doc_builder import build as build_context_doc
+                from server.brain.intent_classifier import classify
+                from server.brain.tiny_generator import TinyGenerator
+                from server.brain.v4_pipeline import _state_snapshot_for_gate
+                from server.brain.workers import ExecutionResult
+
+                intent_result = classify(partial_text, self.turn_idx)
+                profile = intent_result.worker_profile
+                ctx_doc = build_context_doc(
+                    intent=intent_result.intent,
+                    turn_type=intent_result.turn_type,
+                    worker_profile=profile,
+                    execution_result=ExecutionResult(),
+                    current_state=_state_snapshot_for_gate(self.state),
+                )
+                generator = TinyGenerator(llm_client=self._llm_client)
+                restaurant_identity = ""
+                try:
+                    from server.core.tenant_config import load_tenant_config
+
+                    tenant_cfg = load_tenant_config(self.tenant_id or "doboo")
+                    if getattr(tenant_cfg, "restaurant_name", ""):
+                        city = (tenant_cfg.location or {}).get("city") or tenant_cfg.city
+                        restaurant_identity = f"{tenant_cfg.restaurant_name} in {city}"
+                except Exception:
+                    restaurant_identity = ""
+                spoken, json_meta = await generator.generate(
+                    ctx_doc,
+                    self.last_turns + [("user", partial_text)],
+                    current_node_name=profile,
+                    restaurant_identity=restaurant_identity,
+                )
+                return {"spoken": spoken, "json_meta": json_meta, "profile": profile}
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.debug("[V4Turn] speculative TinyGenerator failed: %s", exc)
+                return None
+
+        self._speculative_generator_partial = partial_text
+        self._speculative_generator_turn_idx = self.turn_idx
+        self._speculative_generator_profile = ""
+        self._speculative_generator_task = asyncio.create_task(_generate())
+        logger.info(
+            "[V4Turn] started speculative TinyGenerator turn=%s partial_chars=%s",
+            self.turn_idx,
+            len(partial_text),
+        )
+
+    async def cancel_speculative_generator(self) -> None:
+        task = self._speculative_generator_task
+        if task is not None and not task.done():
+            task.cancel()
+        self._speculative_generator_task = None
+        self._speculative_generator_partial = ""
+        self._speculative_generator_profile = ""
+        self._speculative_generator_turn_idx = None
+
+    async def _consume_speculative_generator(self, user_text: str) -> Optional[dict]:
+        task = self._speculative_generator_task
+        partial = self._speculative_generator_partial or ""
+        stable_prefix = partial[:max(10, len(partial) - 5)] if partial else ""
+        stable = (
+            task is not None
+            and self._speculative_generator_turn_idx == self.turn_idx
+            and bool(stable_prefix)
+            and user_text.lower().startswith(stable_prefix.lower())
+        )
+        self._speculative_generator_task = None
+        self._speculative_generator_partial = ""
+        self._speculative_generator_profile = ""
+        self._speculative_generator_turn_idx = None
+        if not stable:
+            if task is not None and not task.done():
+                task.cancel()
+            return None
+        try:
+            result = await asyncio.wait_for(task, timeout=0.25)
+        except asyncio.TimeoutError:
+            task.cancel()
+            return None
+        except asyncio.CancelledError:
+            return None
+        except Exception as exc:
+            logger.debug("[V4Turn] speculative TinyGenerator consume failed: %s", exc)
+            return None
+        if result:
+            logger.info("[V4Turn] reused speculative TinyGenerator turn=%s", self.turn_idx)
+        return result
+
+    async def cancel_speculative_semantic_extraction(self) -> None:
+        task = self._speculative_semantic_task
+        if task is not None and not task.done():
+            task.cancel()
+        self._speculative_semantic_task = None
+        self._speculative_semantic_partial = ""
+        self._speculative_semantic_slots = []
+        self._speculative_semantic_turn_idx = None
 
     # ── brain_service reads turn_processor._state for CRM ────────────────────
     @property
@@ -172,6 +327,14 @@ class V4TurnProcessor:
         from server.brain.conversation_state import update_state_from_utterance
         from server.brain.context_doc_builder import _persist_resolved_entities_to_state
         from server.brain.v4_pipeline import process_turn_v4
+        from server.brain.contracts.turn_timings import TurnTimings
+        import time
+
+        # Initialize _turn_timings at the start of each turn for TTS TTFB instrumentation.
+        # This must happen at the top of process_turn before any async work begins.
+        # _turn_timings is used by the TTS timing processor to stamp tts_first_byte_at
+        # and by brain_service.py to accumulate per-stage latencies.
+        self.state._turn_timings = TurnTimings()
 
         self._semantic_tools_called_this_turn = []
 
@@ -200,6 +363,7 @@ class V4TurnProcessor:
         # Step 2: run v4 pipeline — workers + context_doc + commit gate + TinyGenerator
         # Include current user turn in last_turns so TinyGenerator always sees it in context.
         turns_with_current = list(self.last_turns) + ([("user", user_text)] if user_text else [])
+        speculative_generator_result = await self._consume_speculative_generator(user_text)
         result_dict = await process_turn_v4(
             user_text=user_text,
             turn_idx=self.turn_idx,
@@ -211,6 +375,7 @@ class V4TurnProcessor:
             tts_callback=tts_callback,
             caller_phone=self.caller_phone,
             speculative_worker_results=getattr(self, "_speculative_worker_results", None),
+            speculative_generator_result=speculative_generator_result,
         )
         self._speculative_worker_results = None
 
@@ -252,7 +417,7 @@ class V4TurnProcessor:
             return None
 
         import time
-        from server.brain.slot_extraction_layer import slots_for_current_turn
+        from server.brain.slot_extraction_layer import should_run_semantic_extraction, slots_for_current_turn
         from server.brain.slot_validators import (
             AddressValidator,
             DateValidator,
@@ -265,14 +430,51 @@ class V4TurnProcessor:
         # semantic state can silently advance a later pre-commit gate.
         self.state.semantic_slot_values.pop("confirmation_intent", None)
 
+        if not should_run_semantic_extraction(self.state, user_text):
+            self._last_slot_extraction_latency_ms = 0
+            self._last_slot_retention_status = {
+                "skipped": True,
+                "reason": "no_semantic_need",
+            }
+            self._last_validation_passes = []
+            return None
+
         started = time.monotonic()
         slots = slots_for_current_turn(self.state, user_text)
-        candidates = await self.slot_extraction_layer.extract(
-            user_utterance=user_text,
-            conversation_history=self.last_turns + ([("user", user_text)] if user_text else []),
-            current_state=self.state,
-            slots_to_extract=slots,
+        candidates = None
+        task = self._speculative_semantic_task
+        partial = self._speculative_semantic_partial or ""
+        stable_prefix = partial[:max(10, len(partial) - 5)] if partial else ""
+        speculative_stable = (
+            task is not None
+            and self._speculative_semantic_turn_idx == self.turn_idx
+            and bool(stable_prefix)
+            and user_text.lower().startswith(stable_prefix.lower())
         )
+        if speculative_stable:
+            try:
+                candidates = await task
+                logger.info("[V4Turn] reused speculative semantic extraction turn=%s", self.turn_idx)
+            except asyncio.CancelledError:
+                candidates = None
+            except Exception as exc:
+                logger.debug("[V4Turn] speculative semantic extraction failed: %s", exc)
+                candidates = None
+        elif task is not None and not task.done():
+            task.cancel()
+
+        self._speculative_semantic_task = None
+        self._speculative_semantic_partial = ""
+        self._speculative_semantic_slots = []
+        self._speculative_semantic_turn_idx = None
+
+        if candidates is None:
+            candidates = await self.slot_extraction_layer.extract(
+                user_utterance=user_text,
+                conversation_history=self.last_turns + ([("user", user_text)] if user_text else []),
+                current_state=self.state,
+                slots_to_extract=slots,
+            )
         self._last_slot_extraction_latency_ms = int((time.monotonic() - started) * 1000)
 
         validators = {
@@ -288,11 +490,27 @@ class V4TurnProcessor:
         }
         validation_passes: list[dict] = []
         address_reprompt: Optional[str] = None
-        for candidate in candidates.all():
+
+        async def _validate_one(candidate):
             validator = validators.get(candidate.slot_name)
             if validator is None:
-                continue
+                return candidate, None
+            if candidate.slot_name == "delivery_address":
+                candidate_value = str(candidate.value or "").strip().lower()
+                current_value = str(getattr(self.state, "delivery_address", "") or "").strip().lower()
+                if (
+                    candidate_value
+                    and current_value == candidate_value
+                    and getattr(self.state, "address_verified", False)
+                ):
+                    return candidate, None
             result = await validator.validate(candidate)
+            return candidate, result
+
+        validated = await asyncio.gather(*(_validate_one(candidate) for candidate in candidates.all()))
+        for candidate, result in validated:
+            if result is None:
+                continue
             candidate.validator_feedback = result.feedback
             candidate.validator_valid = result.is_valid
             candidate.confidence = max(0.0, min(1.0, candidate.confidence + result.confidence_adjustment))
@@ -312,6 +530,10 @@ class V4TurnProcessor:
                 )
             if result.tool_called:
                 self._semantic_tools_called_this_turn.append(result.tool_called)
+                if candidate.slot_name == "delivery_address" and result.is_valid:
+                    self.state.verify_address_called = True
+                    self.state.address_verified = True
+                    self.state.verify_address_failed = False
             validation_passes.append({
                 "slot": candidate.slot_name,
                 "valid": result.is_valid,
@@ -348,6 +570,14 @@ class V4TurnProcessor:
 
         pending = getattr(self.state, "pending_readback_slots", {}) or {}
         if pending and not applied:
+            has_one_shot_order = (
+                set(pending.keys()) == {"delivery_address"}
+                and callable(getattr(self.state, "has_all_order_data_for_one_shot", None))
+                and self.state.has_all_order_data_for_one_shot()
+            )
+            if has_one_shot_order:
+                # Let the order overview read back items + address together.
+                return None
             return self._build_semantic_readback(pending)
         return None
 
@@ -404,6 +634,13 @@ class V4TurnProcessor:
             value = raw.get("value")
             if isinstance(value, list):
                 value = ", ".join(str(v) for v in value)
+            if slot_name == "delivery_address" and value:
+                try:
+                    from server.brain.v4_pipeline import format_address_for_speech
+
+                    value = format_address_for_speech(str(value))
+                except Exception:
+                    value = str(value)
             if value:
                 parts.append(f"{label}: {value}")
         if not parts:

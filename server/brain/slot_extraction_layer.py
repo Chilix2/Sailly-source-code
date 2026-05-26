@@ -115,17 +115,23 @@ class SlotExtractionLayer:
         started = time.monotonic()
         slots = [slot for slot in slots_to_extract if slot in SEMANTIC_SLOT_NAMES]
         deterministic = self._extract_deterministic(user_utterance, current_state, slots)
+        llm_slots = [
+            slot for slot in slots
+            if slot not in deterministic
+            or float(deterministic[slot].get("confidence", 0.0) or 0.0) < 0.85
+            or bool(deterministic[slot].get("correction"))
+        ]
         llm_candidates: dict[str, Any] = {}
         llm_timed_out = False
 
-        if slots and self.extractor is not None:
+        if llm_slots and self.extractor is not None:
             try:
                 llm_candidates = await asyncio.wait_for(
                     self._extract_via_llm(
                         user_utterance=user_utterance,
                         conversation_history=conversation_history,
                         current_state=current_state,
-                        slots_to_extract=slots,
+                        slots_to_extract=llm_slots,
                     ),
                     timeout=self.timeout_s,
                 )
@@ -138,7 +144,7 @@ class SlotExtractionLayer:
         merged = self._merge_candidates(deterministic, llm_candidates)
         candidates = self._score_and_gate(merged)
         latency_ms = int((time.monotonic() - started) * 1000)
-        self._stamp_metrics(current_state, candidates, latency_ms, llm_timed_out)
+        self._stamp_metrics(current_state, candidates, latency_ms, llm_timed_out, llm_skipped=not llm_slots)
         return candidates
 
     def _extract_deterministic(self, utterance: str, state: Any, slots: list[str]) -> dict[str, dict[str, Any]]:
@@ -170,6 +176,21 @@ class SlotExtractionLayer:
                 match = _BARE_INT_RE.search(text)
                 if match:
                     candidates["party_size"] = self._raw_candidate(int(match.group(1)), 0.85, match.group(1), "deterministic")
+
+        if "order_items" in slots:
+            try:
+                from server.brain.conversation_state import _extract_all_dishes
+
+                dishes = _extract_all_dishes(text, getattr(state, "known_items", None))
+            except Exception:
+                dishes = []
+            if dishes:
+                candidates["order_items"] = self._raw_candidate(
+                    dishes,
+                    0.9,
+                    text,
+                    "deterministic",
+                )
 
         return candidates
 
@@ -352,10 +373,19 @@ class SlotExtractionLayer:
                 setattr(result, slot_name, candidate)
         return result
 
-    def _stamp_metrics(self, state: Any, candidates: SlotCandidates, latency_ms: int, timed_out: bool) -> None:
+    def _stamp_metrics(
+        self,
+        state: Any,
+        candidates: SlotCandidates,
+        latency_ms: int,
+        timed_out: bool,
+        *,
+        llm_skipped: bool = False,
+    ) -> None:
         metric = {
             "latency_ms": latency_ms,
             "timed_out": timed_out,
+            "llm_skipped": llm_skipped,
             **candidates.to_metric(),
         }
         try:
@@ -406,6 +436,8 @@ def slots_for_current_turn(state: Any, user_text: str = "") -> list[str]:
     """Return the semantic slots that matter for this turn."""
     lower = (user_text or "").lower()
     slots: set[str] = {"confirmation_intent"}
+    if getattr(state, "end_call_stage", "idle") == "order_pre_commit_readback":
+        return ["confirmation_intent"]
     if getattr(state, "order_intent", False) or any(word in lower for word in ("bestell", "liefer", "abhol", "essen")):
         slots.update({"order_items", "customer_name", "phone"})
         if (
@@ -427,6 +459,57 @@ def slots_for_current_turn(state: Any, user_text: str = "") -> list[str]:
         "correction_pending",
     }:
         slots.update({"customer_name", "delivery_address", "order_items", "phone", "delivery_date", "party_size"})
-    if not slots - {"confirmation_intent"}:
-        slots.update({"customer_name", "phone"})
     return sorted(slots)
+
+
+def should_run_semantic_extraction(state: Any, user_text: str = "") -> bool:
+    """Return False for low-value turns where deterministic v4 routing is enough."""
+    lower = (user_text or "").lower()
+    if getattr(state, "pending_readback_slots", None):
+        return True
+    if getattr(state, "end_call_stage", "idle") == "order_pre_commit_readback":
+        if any(token in lower for token in _CONFIRMATION_YES | _CONFIRMATION_NO):
+            return False
+        return True
+    if getattr(state, "end_call_stage", "idle") in {
+        "pre_commit_readback",
+        "order_pre_commit_readback",
+        "readback_pending",
+        "correction_pending",
+    }:
+        return True
+    slot_signals = (
+        "bestell", "liefer", "abhol", "essen", "reserv", "tisch", "person",
+        "adresse", "straße", "strasse", "bogen", "telefon", "nummer",
+        "kimchi", "bibimbap", "bebimbap", "wasser", "cola",
+    )
+    status_signals = (
+        "noch da", "bist du da", "hallo noch", "hörst du", "hoerst du",
+        "verbindung", "verbindungsproblem", "warte", "moment",
+    )
+    if any(signal in lower for signal in status_signals):
+        return False
+    phone_only_signals = (
+        "telefonnummer", "nummer ist", "meine nummer", "null", "eins", "zwei",
+        "drei", "vier", "fünf", "fuenf", "sechs", "sieben", "acht", "neun",
+    )
+    has_phone_signal = _PHONE_RE.search(user_text or "") or any(signal in lower for signal in phone_only_signals)
+    has_non_phone_slot_signal = any(
+        signal in lower
+        for signal in (
+            "bestell", "liefer", "abhol", "essen", "reserv", "tisch", "person",
+            "adresse", "straße", "strasse", "bogen", "kimchi", "bibimbap",
+            "bebimbap", "wasser", "cola",
+        )
+    )
+    if has_phone_signal and not has_non_phone_slot_signal:
+        return False
+    if any(token in lower for token in _CONFIRMATION_YES | _CONFIRMATION_NO):
+        return False
+    if getattr(state, "order_intent", False) or getattr(state, "reservation_intent", False):
+        return True
+    if any(signal in lower for signal in slot_signals):
+        return True
+    if has_phone_signal:
+        return True
+    return False

@@ -466,9 +466,28 @@ async def execute_tool(
         )
         return blocked_result
 
-    if tool_name in ("create_order", "create_reservation") and conversation_state is not None:
-        ready_for_commit = getattr(conversation_state, "ready_for_commit", None)
-        if callable(ready_for_commit) and not ready_for_commit(tool_name):
+    if tool_name in ("create_order", "create_reservation"):
+        ready_for_commit = getattr(conversation_state, "ready_for_commit", None) if conversation_state is not None else None
+        if conversation_state is None or not callable(ready_for_commit):
+            reason = "missing_conversation_state"
+            logger.warning(f"[GUARDIAN_BLOCK] {tool_name} blocked for {call_sid}: {reason}")
+            blocked_result = {
+                "success": False,
+                "blocked_by_guardian": True,
+                "reason": reason,
+                "must_ask_for": ["explicit_confirmation"],
+                "message": "Interner Schutz: Bestellungen brauchen einen bestätigten Gesprächszustand.",
+            }
+            _record_tool_event(
+                tool_name=tool_name,
+                args=args,
+                call_sid=call_sid,
+                turn_number=turn_number,
+                result=blocked_result,
+                success=False,
+            )
+            return blocked_result
+        if not ready_for_commit(tool_name):
             reason = "readback_not_confirmed"
             logger.warning(f"[GUARDIAN_BLOCK] {tool_name} blocked for {call_sid}: {reason}")
             blocked_result = {
