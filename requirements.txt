@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+pipecat-ai[google,deepgram,silero]
+google-cloud-texttospeech
+anthropic[vertex]
+deepgram-sdk
+python-dotenv
+pyyaml
+google-auth
+redis

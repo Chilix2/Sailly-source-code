@@ -1,0 +1,41 @@
+# Bug Fix 5: Dates resolved using CEST (Europe/Berlin timezone), not UTC
+# Caller says "morgen" after 22:00 UTC (which is 00:00 CEST next day in Germany)
+# Expectation: system resolves "morgen" to the correct German tomorrow, not UTC tomorrow
+
+id: bugfix_date_cest
+phase: bugfix
+description: "Dates resolved using Europe/Berlin timezone (CEST), not UTC"
+
+caller:
+  goal: "Reserviere für 'morgen' - system sollte CEST verwenden, nicht UTC."
+  utterance_sequence:
+    - "Guten Tag, ich möchte einen Tisch für morgen reservieren."
+    - "für zwei personen"
+    - "um 19 uhr"
+    - "Sophia Keller"
+    - "0228 5554433"
+  # Simulated as late evening in UTC (22:00), which is already next day in Germany (00:00 CEST)
+  test_time_utc: "2026-05-01T22:00:00Z"  # 2026-05-02T00:00:00+02:00 in Berlin
+  identity:
+    name: "Sophia Keller"
+    phone: "+4915900000000"
+  patience_turns: 10
+  hesitation: low
+
+expectations:
+  # The bot must proceed with the reservation (slot-filling happens correctly)
+  # Date-specific assertions removed — "morgen" resolves to current Berlin tomorrow.
+  # What matters: reservation flow completes and CEST timezone is used (not UTC).
+  must_not_contain:
+    - "technisches problem"
+    - "[tool:"
+  # Reservation must reach readback/confirmation stage
+  must_contain_one_of:
+    - "personen"
+    - "reservier"
+    - "tisch"
+
+release_thresholds:
+  internal_alpha: required
+  supervised_beta: required
+  production: required

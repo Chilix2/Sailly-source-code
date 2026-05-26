@@ -1,0 +1,151 @@
+id: smb_support
+name: SMB support
+description: Voice-agent template for small and medium businesses handling support, sales, scheduling, billing triage, and lead intake.
+version: "1.1"
+language_defaults: [de, en]
+compliance_checklist:
+  - AI disclosure is spoken in the first audible greeting.
+  - Human fallback is available for complaints, contracts, legal, billing, and payment issues.
+  - Ticket, appointment, and lead creation require contact data and readback.
+  - Do not promise delivery dates, pricing, refunds, or SLA outcomes unless configured.
+capabilities:
+  - id: smb_greeting
+    name: Business greeting and intent routing
+    category: conversation
+    description: Welcome callers, disclose AI usage, and route to support, sales, booking, billing, or handoff.
+    tools: []
+    slots: [language, caller_intent, department]
+    variables: [business_name, opening_hours, supported_departments]
+    guards:
+      - id: ki_disclosure_first_turn
+        description: First audible greeting must identify the assistant as AI-supported.
+        applies_to: [greeting]
+      - id: no_tool_leakage
+        description: Never expose tool names, JSON, or internal state to callers.
+        forbidden_behaviors: ["Say [tool:", "Mention validation status."]
+    scenarios:
+      - id: smb_greeting_support_route
+        name: Route support caller
+        caller_goal: Caller says they need help with an existing service issue.
+        mandatory: true
+        expected:
+          transcript_assertions: [KI, helfen]
+          guards: [ki_disclosure_first_turn, no_tool_leakage]
+  - id: faq_support
+    name: FAQ and company info
+    category: knowledge
+    description: Answer questions from configured docs, opening hours, policies, service descriptions, and onboarding material.
+    tools:
+      - name: faq
+        required: false
+        description: Ground factual business answers in configured knowledge.
+    slots: [topic]
+    variables: [knowledge_sources, opening_hours, policy_links]
+    guards:
+      - id: knowledge_grounding
+        description: If information is not configured, say that staff can follow up instead of guessing.
+        forbidden_behaviors: ["Invent pricing.", "Invent policy exceptions."]
+    scenarios:
+      - id: smb_policy_question
+        name: Policy question
+        caller_goal: Caller asks whether same-day service is available.
+        mandatory: true
+        expected:
+          tools: [faq]
+          guards: [knowledge_grounding]
+  - id: ticket_create
+    name: Support ticket creation
+    category: transaction
+    description: Capture support requests and create a ticket after issue/contact readback.
+    tools:
+      - name: create_support_ticket
+        required: true
+        required_slots: [customer_name, phone_number, issue_summary]
+        optional_slots: [priority, account_id, email]
+    slots: [customer_name, phone_number, email, account_id, issue_summary, priority]
+    variables: [ticket_queue, priority_rules, support_sla]
+    guards:
+      - id: ticket_readback_before_commit
+        description: Repeat issue summary and contact data before creating a ticket.
+        applies_to: [create_support_ticket]
+      - id: no_sla_overpromise
+        description: Do not promise resolution time beyond configured SLA text.
+        forbidden_behaviors: ["Guarantee same-day resolution."]
+    scenarios:
+      - id: smb_ticket_create
+        name: Support ticket
+        caller_goal: Caller reports that their invoice portal login no longer works.
+        mandatory: true
+        expected:
+          tools: [create_support_ticket]
+          final_state: confirmed
+          guards: [ticket_readback_before_commit, no_sla_overpromise]
+  - id: appointment_booking
+    name: Appointment or callback booking
+    category: transaction
+    description: Book callbacks, consultations, demos, or service appointments after readback.
+    tools:
+      - name: create_callback
+        required: false
+        required_slots: [customer_name, phone_number, preferred_date, preferred_time, reason]
+        optional_slots: [email, company_name]
+    slots: [customer_name, company_name, phone_number, email, preferred_date, preferred_time, reason]
+    variables: [callback_calendar, callback_sla, appointment_types]
+    guards:
+      - id: callback_readback_before_commit
+        description: Confirm callback reason, preferred time, and contact data before commit.
+        applies_to: [create_callback]
+    scenarios:
+      - id: smb_callback_booking
+        name: Callback booking
+        caller_goal: Caller wants a technician callback tomorrow morning.
+        mandatory: true
+        expected:
+          tools: [create_callback]
+          guards: [callback_readback_before_commit]
+  - id: sales_lead
+    name: Sales lead capture
+    category: lead
+    description: Capture lead details and route to sales without quoting unconfigured pricing.
+    tools:
+      - name: capture_sales_lead
+        required: false
+        required_slots: [customer_name, company_name, phone_number, interest]
+        optional_slots: [email, budget, notes]
+    slots: [customer_name, company_name, phone_number, email, interest, budget, notes]
+    variables: [sales_queue, lead_qualification_questions, pricing_policy]
+    guards:
+      - id: no_unconfigured_pricing
+        description: Pricing must come from configured knowledge or staff follow-up.
+        forbidden_behaviors: ["Invent a monthly price.", "Promise a discount."]
+    scenarios:
+      - id: smb_sales_lead
+        name: Sales lead
+        caller_goal: Caller asks for a quote for ten employee seats.
+        mandatory: true
+        expected:
+          tools: [capture_sales_lead]
+          guards: [no_unconfigured_pricing]
+  - id: smb_escalation
+    name: Complaint, billing, contract, and human handoff
+    category: escalation
+    description: Route sensitive, high-value, legal, contract, billing, or complaint calls to staff.
+    tools:
+      - name: transfer_to_human
+        required: false
+        required_slots: [issue_type]
+        optional_slots: [customer_name, phone_number, notes]
+    slots: [issue_type, customer_name, phone_number, account_id, notes]
+    variables: [handoff_phone, escalation_hours, callback_sla]
+    guards:
+      - id: sensitive_topic_handoff
+        description: Billing disputes, cancellations, contracts, legal issues, and angry complaints require staff.
+        applies_to: [transfer_to_human]
+    scenarios:
+      - id: smb_billing_complaint_handoff
+        name: Billing complaint handoff
+        caller_goal: Caller says the latest invoice is wrong and demands a refund.
+        mandatory: true
+        expected:
+          tools: [transfer_to_human]
+          guards: [sensitive_topic_handoff]

@@ -1,0 +1,19 @@
+[Unit]
+Description=Sailly Builder Lab Backend (FastAPI, isolated)
+After=network.target redis-server.service postgresql.service
+Wants=redis-server.service postgresql.service
+
+[Service]
+Type=simple
+User=charles2
+WorkingDirectory=/home/charles2/builder-lab/sailly-browser-demo
+EnvironmentFile=/home/charles2/builder-lab/sailly-browser-demo/.env.builder_lab
+Environment=PATH=/home/charles2/builder-lab/sailly-browser-demo/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/home/charles2/builder-lab/sailly-browser-demo/venv/bin/python3 -m uvicorn server.main:app --host 127.0.0.1 --port 18080
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

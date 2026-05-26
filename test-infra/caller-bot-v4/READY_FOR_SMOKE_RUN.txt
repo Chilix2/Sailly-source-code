@@ -1,0 +1,31 @@
+✓ IMPLEMENTATION COMPLETE
+
+All components are built, tested, and ready for smoke run.
+
+CHECKLIST:
+✓ Scaffold (README, requirements, pyproject, system prompt)
+✓ Transport (HeadlessClient, WS protocol)
+✓ Persona (GPT-4o JSON-mode)
+✓ Scenarios (11 YAML scenarios Phase 0-10, smoke/core/full suites)
+✓ Verifier (10 global rules + scenario expectations)
+✓ Metrics (asyncpg fetch + derive signals)
+✓ Runner (orchestrator + conversation loop)
+✓ Scoring (per-call + aggregate reports)
+✓ CLI (full argument support)
+✓ Unit tests (15/15 passing)
+
+FILES CREATED:
+- src/: 9 Python modules (main, config, transport, persona, runner, verifier, metrics, scoring, scenario_loader)
+- scenarios/: 11 YAML scenarios across phases 0-10
+- tests/: 2 test modules (15 tests, all passing)
+- prompts/: caller_system.de.txt (from v4 spec)
+- Docs: README.md, QUICKSTART.md, IMPLEMENTATION_NOTES.md
+
+READY FOR SMOKE RUN:
+1. Start v4 server: python3 -m server.main (or existing command)
+2. Set OPENAI_API_KEY: export OPENAI_API_KEY=sk-...
+3. Run smoke: cd test-infra/caller-bot-v4 && python3 -m src.main --suite smoke --runs 1 --verbose
+4. Reports will be saved to out/ directory
+5. Target: All 4 scenarios PASS = Internal Alpha Ready
+
+NEXT: The smoke_run task requires a running v4 server to execute. Once server is up and OPENAI_API_KEY is set, run the command above.

@@ -1,0 +1,6 @@
+{"meta": {"name": "order_bebimbap_multi_item", "description": "Mixed-language STT typo must preserve Kimchi, Bibimbap, and Wasser before commit"}}
+{"role": "user", "text": "Mijn naam is Markus Schneider. Ik shed gerne een kimchi, een bebimbap und ein wasser. Dat is gerne geliefert aan die adresse am Bonner Bogen zwanzig in Bonn."}
+{"role": "assert", "type": "contains", "text": "Bibimbap"}
+{"role": "assert", "type": "contains", "text": "Kimchi"}
+{"role": "assert", "type": "contains", "text": "Wasser"}
+{"role": "assert", "type": "tool_not", "name": "create_order"}

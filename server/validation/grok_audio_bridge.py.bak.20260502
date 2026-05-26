@@ -1,0 +1,590 @@
+"""
+Bidirectional PCM bridge: Grok Realtime API ↔ Sailly `/ws/demo`.
+
+Switched 2026-05-02 from OpenAI Realtime to Grok Voice Agent API for:
+- Better instruction-following stability (no degradation after 1-2 min)
+- Simpler server-side VAD (no manual turn triggering needed)
+- Faster time-to-first-audio (<1s vs OpenAI 2-3s)
+- Stable role adherence (caller stays as customer, doesn't drift)
+- Flat $0.05/min pricing vs OpenAI's token metering
+
+Architecture:
+- Grok server VAD automatically detects when user finishes speaking
+- No need for bot_turn_watcher() or manual response.create triggering
+- Simpler event handling (mostly compatible with OpenAI events)
+"""
+
+from __future__ import annotations
+
+import asyncio
+import base64
+import json
+import logging
+import os
+import struct
+import time
+from dataclasses import dataclass
+from types import SimpleNamespace
+from typing import Any, Literal
+
+try:
+    import websockets
+except ImportError as e:  # pragma: no cover
+    raise ImportError("Install websockets: pip install websockets") from e
+
+from server.audio_recorder import CALLER_RATE, CallerAudioRecorder, finalize_all
+
+logger = logging.getLogger(__name__)
+
+# Diagnostic logger for bridge instrumentation
+diag = logging.getLogger("bridge.diag")
+diag.setLevel(logging.DEBUG)
+_T0 = time.monotonic()
+
+def _t() -> float:
+    return time.monotonic() - _T0
+
+def _rms(pcm16: bytes) -> int:
+    """Compute RMS of PCM16 LE audio for energy detection."""
+    if not pcm16 or len(pcm16) < 2:
+        return 0
+    try:
+        import audioop
+        return audioop.rms(pcm16, 2)
+    except Exception:
+        return 0
+
+# Grok Voice Agent API endpoint
+GROK_REALTIME_URL = "wss://api.x.ai/v1/realtime"
+GROK_MODEL = "grok-voice-think-fast-1.0"
+
+# Browser wire-protocol constants (must match BrowserFrameSerializer)
+_SEND_SAMPLE_RATE = 16_000
+_BYTES_PER_SAMPLE = 2
+_CHUNK_BYTES = 4096  # 128 ms @ 16 kHz
+_CHUNK_INTERVAL_S = _CHUNK_BYTES / (_SEND_SAMPLE_RATE * _BYTES_PER_SAMPLE)
+_SILENCE_CHUNK = b"\x00" * _CHUNK_BYTES
+
+# Grok audio output event name
+_GROK_AUDIO_DELTA_EVENT = "response.output_audio.delta"
+
+
+@dataclass
+class BridgeResult:
+    call_sid: str
+    transcripts: list[dict[str, Any]]
+    duration_sec: float
+    caller_audio_url: str | None = None
+    agent_audio_url: str | None = None
+    error: str | None = None
+    scenario_id: str = ""
+
+
+class _AgentChunks:
+    """Buffers agent-side PCM (same interface expected by finalize_all)."""
+
+    def __init__(self) -> None:
+        self.chunks: list[bytes] = []
+
+
+def _import_audioop():  # pragma: no cover — env dependent
+    try:
+        import audioop as _a  # type: ignore[import-not-found]
+
+        return _a
+    except ImportError:
+        try:
+            import audioop_lts as _a  # type: ignore[import-not-found]
+
+            return _a
+        except ImportError:
+            return None
+
+
+def _linear_pcm16_resample(pcm: bytes, src_rate: int, dst_rate: int) -> bytes:
+    """Chunk-wise linear resample (no cross-chunk state) — fallback only."""
+    if not pcm or src_rate == dst_rate:
+        return pcm
+    samples = struct.unpack(f"<{len(pcm) // 2}h", pcm)
+    if not samples:
+        return pcm
+    ratio = dst_rate / src_rate
+    out_len = max(1, int(len(samples) * ratio))
+    out: list[int] = []
+    for j in range(out_len):
+        src_pos = j / ratio
+        i = int(src_pos)
+        frac = src_pos - i
+        if i + 1 < len(samples):
+            s = samples[i] * (1.0 - frac) + samples[i + 1] * frac
+        else:
+            s = float(samples[min(i, len(samples) - 1)])
+        out.append(int(max(-32768, min(32767, round(s)))))
+    return struct.pack(f"<{len(out)}h", *out)
+
+
+class _PCM24kTo16k:
+    """Stateful resampler for Grok output (24 kHz) → Sailly mic path (16 kHz)."""
+
+    def __init__(self) -> None:
+        self._state: Any = None
+        self._audioop = _import_audioop()
+
+    def convert(self, pcm24: bytes) -> bytes:
+        if not pcm24:
+            return pcm24
+        if self._audioop is not None:
+            out, self._state = self._audioop.ratecv(
+                pcm24, 2, 1, 24000, CALLER_RATE, self._state
+            )
+            return out
+        return _linear_pcm16_resample(pcm24, 24000, CALLER_RATE)
+
+
+class _SaillyAudioPump:
+    """
+    Reframes inbound PCM16/16kHz audio into 4096-byte chunks, prefixes each
+    with a 4-byte LE chunk counter, paces sends at real time (~128ms/chunk),
+    and emits silence whenever the buffer is empty.
+
+    This matches BrowserFrameSerializer's wire format and the timing a real
+    browser microphone produces.
+    """
+
+    def __init__(self, ws: Any) -> None:
+        self._ws = ws
+        self._buf = bytearray()
+        self._counter = 0
+        self._lock = asyncio.Lock()
+        self._task: asyncio.Task | None = None
+        self._stopped = False
+        self._send_errors = 0
+
+    def start(self) -> None:
+        if self._task is None:
+            self._task = asyncio.create_task(self._loop(), name="sailly-audio-pump")
+
+    async def stop(self) -> None:
+        self._stopped = True
+        if self._task is not None:
+            self._task.cancel()
+            try:
+                await self._task
+            except (asyncio.CancelledError, Exception):
+                pass
+            self._task = None
+
+    async def push(self, pcm16: bytes) -> None:
+        """Append PCM16/16kHz audio bytes to the outbound buffer."""
+        if not pcm16:
+            return
+        async with self._lock:
+            self._buf.extend(pcm16)
+
+    async def drop_pending(self) -> None:
+        """Discard any buffered audio that hasn't been sent yet."""
+        async with self._lock:
+            self._buf.clear()
+
+    async def _next_chunk(self) -> bytes:
+        async with self._lock:
+            if len(self._buf) >= _CHUNK_BYTES:
+                chunk = bytes(self._buf[:_CHUNK_BYTES])
+                del self._buf[:_CHUNK_BYTES]
+                return chunk
+        return _SILENCE_CHUNK
+
+    async def _loop(self) -> None:
+        loop = asyncio.get_event_loop()
+        next_t = loop.time()
+        while not self._stopped:
+            chunk = await self._next_chunk()
+            header = struct.pack("<I", self._counter & 0xFFFFFFFF)
+            try:
+                await self._ws.send(header + chunk)
+            except Exception as e:
+                self._send_errors += 1
+                if self._send_errors > 3:
+                    logger.warning("[pump] giving up after repeated send errors: %s", e)
+                    break
+                await asyncio.sleep(0.05)
+                continue
+            self._counter += 1
+            if self._counter % 100 == 0:
+                async with self._lock:
+                    buf_len = len(self._buf)
+                diag.info("T=%.3f PUMP_HEARTBEAT counter=%d buf_bytes=%d", _t(), self._counter, buf_len)
+            next_t += _CHUNK_INTERVAL_S
+            delay = next_t - loop.time()
+            if delay > 0:
+                await asyncio.sleep(delay)
+            else:
+                # Fell behind (slow link or GC pause). Reset clock to avoid a
+                # catch-up burst that defeats real-time pacing.
+                next_t = loop.time()
+
+
+async def _drain_until_sailly_session_init(sailly_ws: Any) -> str:
+    """Wait for session_init event from Sailly and extract call_sid."""
+    while True:
+        msg = await sailly_ws.recv()
+        if isinstance(msg, bytes):
+            continue
+        try:
+            data = json.loads(msg)
+        except json.JSONDecodeError:
+            continue
+        if data.get("type") == "session_init":
+            sid = data.get("call_sid") or ""
+            logger.info("[grok-bridge] Sailly session_init call_sid=%s", sid)
+            return sid
+        if data.get("error"):
+            raise RuntimeError(f"Sailly handshake error: {data}")
+
+
+async def _drain_until_grok_session_ready(grok_ws: Any) -> None:
+    """Wait for session.updated event from Grok."""
+    while True:
+        msg = await grok_ws.recv()
+        if isinstance(msg, bytes):
+            continue
+        try:
+            data = json.loads(msg)
+        except json.JSONDecodeError:
+            continue
+        if data.get("type") == "session.updated":
+            logger.info("[grok-bridge] Grok session configured")
+            return
+        if data.get("error"):
+            raise RuntimeError(f"Grok session config error: {data}")
+
+
+async def connect_grok_to_sailly(
+    *,
+    scenario_id: str,
+    caller_instructions: str,
+    tenant_id: str,
+    sailly_ws_url: str,
+    xai_api_key: str,
+    google_credentials_path: str | None = None,
+    max_duration_sec: float = 180.0,
+    voice: str = "Ara",
+) -> BridgeResult:
+    """
+    Run one validation call: Sailly handles STT/TTS/LLM; Grok Realtime plays
+    the caller. The bridge presents itself to Sailly as a real browser mic
+    (correct framing, real-time pacing, continuous silence) with automatic
+    turn-taking via Grok's server-side VAD.
+    """
+    t0 = time.monotonic()
+    transcripts: list[dict[str, Any]] = []
+    creds = google_credentials_path or os.environ.get(
+        "GOOGLE_APPLICATION_CREDENTIALS",
+        "/home/charles2/.ssh/sailly-voice-agent-key.json",
+    )
+
+    call_sid = ""
+    err: str | None = None
+    caller_recorder = CallerAudioRecorder(call_sid="pending", credentials_path=creds)
+    agent_buf = _AgentChunks()
+
+    sailly_ws = None
+    grok_ws = None
+    pump: _SaillyAudioPump | None = None
+    pump_started = False  # Phase 1: Track if pump has been started
+    bridge_state: Literal["grok_listening", "grok_speaking", "cooldown"] = "grok_listening"  # 3-state machine
+    cooldown_deadline = 0.0  # Unix time when cooldown expires
+    _COOLDOWN_TIMEOUT_S = 8.0
+    
+    # Sailly TTS silence detection to prevent audio overlap
+    _SAILLY_TTS_GRACE_S = 0.5   # how long after last TTS frame to wait
+    sailly_last_tts_ts = 0.0    # monotonic time of last high-RMS Sailly frame
+    grok_audio_buf: list[bytes] = []  # buffered Grok audio while Sailly TTS active
+
+    try:
+        # ─── 1. Sailly handshake ────────────────────────────────────────────
+        sailly_ws = await websockets.connect(sailly_ws_url, max_size=None)
+        await sailly_ws.send(
+            json.dumps({"tenant": tenant_id, "voice": "Kore", "style": "warm"})
+        )
+        call_sid = await _drain_until_sailly_session_init(sailly_ws)
+        diag.info("T=%.3f SAILLY_INIT call_sid=%s", _t(), call_sid)
+        caller_recorder._call_sid = call_sid
+
+        # ─── 2. Create audio pump but don't start yet ────────────────────────
+        # Phase 1: Defer start until first bot transcript arrives
+        pump = _SaillyAudioPump(sailly_ws)
+        # pump.start() is called later after first bot transcript
+
+        # ─── 3. Grok Realtime handshake ────────────────────────────────────
+        grok_url = f"{GROK_REALTIME_URL}?model={GROK_MODEL}"
+        grok_ws = await websockets.connect(
+            grok_url,
+            additional_headers={"Authorization": f"Bearer {xai_api_key}"},
+            max_size=None,
+        )
+
+        # Minimal session config: server VAD handles turn detection
+        session_update = {
+            "type": "session.update",
+            "session": {
+                "instructions": caller_instructions,
+                "voice": voice,
+                "turn_detection": {
+                    "type": "server_vad",
+                    "threshold": 0.5,
+                },
+                "audio": {
+                    "input": {"format": {"type": "audio/pcm", "rate": 24000}},
+                    "output": {"format": {"type": "audio/pcm", "rate": 24000}},
+                },
+            },
+        }
+        await grok_ws.send(json.dumps(session_update))
+        await _drain_until_grok_session_ready(grok_ws)
+        diag.info("T=%.3f GROK_READY voice=%s vad=server_vad", _t(), voice)
+
+        # ─── 4. Bidirectional audio bridge with cooldown timeout monitoring ──────────────────────────────────
+
+        async def sailly_to_grok() -> None:
+            """Forward Sailly's bot TTS to Grok."""
+            nonlocal pump_started, bridge_state, cooldown_deadline, sailly_last_tts_ts
+            assert sailly_ws is not None and grok_ws is not None
+            evt_count = 0
+            while True:
+                msg = await sailly_ws.recv()
+                if isinstance(msg, bytes):
+                    # Track Sailly TTS activity (high RMS = active TTS)
+                    rms_val = _rms(msg)
+                    if rms_val > 200:
+                        sailly_last_tts_ts = time.monotonic()
+                    
+                    # 3-state gating: only forward Sailly audio if Grok is actively LISTENING
+                    if bridge_state == "grok_listening":
+                        # Sailly emits PCM16 LE 24kHz mono. Grok accepts 24kHz.
+                        agent_buf.chunks.append(msg)
+                        diag.info("T=%.3f SAILLY_BIN_TO_GROK bytes=%d rms=%d state=%s", _t(), len(msg), rms_val, bridge_state)
+                        b64 = base64.b64encode(msg).decode("ascii")
+                        await grok_ws.send(
+                            json.dumps({"type": "input_audio_buffer.append", "audio": b64})
+                        )
+                else:
+                    try:
+                        data = json.loads(msg)
+                    except json.JSONDecodeError:
+                        continue
+                    mtype = data.get("type")
+                    evt_count += 1
+                    speaker = data.get("speaker", "")
+                    text = (data.get("text") or "")[:80]
+                    diag.info("T=%.3f SAILLY_JSON type=%s speaker=%s text=%r", _t(), mtype, speaker, text)
+
+                    # Phase 1: Start pump on first bot transcript
+                    if mtype == "transcript" and speaker == "bot" and not pump_started:
+                        if pump is not None:
+                            pump.start()
+                            pump_started = True
+                            diag.info("T=%.3f PUMP_STARTED after first bot transcript", _t())
+
+                    # 3-state transition: cooldown -> grok_listening when bot finishes
+                    if mtype == "transcript" and speaker == "bot" and bridge_state == "cooldown":
+                        bridge_state = "grok_listening"
+                        diag.info("T=%.3f STATE_CHANGE cooldown->grok_listening (bot done)", _t())
+
+                    if mtype == "transcript":
+                        speaker = data.get("speaker")
+                        text = data.get("text") or ""
+                        transcripts.append({"speaker": speaker, "text": text})
+
+                    elif mtype == "bot_text":
+                        # Streaming TTS text
+                        pass
+
+                    elif mtype == "tools_called":
+                        transcripts.append(
+                            {"speaker": "tools", "text": data.get("tools")}
+                        )
+
+                    elif mtype == "call_ended":
+                        # Sailly will close the socket shortly
+                        pass
+
+                    elif mtype == "error":
+                        raise RuntimeError(f"Sailly WS error: {data}")
+
+        downsample = _PCM24kTo16k()
+
+        async def cooldown_monitor() -> None:
+            """Monitor cooldown timeout and auto-exit if bot transcript doesn't arrive in time."""
+            nonlocal bridge_state, cooldown_deadline
+            while True:
+                await asyncio.sleep(0.1)  # Check every 100ms
+                if bridge_state == "cooldown" and time.monotonic() > cooldown_deadline:
+                    bridge_state = "grok_listening"
+                    diag.info("T=%.3f STATE_CHANGE cooldown->grok_listening (timeout)", _t())
+
+        async def grok_to_sailly() -> None:
+            """Forward Grok caller speech to the pump."""
+            nonlocal pump_started, bridge_state, cooldown_deadline, sailly_last_tts_ts, grok_audio_buf
+            assert grok_ws is not None and pump is not None
+            evt_count = 0
+            while True:
+                raw = await grok_ws.recv()
+                
+                # Check if this is binary audio (raw PCM24) or JSON event
+                if isinstance(raw, bytes):
+                    # Raw PCM24 audio directly from Grok
+                    if len(raw) > 0:
+                        rms_val = _rms(raw)
+                        diag.info("T=%.3f GROK_BIN bytes=%d rms=%d state=%s", _t(), len(raw), rms_val, bridge_state)
+                        pcm16 = downsample.convert(raw)
+                        
+                        # Check if Sailly TTS is still active (grace period)
+                        if time.monotonic() - sailly_last_tts_ts > _SAILLY_TTS_GRACE_S:
+                            # Sailly TTS is quiet, flush any buffered Grok audio first
+                            for chunk in grok_audio_buf:
+                                caller_recorder.on_audio(chunk)
+                                await pump.push(chunk)
+                            if grok_audio_buf:
+                                diag.info("T=%.3f GROK_AUDIO_FLUSHED chunks=%d", _t(), len(grok_audio_buf))
+                            grok_audio_buf.clear()
+                            # Now push current audio
+                            caller_recorder.on_audio(pcm16)
+                            await pump.push(pcm16)
+                        else:
+                            # Sailly TTS still active, buffer this audio
+                            grok_audio_buf.append(pcm16)
+                            diag.info("T=%.3f GROK_AUDIO_BUFFERED bytes=%d rms=%d", _t(), len(pcm16), rms_val)
+                    continue
+                
+                # JSON event
+                try:
+                    evt = json.loads(raw)
+                except json.JSONDecodeError:
+                    logger.warning("[grok_to_sailly] failed to parse: %s", raw[:100])
+                    continue
+                    
+                et = evt.get("type")
+                evt_count += 1
+                diag.info("T=%.3f GROK_EVT type=%s state=%s", _t(), et, bridge_state)
+
+                # Handle missing type (Grok API error) — Issue 3
+                if et is None:
+                    logger.warning("[grok] untyped event: %s", str(evt)[:120])
+                    if evt.get("detail"):   # Grok API error — terminate
+                        raise RuntimeError(f"Grok API error: {evt}")
+                    continue
+
+                # 3-state machine transitions
+                if et == "response.created":
+                    bridge_state = "grok_speaking"
+                    diag.info("T=%.3f STATE_CHANGE grok_listening->grok_speaking", _t())
+                elif et == "response.done":
+                    bridge_state = "cooldown"
+                    cooldown_deadline = time.monotonic() + _COOLDOWN_TIMEOUT_S
+                    diag.info("T=%.3f STATE_CHANGE grok_speaking->cooldown (timeout at T=%.3f)", _t(), _COOLDOWN_TIMEOUT_S)
+
+                # Handle audio deltas from Grok (base64 encoded in JSON)
+                if et == _GROK_AUDIO_DELTA_EVENT:
+                    delta = evt.get("delta") or ""
+                    if not delta:
+                        continue
+                    pcm24 = base64.b64decode(delta)
+                    pcm16 = downsample.convert(pcm24)
+                    rms_val = _rms(pcm16)
+                    diag.info("T=%.3f GROK_AUDIO_FORWARDED bytes=%d rms=%d", _t(), len(pcm16), rms_val)
+                    
+                    # Check if Sailly TTS is still active (grace period)
+                    if time.monotonic() - sailly_last_tts_ts > _SAILLY_TTS_GRACE_S:
+                        # Sailly TTS is quiet, flush any buffered Grok audio first
+                        for chunk in grok_audio_buf:
+                            caller_recorder.on_audio(chunk)
+                            await pump.push(chunk)
+                        if grok_audio_buf:
+                            diag.info("T=%.3f GROK_AUDIO_FLUSHED chunks=%d", _t(), len(grok_audio_buf))
+                        grok_audio_buf.clear()
+                        # Now push current audio
+                        caller_recorder.on_audio(pcm16)
+                        await pump.push(pcm16)
+                    else:
+                        # Sailly TTS still active, buffer this audio
+                        grok_audio_buf.append(pcm16)
+                        diag.info("T=%.3f GROK_AUDIO_BUFFERED bytes=%d rms=%d", _t(), len(pcm16), rms_val)
+                    continue
+
+                # Phase 3: Grok audio should flow cleanly to Sailly STT
+                # (no text capture needed - Grok is audio-only caller)
+                if et == "response.done":
+                    diag.info("T=%.3f GROK_RESPONSE_DONE caller_finished_speaking", _t())
+                    continue
+
+                # Capture Grok's ground-truth transcription (what Grok heard)
+                if et == "conversation.item.input_audio_transcription.completed":
+                    grok_heard = evt.get("transcript") or ""
+                    diag.info("T=%.3f GROK_HEARD text=%r", _t(), grok_heard[:80])
+                    continue
+
+                if et in ("response.audio.done", "response.output_audio.done"):
+                    logger.debug("[grok_to_sailly] end of utterance")
+                    continue
+
+                if et == "input_audio_buffer.speech_started":
+                    logger.debug("[grok_to_sailly] VAD: speech started")
+                    continue
+
+                if et == "input_audio_buffer.speech_stopped":
+                    logger.debug("[grok_to_sailly] VAD: speech stopped")
+                    continue
+
+                if et == "error":
+                    err_obj = evt.get("error") or {}
+                    diag.info("T=%.3f GROK_ERROR %s", _t(), str(evt)[:100])
+                    logger.warning("[grok_to_sailly] error: %s", evt)
+
+        await asyncio.wait_for(
+            asyncio.gather(sailly_to_grok(), grok_to_sailly(), cooldown_monitor()),
+            timeout=max_duration_sec,
+        )
+
+    except asyncio.TimeoutError:
+        logger.info("[grok-bridge] Max duration %.1fs elapsed — stopping", max_duration_sec)
+    except Exception as e:
+        err = str(e)
+        logger.exception("[grok-bridge] Failed: %s", e)
+    finally:
+        if pump is not None:
+            try:
+                await pump.stop()
+            except Exception:
+                pass
+        for ws in (sailly_ws, grok_ws):
+            if ws is not None:
+                try:
+                    await ws.close()
+                except Exception:
+                    pass
+
+    # ─── 5. Persist recordings ──────────────────────────────────────────────
+    combined_url: str | None = None
+    agent_url: str | None = None
+    try:
+        agent_shim = SimpleNamespace(chunks=agent_buf.chunks)
+        combined_url, agent_url = await finalize_all(
+            call_sid=call_sid or caller_recorder._call_sid,
+            credentials_path=creds,
+            caller_recorder=caller_recorder,
+            agent_capture=agent_shim,  # type: ignore[arg-type]
+        )
+    except Exception as fin_e:
+        logger.warning("[grok-bridge] finalize_all failed: %s", fin_e)
+
+    dur = time.monotonic() - t0
+    return BridgeResult(
+        call_sid=call_sid,
+        transcripts=transcripts,
+        duration_sec=dur,
+        caller_audio_url=combined_url,
+        agent_audio_url=agent_url,
+        error=err,
+        scenario_id=scenario_id,
+    )

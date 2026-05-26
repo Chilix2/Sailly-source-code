@@ -1,0 +1,7 @@
+name: smoke_greeting_and_hangup
+description: Minimal smoke test — bot greets, caller responds, bot acknowledges.
+turns:
+  - user: "Hallo, ich möchte bestellen."
+    expect_contains: "DOBOO"
+  - user: "Einen Bulgogi zum Abholen."
+    expect_tools: []

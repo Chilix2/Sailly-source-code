@@ -1,0 +1,9 @@
+{"meta": {"name": "reservation_basic", "description": "Standard reservation flow — 4 slots, create_reservation fires", "fix_history": ["2026-04-26: removed order-dependent contains/name (Sprint 1 PR-A)", "2026-05-08: re-applied after regression; 5-turn v4 flow with phone + final confirm"]}}
+{"role": "user", "text": "Ich möchte einen Tisch für nächsten Freitag reservieren."}
+{"role": "assert", "type": "forbid", "text": "technisches problem"}
+{"role": "user", "text": "Um neunzehn Uhr für vier Personen."}
+{"role": "user", "text": "Mein Name ist Anna Weber."}
+{"role": "user", "text": "Meine Nummer ist null eins sieben neun drei vier fünf sechs sieben acht neun."}
+{"role": "user", "text": "Ja, das stimmt."}
+{"role": "assert", "type": "tool", "name": "create_reservation", "at_end": true}
+{"role": "assert", "type": "tool_not", "name": "create_order", "at_end": true}

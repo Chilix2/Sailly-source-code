@@ -1,0 +1,53 @@
+[Unit]
+Description=Sailly Sound Validation — STS Caller Test Suite
+Documentation=file:///home/charles2/sailly-browser-demo/QUICK_START.md
+After=network-online.target sailly-voice-agent.service
+Wants=network-online.target
+PartOf=sailly-voice-agent.service
+
+[Service]
+Type=simple
+User=charles2
+Group=charles2
+WorkingDirectory=/home/charles2/sailly-browser-demo
+
+# Load secrets from GCP at startup (injected by env-loader.sh)
+EnvironmentFile=-/home/charles2/sailly-browser-demo/.env
+EnvironmentFile=-/run/sailly/validation.env
+
+# API keys (override via /run/sailly/validation.env loaded by ExecStartPre)
+# XAI_API_KEY and ANTHROPIC_API_KEY will be set by ExecStartPre
+Environment=PYTHONPATH=/home/charles2/sailly-browser-demo
+Environment=LOG_LEVEL=INFO
+Environment=SAILLY_WS_URL=ws://localhost:8080/ws/demo
+Environment=SAILLY_HEALTH_URL=http://localhost:8080/healthz
+
+# Load secrets from GCP before starting
+ExecStartPre=/bin/bash -c '\
+    mkdir -p /run/sailly && \
+    if command -v gcloud >/dev/null 2>&1; then \
+        echo "XAI_API_KEY=$(gcloud secrets versions access latest --secret=REDACTED_XAI_KEY 2>/dev/null || echo "")" > /run/sailly/validation.env && \
+        echo "ANTHROPIC_API_KEY=$(gcloud secrets versions access latest --secret=anthropic-api-key 2>/dev/null || echo "")" >> /run/sailly/validation.env && \
+        echo "DEEPGRAM_API_KEY=$(gcloud secrets versions access latest --secret=deepgram-api-key 2>/dev/null || echo "")" >> /run/sailly/validation.env && \
+        chmod 600 /run/sailly/validation.env; \
+    fi'
+
+ExecStart=/bin/bash /home/charles2/sailly-browser-demo/run_validation.sh --daemon
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=sailly-validation
+
+# Restart: on failure only (not on success exit 0)
+Restart=on-failure
+RestartSec=60s
+StartLimitIntervalSec=300s
+StartLimitBurst=3
+
+# Resource limits
+TimeoutStartSec=120s
+TimeoutStopSec=30s
+
+[Install]
+WantedBy=multi-user.target
