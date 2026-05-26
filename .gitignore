@@ -40,5 +40,8 @@ test-infra/**/out/
 .local/backups/
 
 # Local key material (never commit)
+credentials/
+partner-local-setup.tar.gz
+DOWNLOAD-ME-*.tar.gz
 scripts/gsm-aws-bedrock-templates/*.value
 **/BedrockAPIKey*.csv
