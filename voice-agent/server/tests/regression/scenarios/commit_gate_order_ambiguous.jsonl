@@ -1,0 +1,5 @@
+{"meta": {"name": "commit_gate_order_ambiguous", "description": "Order readback followed by ambiguous response must not fire create_order"}}
+{"role": "user", "text": "Guten Tag, ich möchte ein Bibimbap zum Abholen bestellen. Mein Name ist Markus Schneider. Meine Nummer ist null eins sieben neun drei vier fünf sechs sieben acht neun."}
+{"role": "assert", "type": "contains", "text": "stimmt"}
+{"role": "user", "text": "Vielleicht, ich überlege noch."}
+{"role": "assert", "type": "tool_not", "name": "create_order", "at_end": true}

@@ -679,6 +679,7 @@ async def process_turn_v4(
         tts_callback = _chunked_tts_callback
 
     t0 = time.monotonic()
+    state._current_turn_idx = turn_idx
 
     # Strip caller-bot audit annotations before any processing.
     # Annotations like "[Achtung Sailly: KEIN_READBACK — ...]" are added by the
@@ -1687,6 +1688,8 @@ async def process_turn_v4(
                 state.pre_commit_shown = False
                 state.order_pre_commit_shown = False
                 state._order_readback_shown = False  # type: ignore
+                state.reset_commit_readback("create_order", "correction_pending")
+                state.reset_commit_readback("create_reservation", "correction_pending")
                 state._false_denial_count = 0  # reset on real correction
         # Extract any time correction from the current user utterance before workers run.
         # This prevents reverting to the old time when the LLM re-reads stale state.
@@ -1740,6 +1743,8 @@ async def process_turn_v4(
             state.pre_commit_shown = False
             state.order_pre_commit_shown = False
             state._readback_already_shown = False
+            state.reset_commit_readback("create_order", "name_corrected")
+            state.reset_commit_readback("create_reservation", "name_corrected")
             state.end_call_stage = "idle"
             end_call_stage = "idle"
             logger.info(
@@ -1752,7 +1757,9 @@ async def process_turn_v4(
             # User confirmed — mark stage as idle and fall through to commit gate
             _order_readback_confirmed_now = end_call_stage == "order_pre_commit_readback"
             if _order_readback_confirmed_now:
-                state._order_readback_confirmed = True
+                state.mark_commit_readback_confirmed("create_order")
+            else:
+                state.mark_commit_readback_confirmed("create_reservation")
             state.end_call_stage = "idle"
             end_call_stage = "idle"
             logger.info(f"[v4_pipeline] T{turn_idx} pre-commit summary confirmed → proceeding to commit")
@@ -1776,20 +1783,26 @@ async def process_turn_v4(
                 logger.info(f"[v4_pipeline] T{turn_idx} pre-commit: order change detected ({_current_dish!r} → {_mentioned_dish!r})")
                 state.selected_dish = _mentioned_dish
                 state.selected_items = None
-                state.order_pre_commit_shown = False
-                state._order_readback_shown = False  # type: ignore
-                state.order_pre_commit_shown = False
+                state.reset_commit_readback("create_order", "order_change_detected")
                 state._false_denial_count = 0
                 state.end_call_stage = "idle"
                 end_call_stage = "idle"
                 # Fall through — workers will pick up name update if present
             elif getattr(state, "_false_denial_count", 0) >= 2:
-                # Caller has denied ≥2 times claiming item not on menu — break loop, proceed to commit
-                logger.info(f"[v4_pipeline] T{turn_idx} false-denial loop break ({state._false_denial_count} denials) → forcing commit")
-                state.end_call_stage = "idle"
-                end_call_stage = "idle"
+                # Caller is stuck in a denial loop. Do not force a write tool;
+                # ask for an explicit confirmation or correction instead.
+                logger.info(f"[v4_pipeline] T{turn_idx} false-denial loop break ({state._false_denial_count} denials) → explicit confirm required")
                 state._false_denial_count = 0
-                _order_slots_ok = _all_slots_present(state, "create_order")
+                confirm_text = "Ich kann die Bestellung nur aufnehmen, wenn Sie die Zusammenfassung ausdrücklich bestätigen. Stimmt die Bestellung so?"
+                if tts_callback:
+                    try:
+                        await tts_callback(confirm_text)
+                    except Exception as _cb_err:
+                        logger.warning(f"[v4_pipeline] tts_callback raised: {_cb_err}")
+                return _quick_return(
+                    confirm_text, profile, intent_result, t0,
+                    tools=[], next_action="clarify", should_end=False,
+                )
             else:
                 # Check if user explicitly denies/corrects the order (vs. neutral utterance = implicit confirmation)
                 # Use ORDER-SPECIFIC denial patterns only — avoid matching general German negation like
@@ -1813,27 +1826,26 @@ async def process_turn_v4(
                     user_text.lower()
                 ))
                 if not _has_explicit_denial and not _is_repeat_request:
-                    # No denial keywords AND user is not repeating request — treat as implicit confirmation
-                    # (e.g. "Julia Wagner, bitte." — user provides missing name slot = implicit OK)
-                    logger.info(f"[v4_pipeline] T{turn_idx} pre-commit: no denial detected, implicit confirm → commit")
-                    state.end_call_stage = "idle"
-                    end_call_stage = "idle"
-                    state._false_denial_count = 0
-                    _order_slots_ok = _all_slots_present(state, "create_order")
-                    # Fall through to commit gate below
+                    logger.info(f"[v4_pipeline] T{turn_idx} pre-commit: ambiguous response → explicit confirmation required")
+                    confirm_text = "Bitte bestätigen Sie kurz mit Ja, wenn alles so stimmt. Stimmt das so?"
+                    if tts_callback:
+                        try:
+                            await tts_callback(confirm_text)
+                        except Exception as _cb_err:
+                            logger.warning(f"[v4_pipeline] tts_callback raised: {_cb_err}")
+                    return _quick_return(
+                        confirm_text, profile, intent_result, t0,
+                        tools=[], next_action="clarify", should_end=False,
+                    )
                 elif (
                     end_call_stage == "order_pre_commit_readback"
                     and _is_repeat_request
                     and not _has_explicit_denial
                 ):
-                    # Readback was already shown; a repeated matching order is
-                    # the caller restating the confirmation, not a reason to
-                    # loop the same readback again.
-                    logger.info(f"[v4_pipeline] T{turn_idx} order pre-commit: repeat after readback → committing")
+                    logger.info(f"[v4_pipeline] T{turn_idx} order pre-commit: repeated order → explicit confirmation required")
+                    state.reset_commit_readback("create_order", "repeat_after_readback")
                     state.end_call_stage = "idle"
                     end_call_stage = "idle"
-                    state._false_denial_count = 0
-                    _order_slots_ok = _all_slots_present(state, "create_order")
                 elif _is_repeat_request and not (_semantic_confirms_v4(state) or _is_confirmation_v4(user_text)):
                     # User is repeating their order WITHOUT leading confirmation — re-show readback
                     logger.info(f"[v4_pipeline] T{turn_idx} pre-commit: user repeating (no leading confirm) → re-show readback")
@@ -1844,6 +1856,7 @@ async def process_turn_v4(
                 elif _is_repeat_request:
                     # "Ja, ich möchte..." — leading confirm wins, treat as confirmation
                     logger.info(f"[v4_pipeline] T{turn_idx} pre-commit: repeat+leading-confirm → committing")
+                    state.mark_commit_readback_confirmed("create_order" if end_call_stage == "order_pre_commit_readback" else "create_reservation")
                     state.end_call_stage = "idle"
                     end_call_stage = "idle"
                     state._false_denial_count = 0
@@ -2245,7 +2258,7 @@ async def process_turn_v4(
                     summary, "order_start", intent_result, t0,
                     tools=scheduled_run, next_action="clarify", should_end=False,
                 )
-            state._readback_already_shown = True
+            state.mark_commit_readback_shown("create_order")
             state.end_call_stage = "order_pre_commit_readback"
             state._pending_bot_response = summary
             logger.info(f"[v4_pipeline] T{turn_idx} order readback shown: {summary!r}")
@@ -2263,7 +2276,7 @@ async def process_turn_v4(
         if state.end_call_stage == "order_pre_commit_readback" and getattr(state, '_readback_already_shown', False):
             if _semantic_confirms_v4(state) or _is_confirmation_v4(user_text):
                 # User confirmed readback → proceed to commit
-                state._order_readback_confirmed = True
+                state.mark_commit_readback_confirmed("create_order")
                 state.end_call_stage = "idle"
                 logger.info(f"[v4_pipeline] T{turn_idx} order readback CONFIRMED → executing create_order")
                 # Immediately execute create_order below WITHOUT returning early
@@ -2278,10 +2291,17 @@ async def process_turn_v4(
                     "sie wiederholen sich", "gleiche antwort", "bot_loop"
                 ))
                 if _is_loop_complaint:
-                    # User is complaining about loop — force commit without re-asking
-                    logger.warning(f"[v4_pipeline] T{turn_idx} order pre-commit: loop complaint detected → forcing commit")
-                    state.end_call_stage = "idle"
-                    # Fall through to create_order execution with current items
+                    logger.warning(f"[v4_pipeline] T{turn_idx} order pre-commit: loop complaint detected → no forced commit")
+                    confirm_text = "Entschuldigung für die Wiederholung. Ich brauche trotzdem eine eindeutige Bestätigung: Stimmt die Bestellung so?"
+                    if tts_callback:
+                        try:
+                            await tts_callback(confirm_text)
+                        except Exception as _cb_err:
+                            logger.warning(f"[v4_pipeline] tts_callback raised: {_cb_err}")
+                    return _quick_return(
+                        confirm_text, "order_start", intent_result, t0,
+                        tools=[], next_action="clarify", should_end=False,
+                    )
                 else:
                     # Check for explicit correction pattern with new items
                     _corr_m = re.search(r"(?:nein|nicht|falsch)[^\w]*(?:sondern|statt|bitte|wollte|hatte)\s+(.+?)(?:\.|,|$)", _user_lower)
@@ -2295,6 +2315,7 @@ async def process_turn_v4(
                             for extra_dish in _new_dishes[1:]:
                                 state.add_extra_item(extra_dish)
                             logger.info(f"[v4_pipeline] T{turn_idx} correction → updated items to {_new_dishes}")
+                            state.reset_commit_readback("create_order", "order_correction")
                     state.end_call_stage = "correction_pending"
                     correction_text = "Was möchten Sie ändern?"
                     logger.info(f"[v4_pipeline] T{turn_idx} order pre-commit DENIED → asking correction")
@@ -2318,20 +2339,35 @@ async def process_turn_v4(
         _in_confirmation_phase = state.end_call_stage == "order_pre_commit_readback"
         
         if getattr(state, '_confirmation_cycle_count', 0) >= 2:
-            logger.warning(f"[v4_pipeline] T{turn_idx} confirmation loop limit reached ({state._confirmation_cycle_count}) → force commit")
+            logger.warning(f"[v4_pipeline] T{turn_idx} confirmation loop limit reached ({state._confirmation_cycle_count}) → explicit confirmation required")
             state._confirmation_cycle_count = 0
-            # Force commit: treat as confirmation to prevent endless readback loops
-            state.end_call_stage = "idle"
-            # Fall through to create_order execution below
+            confirm_text = "Ich kann die Bestellung erst nach Ihrer klaren Bestätigung aufnehmen. Bitte sagen Sie Ja, wenn alles stimmt."
+            if tts_callback:
+                try:
+                    await tts_callback(confirm_text)
+                except Exception as _cb_err:
+                    logger.warning(f"[v4_pipeline] tts_callback raised: {_cb_err}")
+            return _quick_return(
+                confirm_text, "order_start", intent_result, t0,
+                tools=[], next_action="clarify", should_end=False,
+            )
         else:
             state._confirmation_cycle_count = getattr(state, '_confirmation_cycle_count', 0) + 1
         
         # CRITICAL: Never re-show readback if it was already shown in this phase
         # If readback_shown AND we haven't committed yet, proceed directly to commit
         if _readback_shown_in_phase and _in_confirmation_phase:
-            logger.info(f"[v4_pipeline] T{turn_idx} readback already shown, proceeding to commit")
-            state.end_call_stage = "idle"
-            # Skip the second readback display and jump to commit
+            logger.info(f"[v4_pipeline] T{turn_idx} readback already shown, waiting for explicit confirmation")
+            confirm_text = "Bitte bestätigen Sie die Bestellung kurz mit Ja, wenn alles stimmt."
+            if tts_callback:
+                try:
+                    await tts_callback(confirm_text)
+                except Exception as _cb_err:
+                    logger.warning(f"[v4_pipeline] tts_callback raised: {_cb_err}")
+            return _quick_return(
+                confirm_text, "order_start", intent_result, t0,
+                tools=[], next_action="clarify", should_end=False,
+            )
         elif not _readback_shown_in_phase:
             # Readback not yet shown—show it now and return (don't execute tool yet)
             state.order_pre_commit_shown = True
@@ -2352,7 +2388,7 @@ async def process_turn_v4(
                     summary, "order_start", intent_result, t0,
                     tools=scheduled_run, next_action="clarify", should_end=False,
                 )
-            state._readback_already_shown = True
+            state.mark_commit_readback_shown("create_order")
             if tts_callback:
                 try:
                     await tts_callback(summary)
@@ -2423,13 +2459,32 @@ async def process_turn_v4(
                 "payment_method": "bar",
                 "delivery_address": delivery_address,
             }
+            state.sync_commit_gates_from_legacy_flags()
+            if not state.ready_for_commit("create_order"):
+                logger.warning("[v4_pipeline] T%d create_order blocked by hard confirmation gate", turn_idx)
+                blocked_text = "Ich kann die Bestellung erst aufnehmen, wenn Sie die Zusammenfassung ausdrücklich bestätigen. Stimmt alles so?"
+                state.end_call_stage = "order_pre_commit_readback"
+                if tts_callback:
+                    try:
+                        await tts_callback(blocked_text)
+                    except Exception as _cb_err:
+                        logger.warning(f"[v4_pipeline] tts_callback raised: {_cb_err}")
+                return _quick_return(
+                    blocked_text, "order_start", intent_result, t0,
+                    tools=scheduled_run + commit_tools_run,
+                    next_action="clarify",
+                    should_end=False,
+                )
             order_result = await execute_tool(
-                "create_order", order_args, call_sid, tenant_id
+                "create_order", order_args, call_sid, tenant_id,
+                turn_number=turn_idx,
+                conversation_state=state,
             )
             commit_tools_run.append("create_order")
             logger.info(f"[v4_pipeline] T{turn_idx} create_order → {order_result}")
 
             state.order_created = True
+            state.mark_commit_tool_succeeded("create_order")
             state.end_call_stage = "confirmed"
 
             # Multi-intent check: if reservation is also pending, keep session open
@@ -2598,7 +2653,7 @@ async def process_turn_v4(
         # Fix 3: Pre-commit readback — show summary and ask for confirmation before running tools
         # Only show if NOT already in pre_commit_readback state (confirmation already displayed)
         if not getattr(state, "pre_commit_shown", False) and end_call_stage != "pre_commit_readback":
-            state.pre_commit_shown = True
+            state.mark_commit_readback_shown("create_reservation")
             state.end_call_stage = "pre_commit_readback"
             summary = _with_name_ack(_build_pre_commit_summary_v4(state) + " Stimmt das so?")
             logger.info(f"[v4_pipeline] T{turn_idx} pre-commit summary: {summary!r}")
@@ -2664,8 +2719,26 @@ async def process_turn_v4(
                 "name": getattr(state, "customer_name", "") or getattr(state, "first_name", "") or "",
                 "phone": getattr(state, "phone_number", None) or caller_phone or "",
             }
+            state.sync_commit_gates_from_legacy_flags()
+            if not state.ready_for_commit("create_reservation"):
+                logger.warning("[v4_pipeline] T%d create_reservation blocked by hard confirmation gate", turn_idx)
+                blocked_text = "Ich kann die Reservierung erst eintragen, wenn Sie die Zusammenfassung ausdrücklich bestätigen. Stimmt alles so?"
+                state.end_call_stage = "pre_commit_readback"
+                if tts_callback:
+                    try:
+                        await tts_callback(blocked_text)
+                    except Exception as _cb_err:
+                        logger.warning(f"[v4_pipeline] tts_callback raised: {_cb_err}")
+                return _quick_return(
+                    blocked_text, "reservation_start", intent_result, t0,
+                    tools=scheduled_run + commit_tools_run,
+                    next_action="clarify",
+                    should_end=False,
+                )
             res_result = await execute_tool(
-                "create_reservation", res_args, call_sid, tenant_id
+                "create_reservation", res_args, call_sid, tenant_id,
+                turn_number=turn_idx,
+                conversation_state=state,
             )
             commit_tools_run.append("create_reservation")
             logger.info(f"[v4_pipeline] T{turn_idx} create_reservation → {res_result}")
@@ -2694,7 +2767,7 @@ async def process_turn_v4(
                 logger.warning(f"[v4_pipeline] T{turn_idx} create_reservation failed: {_tool_error}")
                 state.end_call_stage = "idle"
                 state.reservation_created = False
-                state.pre_commit_shown = False
+                state.reset_commit_readback("create_reservation", "create_reservation_failed")
                 if tts_callback:
                     try:
                         await tts_callback(error_text)
@@ -2709,6 +2782,7 @@ async def process_turn_v4(
             # Success: mark committed, give final confirmation, end call.
             # The user already confirmed via pre-commit summary — no second "Stimmt das so?" needed.
             state.reservation_created = True
+            state.mark_commit_tool_succeeded("create_reservation")
             state.end_call_stage = "confirmed"
             readback = _build_readback_v4(state) + " Wir freuen uns auf Sie. Auf Wiederhören!"
             logger.info(f"[v4_pipeline] T{turn_idx} COMMITTED → readback: {readback!r}")

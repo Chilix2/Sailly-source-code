@@ -376,11 +376,11 @@ def _time_to_minutes(value: str) -> Optional[int]:
 _GUARDIAN_PRECONDITIONS: dict = {
     "create_order": {
         "required_from_args": ["order_items"],   # dish must be present
-        "min_prior_assistant_turns": 2,           # can't fire on turn 0 or 1
+        "min_prior_assistant_turns": 1,           # readback must have happened before confirm
     },
     "create_reservation": {
         "required_from_args": ["date", "time", "party_size"],
-        "min_prior_assistant_turns": 3,
+        "min_prior_assistant_turns": 1,
     },
 }
 
@@ -465,6 +465,28 @@ async def execute_tool(
             success=False,
         )
         return blocked_result
+
+    if tool_name in ("create_order", "create_reservation") and conversation_state is not None:
+        ready_for_commit = getattr(conversation_state, "ready_for_commit", None)
+        if callable(ready_for_commit) and not ready_for_commit(tool_name):
+            reason = "readback_not_confirmed"
+            logger.warning(f"[GUARDIAN_BLOCK] {tool_name} blocked for {call_sid}: {reason}")
+            blocked_result = {
+                "success": False,
+                "blocked_by_guardian": True,
+                "reason": reason,
+                "must_ask_for": ["explicit_confirmation"],
+                "message": "Bitte bestätigen Sie zuerst die Zusammenfassung ausdrücklich.",
+            }
+            _record_tool_event(
+                tool_name=tool_name,
+                args=args,
+                call_sid=call_sid,
+                turn_number=turn_number,
+                result=blocked_result,
+                success=False,
+            )
+            return blocked_result
 
     logger.info(f"Tool call: {tool_name}({json.dumps(args, ensure_ascii=False)[:200]}) [tenant={tenant_id}]")
 
