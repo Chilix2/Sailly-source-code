@@ -1,21 +1,22 @@
 {
   "_meta": {
-    "generated": "2026-05-18",
+    "generated": "2026-05-24",
     "sources": [
       "Batch result JSONs — /tmp/scenario_validation/ (May 13 + May 18 runs, 60 batches)",
-      "Agent transcripts mined — 8 large JSONLs (Apr 27 – May 18, fc4c5bbc, 5d2ac383, a06197b0, d6c51a74, 16688416, 4c6bfd09, 263f6dac, 90ed704f)",
-      "Git log -- 9 key fix commits (d30bb11 → ced5a9a, May 7–8 sprint)",
+      "Agent transcripts mined — 8 large JSONLs (Apr 27 – May 24)",
+      "Git log -- Recent fix commits (d30bb11 → 5a8c59b, May 7–26 sprint)",
+      "Call reports — May 24 incidents (demo-467acd29b952, demo-55672fd7babc, demo-86f55118da2a, demo-3b553cd21fb4, demo-c9085703bf09)",
       "FIX_VALIDATION_IMPLEMENTATION_GUIDE.md",
       "VALIDATION_RUN_CONFIG.md",
-      "Agent session 9a1d17c0 (May 20) — G/H/I phase analysis + code cleanup"
+      "Agent session — Menu & First-Turn Latency Fix (May 24-26)"
     ],
     "schema_version": "2.0",
     "batches_analyzed": 60,
     "commits_analyzed": 9,
     "transcripts_analyzed": 8,
-    "issues_count": 87,
-    "last_updated": "2026-05-20T09:55:00",
-    "total_issues": 87,
+    "issues_count": 88,
+    "last_updated": "2026-05-26T09:12:59.017059Z",
+    "total_issues": 88,
     "sources_count": 0
   },
   "issue_library": [
@@ -9299,15 +9300,23 @@
     {
       "id": "TINY_GENERATOR_ANTHROPIC_FALLBACK_001",
       "title": "TinyGenerator fails silently to 'Was darf ich für Sie tun?' when Anthropic API credits exhausted",
-      "achtung_flags": ["BOT_LOOP"],
+      "achtung_flags": [
+        "BOT_LOOP"
+      ],
       "category": "api_outage",
       "severity": "critical",
-      "affects_metrics": ["flow", "linguistic", "tool_accuracy"],
+      "affects_metrics": [
+        "flow",
+        "linguistic",
+        "tool_accuracy"
+      ],
       "root_cause": "TinyGenerator._call_llm() calls Anthropic client and raises exception when credits are low (HTTP 400). The exception propagates to TinyGenerator.generate() which catches it at line 267 and returns _FALLBACK_RESPONSE = 'Was darf ich für Sie tun?'. This causes every bot response to be the fallback greeting, triggering BOT_LOOP detection in ALL scenarios.",
       "fix": "Added OpenAI gpt-4o-mini fallback in TinyGenerator._call_llm(): when Anthropic raises a credit-related error (400 with 'credit' or '400'/'403'), fall back to OpenAI gpt-4o-mini before returning empty string.",
       "fix_applied": true,
       "fix_file": "server/brain/tiny_generator.py",
-      "affected_phases": ["all"],
+      "affected_phases": [
+        "all"
+      ],
       "symptoms": [
         "caller_bot LOOP detected turn 3: 'Was darf ich für Sie tun?'",
         "no close frame received or sent (server crash after bot returns fallback repeatedly)",
@@ -9326,7 +9335,10 @@
       "fix": "Need runtime safety check: either (1) add pyflakes/pylint-style undefined-name check in fix_applier before applying, or (2) use restricted pattern matching to only allow variable names that already exist in the file.",
       "fix_applied": false,
       "fix_file": "server/validation/fix_applier.py",
-      "affected_phases": ["i", "a"],
+      "affected_phases": [
+        "i",
+        "a"
+      ],
       "symptoms": [
         "name '_is_price_discrepancy' is not defined",
         "scenario=I2.2_D4_rude error: name '_is_price_discrepancy' is not defined",
@@ -9336,15 +9348,22 @@
     {
       "id": "MANAGER_REQUEST_NOT_HANDLED_001",
       "title": "Bot responds with reservation apology text to manager escalation requests",
-      "achtung_flags": ["BOT_LOOP"],
+      "achtung_flags": [
+        "BOT_LOOP"
+      ],
       "category": "routing_regression",
       "severity": "high",
-      "affects_metrics": ["flow", "deterministic"],
+      "affects_metrics": [
+        "flow",
+        "deterministic"
+      ],
       "root_cause": "H2.3 scenario: when user says 'Ich möchte mit dem Manager sprechen', the loop_complaint handler fires if 'manager' is in text. On first turn (repeat_count=1 < 2), the 'else' branch executes, checking for missing reservation slots. Since no reservation is active, _still_missing=[] and bot says 'Ich habe jetzt alle Angaben und lege die Reservierung sofort an' — completely wrong for a manager request.",
       "fix": "Added explicit _MANAGER_KWS check BEFORE the loop_complaint handler. When manager request keywords detected and NOT a loop complaint, immediately respond with empathetic escalation text and set next_action='escalate'.",
       "fix_applied": true,
       "fix_file": "server/brain/v4_pipeline.py",
-      "affected_phases": ["h"],
+      "affected_phases": [
+        "h"
+      ],
       "symptoms": [
         "H2.3_D4: baseline 46.5, all attempts 46.5 (plateauing)",
         "Bot says 'ich lege die Reservierung sofort an' to manager request",
