@@ -44,7 +44,6 @@ async def validate_pickup_time(
     value: str, tenant_cfg: dict, ctx: ValidationContext,
 ) -> ValidationResult:
     from datetime import datetime, timedelta
-    from server.brain.layer1.after_hours import is_within_hours
 
     try:
         t = parse_german_datetime(value)
@@ -60,7 +59,7 @@ async def validate_pickup_time(
             detail="pickup time too soon (need ≥15min prep)",
         )
 
-    if not is_within_hours(ctx.tenant_id, t):
+    if not tenant_is_open_at(ctx.tenant_id, t):
         return ValidationResult(
             status=ValidationStatus.FAILED,
             detail="outside opening hours — offer pre_order channel",

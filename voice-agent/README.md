@@ -1,12 +1,27 @@
-# Sailly Browser Demo
+# Sailly Voice Agent
 
-A completely isolated browser-based demo of the Sailly voice agent. Test, onboard clients, and conduct sales demos without Twilio costs.
+Production browser-based Sailly voice agent for restaurant calls and demos.
+The live host runs this flat tree from `/home/charles2/sailly-browser-demo`.
+GitHub stores the same source under `voice-agent/`.
 
-## Key Principle
+## Production Path
 
-**The brain files (`server/brain/`) are exact copies of the validated pipeline.** They are never modified, only copied. If a bug is found, it is fixed in the validated source (`sailly-google-fork/server/training/`) and re-copied here.
+The live service runs `uvicorn server.main:app` on port 8080 and the voice
+pipeline is:
 
-This guarantee ensures: **demo = validated = production**
+```text
+Browser / phone audio
+  -> server/main.py (/ws/demo)
+  -> BrowserBrainService
+  -> V4TurnProcessor
+  -> v4_pipeline.process_turn_v4
+  -> tools/executor.py + server/tools/handlers
+  -> SaillyGeminiTTSService
+```
+
+The old ADK/node-manager stack has been removed from the production runtime.
+Validation and training code that remains in the repository is tooling, not the
+live turn processor.
 
 ## Setup
 
@@ -30,71 +45,75 @@ Visit `http://localhost:8080` in your browser.
 
 ## Architecture
 
-```
-Browser (mic + speaker)
-    ↓ PCM16 16kHz + 4-byte chunk ID
-WebSocket (/ws/demo)
-    ↓
-Deepgram STT (nova-3, de)
-    ↓
-LLMUserResponseAggregator + VAD (SileroVAD)
-    ↓
-BrowserBrainService (Pipecat wrapper)
-    ↓ delegates to
-server/brain/adk_runner.py (EXACT COPY of validated)
-    ↓
-Tools (mock responses from server/tools/executor.py)
-    ↓
-LLMAssistantResponseAggregator
-    ↓
-Google Gemini 2.5 Flash TTS
-    ↓
-PCM16 24kHz
-    ↓
-WebSocket
-    ↓
-Browser (plays audio)
-```
+Production runtime:
+
+- `server/main.py` — FastAPI app, WebSocket endpoint, Pipecat pipeline wiring
+- `server/brain_service.py` — Pipecat brain processor and call finalization
+- `server/brain/v4_turn_processor.py` — live turn-processor adapter
+- `server/brain/v4_pipeline.py` — deterministic v4 turn flow
+- `server/brain/conversation_state.py` — live state model
+- `server/brain/workers/` — deterministic workers used by v4
+- `tools/executor.py` and `server/tools/handlers/` — tool execution
+- `configs/tenants/` and `configs/providers/` — runtime configuration
 
 ## Files
 
-- `server/brain/` — validated pipeline copied from `sailly-google-fork/server/training/`
-- `server/brain_service.py` — thin Pipecat wrapper around `adk_runner.py` per-turn logic
-- `server/tools/executor.py` — mock tool responses (no database)
+- `server/brain/` — live v4 brain and support modules
+- `server/brain_service.py` — Pipecat wrapper and persistence/finalization
+- `tools/executor.py` — production tool dispatcher
 - `server/main.py` — FastAPI app + WebSocket endpoint
 - `frontend/` — vanilla JS, mic capture, audio playback, chat UI
 - `configs/tenants/doboo.yaml` — restaurant config
+- `docs/PRODUCTION_LEGACY_MANIFEST.md` — production/tooling/legacy classification
 
 ## Testing
 
 Run validation scenarios:
 ```bash
-python3 scripts/test_brain.py
+./run_validation.sh
 ```
 
-## Bug Fixes
+## GitHub Layout
 
-When a bug is found in the browser demo:
+GitHub repo layout:
 
-1. Fix it in `/home/charles2/sailly-google-fork/server/training/` (validated source)
-2. Re-run the validation loop to confirm
-3. Copy the fixed file to `server/brain/`
-4. Both demo and production get the fix
+```text
+Sailly-source-code/
+  .github/
+  README.md
+  voice-agent/
+    server/
+    configs/
+    tools/
+    frontend/
+```
+
+Do not push a duplicate root-level `server/`, `configs/`, or `tools/` tree to
+GitHub. The production app belongs under `voice-agent/` in the GitHub snapshot.
 
 ## Isolation
 
 - **Port:** 8080 (production voice agent on 3003, dashboard on 3000)
 - **Service:** Separate systemd service
-- **Database:** None (stateless demo)
-- **Twilio:** Not used
-- **Redis:** Not used
+- **Database:** PostgreSQL `google_*` call tables
+- **Redis:** session state and metrics
+- **Secrets:** environment or Google Secret Manager
 
 ## Verification
 
-Prove brain files are identical to validated source:
-```bash
-diff <(sed 's/server\.brain\./server.training./g' server/brain/adk_runner.py) \
-     ../sailly-google-fork/server/training/adk_runner.py
-```
+Check syntax for core production files:
 
-Should show only import-path differences.
+```bash
+python3 - <<'PY'
+from pathlib import Path
+for rel in [
+    "server/main.py",
+    "server/brain_service.py",
+    "server/brain/v4_turn_processor.py",
+    "server/brain/v4_pipeline.py",
+    "tools/executor.py",
+]:
+    compile(Path(rel).read_text(), rel, "exec")
+print("ok")
+PY
+```

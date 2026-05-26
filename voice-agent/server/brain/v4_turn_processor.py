@@ -435,9 +435,9 @@ class V4TurnProcessor:
                 caller_phone=caller_phone,
                 filler_cb=filler_cb,
             )
-            # Restore ConversationState from the ADK blob using the existing helper
-            from server.brain.adk_turn_processor import _conversation_state_from_dict
-            processor.state = _conversation_state_from_dict(blob.get("state", {}))
+            # Restore ConversationState without importing the retired ADK stack.
+            from server.brain.session_restore import conversation_state_from_dict
+            processor.state = conversation_state_from_dict(blob.get("state", {}))
             processor.all_tools = blob.get("all_tools", [])
             processor.turn_idx = blob.get("turn_idx", 0)
             processor.state.recent_responses = blob.get("recent_responses", [])

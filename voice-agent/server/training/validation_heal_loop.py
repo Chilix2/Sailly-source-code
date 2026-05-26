@@ -830,7 +830,7 @@ sys.path.insert(0, '/home/charles2/sailly-browser-demo')
 
 async def test():
     try:
-        from server.brain.adk_turn_processor import ADKTurnProcessor
+        from server.training.adk_turn_processor import ADKTurnProcessor
     except Exception as e:
         print(f"SMOKE FAIL: import: {e}"); return False
     tests = [
