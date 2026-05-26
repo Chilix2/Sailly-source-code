@@ -99,7 +99,7 @@ fi
 
 # Try to load secrets from GCP Secret Manager if env vars are missing
 if [[ -z "${XAI_API_KEY:-}" ]]; then
-    load_from_gcp_secret "xai-api-key" "XAI_API_KEY" || warn "XAI_API_KEY not found (check GCP or .env)"
+    load_from_gcp_secret "xai-REDACTED" "XAI_API_KEY" || warn "XAI_API_KEY not found (check GCP or .env)"
 fi
 if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
     load_from_gcp_secret "anthropic-api-key" "ANTHROPIC_API_KEY" || warn "ANTHROPIC_API_KEY not found"
