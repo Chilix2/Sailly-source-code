@@ -1063,11 +1063,63 @@ def _extract_order_quantity(utterance: str) -> Optional[int]:
 
 
 @dataclass
+class CommitGateState:
+    """Durable pre-commit gate for high-stakes write tools."""
+
+    readback_shown: bool = False
+    confirmed: bool = False
+    committed: bool = False
+    reset_cause: Optional[str] = None
+
+    def mark_readback_shown(self) -> None:
+        self.readback_shown = True
+        self.confirmed = False
+        self.reset_cause = None
+
+    def mark_confirmed(self) -> None:
+        if self.readback_shown:
+            self.confirmed = True
+            self.reset_cause = None
+
+    def mark_committed(self) -> None:
+        self.committed = True
+
+    def reset(self, cause: str = "") -> None:
+        self.readback_shown = False
+        self.confirmed = False
+        self.reset_cause = cause or None
+
+    def ready(self) -> bool:
+        return self.readback_shown and self.confirmed and not self.committed
+
+    def to_dict(self) -> dict:
+        return {
+            "readback_shown": self.readback_shown,
+            "confirmed": self.confirmed,
+            "committed": self.committed,
+            "reset_cause": self.reset_cause,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Optional[dict]) -> "CommitGateState":
+        if not isinstance(data, dict):
+            return cls()
+        return cls(
+            readback_shown=bool(data.get("readback_shown", False)),
+            # Never infer confirmed from legacy restored blobs. Only trust the
+            # explicit v6 field, which is written after a caller confirmation.
+            confirmed=bool(data.get("confirmed", False)),
+            committed=bool(data.get("committed", False)),
+            reset_cause=data.get("reset_cause"),
+        )
+
+
+@dataclass
 class ConversationState:
     # Phase 2: schema_version = 2 (CapturedIntent as primary storage; shared_slots added)
     # Phase 1 set this to 1; from_dict() handles the 0→1→2 migration chain.
     # Phase 5.5: schema_version = 5 (validation_entries added).
-    schema_version: int = 5
+    schema_version: int = 6
 
     order_intent: bool = False
     selected_dish: Optional[str] = None
@@ -1076,6 +1128,8 @@ class ConversationState:
     order_items_extras: List[str] = field(default_factory=list)
     phone_number: Optional[str] = None
     order_created: bool = False
+    order_commit_state: CommitGateState = field(default_factory=CommitGateState)
+    reservation_commit_state: CommitGateState = field(default_factory=CommitGateState)
     # Doorbell name notation if different from customer_name
     bell_name: Optional[str] = None
 
@@ -1256,6 +1310,14 @@ class ConversationState:
     # accumulate them here until threshold is met
     phone_digits_buffer: str = ""
 
+    def __post_init__(self) -> None:
+        # Compatibility shims for legacy code that still reads/writes flat flags.
+        self._readback_already_shown = self.order_commit_state.readback_shown
+        self._order_readback_confirmed = self.order_commit_state.confirmed
+        self.order_pre_commit_shown = self.order_commit_state.readback_shown
+        self._order_readback_shown = self.order_commit_state.readback_shown
+        self.pre_commit_shown = self.reservation_commit_state.readback_shown
+
     def ready_for_order_commit(self) -> bool:
         """
         Single authoritative check for whether create_order can fire.
@@ -1375,6 +1437,95 @@ class ConversationState:
             and not self.reservation_created
         )
 
+    def _commit_gate_for(self, tool_name: str) -> Optional[CommitGateState]:
+        if tool_name == "create_order":
+            return self.order_commit_state
+        if tool_name == "create_reservation":
+            return self.reservation_commit_state
+        return None
+
+    def ready_for_commit(self, tool_name: str) -> bool:
+        """Hard gate for high-stakes write tools after explicit readback confirmation."""
+        gate = self._commit_gate_for(tool_name)
+        if gate is None:
+            return True
+        if tool_name == "create_order" and self.order_created:
+            return False
+        if tool_name == "create_reservation" and self.reservation_created:
+            return False
+        ready = gate.ready()
+        if tool_name == "create_order":
+            ready = (
+                ready
+                and bool(getattr(self, "_readback_already_shown", False))
+                and bool(getattr(self, "_order_readback_confirmed", False))
+            )
+        elif tool_name == "create_reservation":
+            ready = ready and bool(getattr(self, "pre_commit_shown", False))
+        if not ready:
+            logger.info(
+                "[ready_for_commit] Blocking %s: readback_shown=%s confirmed=%s committed=%s cause=%s",
+                tool_name,
+                gate.readback_shown,
+                gate.confirmed,
+                gate.committed,
+                gate.reset_cause,
+            )
+        return ready
+
+    def mark_commit_readback_shown(self, tool_name: str) -> None:
+        gate = self._commit_gate_for(tool_name)
+        if gate is None:
+            return
+        gate.mark_readback_shown()
+        if tool_name == "create_order":
+            self._readback_already_shown = True
+            self._order_readback_confirmed = False
+            self.order_pre_commit_shown = True
+        elif tool_name == "create_reservation":
+            self.pre_commit_shown = True
+
+    def mark_commit_readback_confirmed(self, tool_name: str) -> None:
+        gate = self._commit_gate_for(tool_name)
+        if gate is None:
+            return
+        gate.mark_confirmed()
+        self.last_caller_confirmation_turn = getattr(self, "_current_turn_idx", None)
+        if tool_name == "create_order":
+            self._readback_already_shown = True
+            self._order_readback_confirmed = gate.confirmed
+            self.order_summary_confirmed = gate.confirmed
+        elif tool_name == "create_reservation":
+            self.pre_commit_shown = True
+
+    def mark_commit_tool_succeeded(self, tool_name: str) -> None:
+        gate = self._commit_gate_for(tool_name)
+        if gate is not None:
+            gate.mark_committed()
+
+    def reset_commit_readback(self, tool_name: str, cause: str = "") -> None:
+        gate = self._commit_gate_for(tool_name)
+        if gate is None:
+            return
+        gate.reset(cause)
+        if tool_name == "create_order":
+            self._readback_already_shown = False
+            self._order_readback_confirmed = False
+            self.order_pre_commit_shown = False
+            self._order_readback_shown = False
+            self.order_summary_confirmed = False
+        elif tool_name == "create_reservation":
+            self.pre_commit_shown = False
+
+    def sync_commit_gates_from_legacy_flags(self) -> None:
+        """Best-effort bridge for code that still mutates legacy flat flags."""
+        if getattr(self, "_readback_already_shown", False):
+            self.order_commit_state.readback_shown = True
+        if getattr(self, "_order_readback_confirmed", False) and self.order_commit_state.readback_shown:
+            self.order_commit_state.confirmed = True
+        if getattr(self, "pre_commit_shown", False):
+            self.reservation_commit_state.readback_shown = True
+
     # === Cart helpers (multi-item support) ===
     def all_order_items(self) -> List[str]:
         """Return ordered list of all cart items: selected_dish first, then extras."""
@@ -1452,6 +1603,7 @@ class ConversationState:
                         self.verify_address_failed = False
                     self._readback_already_shown = False
                     self._order_readback_confirmed = False
+                    self.reset_commit_readback("create_order", "delivery_address_pending_readback")
                 pending[slot_name] = (
                     candidate.to_metric()
                     if hasattr(candidate, "to_metric")
@@ -1471,6 +1623,7 @@ class ConversationState:
                     self.verify_address_failed = False
                     self._readback_already_shown = False
                     self._order_readback_confirmed = False
+                    self.reset_commit_readback("create_order", "delivery_address_changed")
                 self.delivery_address = str(value).strip()
                 self.delivery_address_mentioned = True
                 self.delivery_intended = True
@@ -1709,8 +1862,11 @@ class ConversationState:
             "call_sid": self.call_sid,
             "order_intent": self.order_intent,
             "selected_dish": self.selected_dish,
+            "order_items_extras": self.order_items_extras,
             "phone_number": self.phone_number,
             "order_created": self.order_created,
+            "order_commit_state": self.order_commit_state.to_dict(),
+            "reservation_commit_state": self.reservation_commit_state.to_dict(),
             "reservation_intent": self.reservation_intent,
             "party_size": self.party_size,
             "reservation_date": self.reservation_date,
@@ -1774,6 +1930,14 @@ class ConversationState:
             "validation_entries": self.validation_entries,
             # Phase 6: strict SMS gate
             "last_caller_confirmation_turn": self.last_caller_confirmation_turn,
+            "address_confirmed": self.address_confirmed,
+            "order_summary_confirmed": self.order_summary_confirmed,
+            "items_confirmed": self.items_confirmed,
+            "delivery_type_confirmed": self.delivery_type_confirmed,
+            "name_confirmed": self.name_confirmed,
+            "delivery_confirmed": self.delivery_confirmed,
+            "phone_confirmed": self.phone_confirmed,
+            "address_verified": self.address_verified,
         }
 
     @classmethod
@@ -1785,6 +1949,7 @@ class ConversationState:
           v1 (Phase 1) → add call_sid, shared_slots defaults
           v2 (Phase 2) → current_intent_idx is Optional[int]; shared_slots present
           v5 (Phase 5.5) → validation_entries dict added
+          v6 (commit gate) → order_commit_state / reservation_commit_state added
         """
         if not data:
             return cls()
@@ -1815,13 +1980,26 @@ class ConversationState:
         if version <= 1 and _ci_idx == 0 and not data.get("captured_intents"):
             _ci_idx = None  # v1 default 0 with no intents → None
 
+        order_gate = CommitGateState.from_dict(data.get("order_commit_state"))
+        reservation_gate = CommitGateState.from_dict(data.get("reservation_commit_state"))
+        if version < 6:
+            # Conservative migration: retain "shown" so the bot does not repeat
+            # unnecessarily, but never infer confirmation from old transient flags.
+            order_gate.readback_shown = data.get("end_call_stage") == "order_pre_commit_readback"
+            order_gate.confirmed = False
+            reservation_gate.readback_shown = bool(data.get("pre_commit_shown")) or data.get("end_call_stage") == "pre_commit_readback"
+            reservation_gate.confirmed = False
+
         return cls(
-            schema_version=5,  # always normalize to current version on load
+            schema_version=6,  # always normalize to current version on load
             call_sid=data.get("call_sid", ""),
             order_intent=data.get("order_intent", False),
             selected_dish=data.get("selected_dish"),
+            order_items_extras=data.get("order_items_extras", []),
             phone_number=data.get("phone_number"),
             order_created=data.get("order_created", False),
+            order_commit_state=order_gate,
+            reservation_commit_state=reservation_gate,
             reservation_intent=data.get("reservation_intent", False),
             party_size=data.get("party_size"),
             reservation_date=data.get("reservation_date"),
@@ -1873,6 +2051,14 @@ class ConversationState:
             validation_entries=data.get("validation_entries", {}),
             # Phase 6: strict SMS gate turn index
             last_caller_confirmation_turn=data.get("last_caller_confirmation_turn"),
+            address_confirmed=data.get("address_confirmed", False),
+            order_summary_confirmed=data.get("order_summary_confirmed", False),
+            items_confirmed=data.get("items_confirmed", False),
+            delivery_type_confirmed=data.get("delivery_type_confirmed", False),
+            name_confirmed=data.get("name_confirmed", False),
+            delivery_confirmed=data.get("delivery_confirmed", False),
+            phone_confirmed=data.get("phone_confirmed", False),
+            address_verified=data.get("address_verified", False),
         )
 
 def _iter_cached_menu_items(state: "ConversationState"):
@@ -2429,6 +2615,7 @@ def update_state_from_utterance(state: ConversationState, utterance: str) -> Non
             state.items_confirmed = False  # Force readback with NEW items on next turn
             state._order_readback_confirmed = False  # CRITICAL: reset readback gate on correction
             state._readback_already_shown = False  # Force re-show readback with corrected items
+            state.reset_commit_readback("create_order", "items_corrected")
             logger.info(f"[Correction] user corrected dish to: {corrected_dishes} (cleared extras, reset readback gates)")
     elif dish and not (dish.lower() == (state.selected_dish or "").lower()):  # Only set if not a repetition of current
         if state.selected_dish is None:
@@ -2440,9 +2627,12 @@ def update_state_from_utterance(state: ConversationState, utterance: str) -> Non
         else:
             # Primary already set — add ALL mentioned (new) dishes as extras.
             # This handles "und dann noch Mandu und Mochi-Eis" after a dish is already selected.
+            before_items = state.all_order_items()
             for d in all_dishes:
                 state.add_extra_item(d)
             state.selected_items = state.all_order_items()
+            if state.selected_items != before_items:
+                state.reset_commit_readback("create_order", "items_changed")
         # Fix 2: Implicit order_intent from dish mention.
         # Only if not an inquiry (e.g. "was ist Kimchi?") and not a reservation.
         if not state.reservation_intent and not any(n in lower for n in NEGATE_ORDER):
@@ -2479,6 +2669,8 @@ def update_state_from_utterance(state: ConversationState, utterance: str) -> Non
         raw = m.group(1).strip()
         digits = _digits_only(raw)
         if len(digits) >= 8:
+            if state.phone_number and _digits_only(state.phone_number) != digits:
+                state.reset_commit_readback("create_order", "phone_corrected")
             state.phone_number = raw
             # A freshly spoken phone overrides an unconfirmed caller-ID prefill:
             # the caller explicitly picked a different number as SMS destination.
@@ -2556,6 +2748,7 @@ def update_state_from_utterance(state: ConversationState, utterance: str) -> Non
             if state.party_size is not None:
                 logger.warning(f'[Party_Size] User correction detected: {utterance[:60]!r} — CLEARING party_size')
                 state.party_size = None
+                state.reset_commit_readback("create_reservation", "party_size_cleared")
         else:
             # ONLY extract party_size on positive/affirmative utterances (no explicit negation present)
             _WORD_NUMS = {
@@ -2575,6 +2768,8 @@ def update_state_from_utterance(state: ConversationState, utterance: str) -> Non
             except ValueError:
                 n = _WORD_NUMS.get(val, 0)
             if 1 <= n <= 50:
+                if state.party_size is not None and state.party_size != n:
+                    state.reset_commit_readback("create_reservation", "party_size_corrected")
                 state.party_size = n
                 logger.info(f'[Party_Size] Extracted: {n} from {utterance[:60]!r}')
 
@@ -2591,6 +2786,8 @@ def update_state_from_utterance(state: ConversationState, utterance: str) -> Non
                 n2 = int(pm2.group(1))
                 # CRITICAL: Sanity check — party size should be 1-50, NOT 2026 (year) or >50 (catering)
                 if 1 <= n2 <= 50:
+                    if state.party_size is not None and state.party_size != n2:
+                        state.reset_commit_readback("create_reservation", "party_size_corrected")
                     state.party_size = n2
             except ValueError:
                 pass
@@ -2609,6 +2806,8 @@ def update_state_from_utterance(state: ConversationState, utterance: str) -> Non
         if pm3:
             n3 = _WORD_NUMS_PARTY.get(pm3.group(1), 0)
             if 1 <= n3 <= 50:
+                if state.party_size is not None and state.party_size != n3:
+                    state.reset_commit_readback("create_reservation", "party_size_corrected")
                 state.party_size = n3
                 logger.info(f'[Party_Size] Word-number extracted: {n3} from {utterance[:60]!r}')
 
@@ -2716,6 +2915,7 @@ def update_state_from_utterance(state: ConversationState, utterance: str) -> Non
     if _old_reservation_date and state.reservation_date != _old_reservation_date:
         state.check_availability_called = False
         state.pre_commit_shown = False
+        state.reset_commit_readback("create_reservation", "date_corrected")
         state.end_call_stage = "idle"
         _date_correction_applied = True
         logger.info(f"[update_state] Date correction: {_old_reservation_date} → {state.reservation_date}")
@@ -2788,6 +2988,7 @@ def update_state_from_utterance(state: ConversationState, utterance: str) -> Non
     ):
         state.check_availability_called = False
         state.pre_commit_shown = False
+        state.reset_commit_readback("create_reservation", "date_corrected")
         state.end_call_stage = "idle"
         logger.info(f"[update_state] Date correction: {_old_reservation_date} → {state.reservation_date}")
 
@@ -2805,6 +3006,7 @@ def update_state_from_utterance(state: ConversationState, utterance: str) -> Non
                 logger.info(f"[update_state] Time correction: {old_time} → {state.reservation_time}")
                 # Clear pre_commit_shown so updated readback fires on next turn
                 state.pre_commit_shown = False
+                state.reset_commit_readback("create_reservation", "time_corrected")
                 state.end_call_stage = "idle"
     tw = re.search(r"um\s+(\w+)", lower)
     if tw and not state.reservation_time:
@@ -3160,6 +3362,8 @@ def update_state_from_utterance(state: ConversationState, utterance: str) -> Non
             if _is_address_correction:
                 state.check_availability_called = False
                 state.pre_commit_shown = False
+                state.reset_commit_readback("create_order", "address_corrected")
+                state.reset_commit_readback("create_reservation", "address_corrected")
                 logger.info(f"[ADDRESS_CORRECT] Reset availability/commit gates after address correction")
 
     # Implicit reservation intent: party_size >= 2 without food → reservation

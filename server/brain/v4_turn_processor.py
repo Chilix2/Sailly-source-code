@@ -184,6 +184,7 @@ class V4TurnProcessor:
             self.last_turns = self.last_turns[-10:]
             self._last_bot_response = clean
             self.turn_idx += 1
+            await self._persist_state_safe()
             return TurnResult(
                 clean_text=clean,
                 raw_response=clean,
@@ -233,6 +234,7 @@ class V4TurnProcessor:
                 self.all_tools.append(t)
         self._last_bot_response = clean
         self.turn_idx += 1
+        await self._persist_state_safe()
 
         return TurnResult(
             clean_text=clean,
@@ -258,6 +260,10 @@ class V4TurnProcessor:
             PartySizeValidator,
             PhoneValidator,
         )
+
+        # Confirmation intent is turn-local. Keeping an old "yes" in durable
+        # semantic state can silently advance a later pre-commit gate.
+        self.state.semantic_slot_values.pop("confirmation_intent", None)
 
         started = time.monotonic()
         slots = slots_for_current_turn(self.state, user_text)
@@ -355,6 +361,7 @@ class V4TurnProcessor:
         self.state.semantic_slot_values.pop("delivery_address", None)
         self.state._readback_already_shown = False
         self.state._order_readback_confirmed = False
+        self.state.reset_commit_readback("create_order", "delivery_address_cleared")
         self.state.end_call_stage = "idle"
 
     def _apply_pending_semantic_slots(self) -> None:
@@ -404,8 +411,26 @@ class V4TurnProcessor:
         return "Ich habe verstanden: " + "; ".join(parts) + ". Stimmt das so?"
 
     async def _persist_state_safe(self):
-        """State persistence stub — v4 does not use Redis adk_brain blob."""
-        pass
+        """Persist v4 brain state for WebSocket reconnects."""
+        if self.session is None:
+            return
+        try:
+            from server.brain.session_restore import conversation_state_to_dict
+
+            blob = {
+                "state": conversation_state_to_dict(self.state),
+                "all_tools": list(self.all_tools),
+                "turn_idx": self.turn_idx,
+                "recent_responses": list(getattr(self.state, "recent_responses", []) or []),
+                "node_mgr": {
+                    "current_node": self.node_mgr.current_node_name,
+                    "turns_in_node": self.node_mgr._turns_in_node,
+                    "node_stack": list(self.node_mgr.node_stack),
+                },
+            }
+            await self.session.update_state({"adk_brain": blob})
+        except Exception as e:
+            logger.debug("[V4Turn] persist_state failed (non-fatal): %s", e)
 
     # ── Session restore (WebSocket reconnect path for /ws/demo) ──────────────
     @classmethod
