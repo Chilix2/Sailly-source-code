@@ -533,6 +533,19 @@ class FixValidationLoop:
             runner.set_cost_tracker(None)
             adk.cost_tracker = None
 
+        # Ingest failure into known issues database
+        if not result["pass"] and self.ingestor:
+            self.ingestor.ingest_failure({
+                "scenario_id": result["scenario_id"],
+                "call_sid": getattr(conv, "call_sid", "") if "conv" in locals() else "",
+                "composite_score": result["composite"],
+                "tools_expected": result["expected_tools"],
+                "tools_called": result["tools_called"],
+                "failure_reasons": result["failures"],
+                "passed": result["pass"],
+                "source": "validation",
+            })
+
         return result
 
     async def _run_batch(self, scenarios: list, bucket_name: str) -> List[Dict]:
