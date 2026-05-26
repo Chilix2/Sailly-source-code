@@ -240,6 +240,14 @@ class LightValidationLoop:
         self.sailly_ws_url = sailly_ws_url
         self.matrix = ScenarioMatrix()
         self.fetcher = PostgresMetricsFetcher()
+        
+        # Initialize failure ingestor
+        try:
+            from server.failure_ingestor import FailureIngestor
+            self.ingestor = FailureIngestor()
+        except ImportError:
+            logger.warning("FailureIngestor not available")
+            self.ingestor = None
 
     def select_scenarios(
         self,
@@ -297,6 +305,22 @@ class LightValidationLoop:
             _score_scenario(r, metrics, transcripts_by_sid.get(getattr(r, "call_sid", ""), ""))
             for r in raw_results
         ]
+
+        # Ingest failures into known issues database
+        if self.ingestor:
+            for sr in scenario_results:
+                if not sr.passed:
+                    self.ingestor.ingest_failure({
+                        "scenario_id": sr.scenario_id,
+                        "call_sid": sr.call_sid,
+                        "composite_score": sr.deterministic_score,
+                        "tools_expected": sr.tools_expected,
+                        "tools_called": sr.tools_called,
+                        "achtung_flags": sr.achtung_flags,
+                        "failure_reasons": sr.failure_tags,
+                        "passed": sr.passed,
+                        "source": "validation",
+                    })
 
         total = len(scenario_results)
         passed_count = sum(1 for r in scenario_results if r.passed)

@@ -338,6 +338,15 @@ class FixValidationLoop:
         self._heartbeat: int = 0
         self._results_lock: Optional[asyncio.Lock] = None
         self._state_lock: Optional[asyncio.Lock] = None
+        
+        # Initialize failure ingestor
+        try:
+            from server.failure_ingestor import FailureIngestor
+            self.ingestor = FailureIngestor()
+        except ImportError:
+            logger.warning("FailureIngestor not available")
+            self.ingestor = None
+        
         self._init_buckets()
 
     def _init_buckets(self):
