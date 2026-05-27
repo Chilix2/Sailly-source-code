@@ -1087,7 +1087,8 @@ class ConversationState:
     # Phase 2: schema_version = 2 (CapturedIntent as primary storage; shared_slots added)
     # Phase 1 set this to 1; from_dict() handles the 0→1→2 migration chain.
     # Phase 5.5: schema_version = 5 (validation_entries added).
-    schema_version: int = 6
+    # Phase 7: schema_version = 7 (DOBOO de-hardcoding; tenant-driven slot extraction)
+    schema_version: int = 7
 
     order_intent: bool = False
     selected_dish: Optional[str] = None
@@ -1974,6 +1975,7 @@ class ConversationState:
           v2 (Phase 2) → current_intent_idx is Optional[int]; shared_slots present
           v5 (Phase 5.5) → validation_entries dict added
           v6 (commit gate) → order_commit_state / reservation_commit_state added
+          v7 (PHASE 2 de-hardcoding) → tenant-driven config; no data migration needed
         """
         if not data:
             return cls()
@@ -2015,7 +2017,7 @@ class ConversationState:
             reservation_gate.confirmed = False
 
         return cls(
-            schema_version=6,  # always normalize to current version on load
+            schema_version=7,  # always normalize to current version on load (v7: de-hardcoded tenant config)
             call_sid=data.get("call_sid", ""),
             order_intent=data.get("order_intent", False),
             selected_dish=data.get("selected_dish"),
