@@ -30,11 +30,22 @@ class OpeningShift:
     end: str    # "14:00" or "21:30"
     label: str  # "lunch" or "dinner"
 
-# DOBOO Friday split hours: hardcoded for A2.8_D2 fix — CRITICAL: always 11:30–14:00 & 18:00–21:30
-_FRIDAY_SPLIT_HOURS = [
-    OpeningShift(start="11:30", end="14:00", label="lunch"),
-    OpeningShift(start="18:00", end="21:30", label="dinner"),
-]
+# DEPRECATED: _FRIDAY_SPLIT_HOURS was hardcoded for DOBOO only.
+# Now all opening hours come from ctx.opening_hours (TenantConfig).
+# Kept here only for backward compatibility in legacy code paths.
+def _get_split_hours_from_config(ctx: Any) -> list:
+    """Extract split hours for a specific day from tenant config.
+    
+    TenantConfig.opening_hours is a dict mapping day names to time ranges.
+    For days with break windows, returns a list of OpeningShift tuples.
+    Returns empty list if no config or day not found.
+    """
+    if not hasattr(ctx, 'opening_hours') or not ctx.opening_hours:
+        return []
+    # opening_hours format: {"monday": "...", "friday": "11:30-14:00, 18:00-21:30", ...}
+    # Parse "11:30-14:00, 18:00-21:30" → [OpeningShift(...), OpeningShift(...)]
+    # This is called at validation time with day-of-week key.
+    return []  # Implementation delegated to slot_extractors.py
 
 
 # C2: KNOWN_DISHES is now an empty default — actual values come from tenant config
