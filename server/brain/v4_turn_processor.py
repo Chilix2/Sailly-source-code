@@ -459,7 +459,6 @@ class V4TurnProcessor:
         tts_callback: Optional[Callable[[str], Awaitable[None]]] = None,
     ) -> TurnResult:
         from server.brain.conversation_state import update_state_from_utterance
-        from server.brain.context_doc_builder import _persist_resolved_entities_to_state
         from server.brain.v4_pipeline import process_turn_v4
         from server.brain.contracts.turn_timings import TurnTimings
         import time
@@ -522,7 +521,7 @@ class V4TurnProcessor:
             turn_idx=self.turn_idx,
             state=self.state,
             call_sid=self.call_sid,
-            tenant_id=self.tenant_id or "doboo",
+            tenant_id=self.tenant_id,
             llm_client=self._llm_client,
             last_turns=turns_with_current,
             tts_callback=tts_callback,
@@ -657,7 +656,7 @@ class V4TurnProcessor:
         validators = {
             "delivery_address": AddressValidator(
                 call_sid=self.call_sid,
-                tenant_id=self.tenant_id or "doboo",
+                tenant_id=self.tenant_id if self.tenant_id else "",
                 city="Bonn",
             ),
             "phone": PhoneValidator(),
