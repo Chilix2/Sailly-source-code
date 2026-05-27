@@ -1,0 +1,135 @@
+╔════════════════════════════════════════════════════════════════════════════╗
+║              CALL ANALYSIS REPORT - EXECUTIVE SUMMARY                      ║
+║                    30 Most Recent Calls Analyzed                           ║
+╚════════════════════════════════════════════════════════════════════════════╝
+
+📊 CRITICAL ISSUES OVERVIEW
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Issue Type                      Count    Percentage    Severity
+  ─────────────────────────────────────────────────────────────────
+  Client Disconnect                 29        96.7%      🔴 CRITICAL
+  High Latency (avg > 500ms)        17        56.7%      🟠 HIGH
+  High P95 Latency (> 1000ms)       17        56.7%      🟠 HIGH
+  Dead Air Periods                  17        56.7%      🟠 HIGH
+  Low Quality Score (< 5.0)          1         3.3%      🟡 MEDIUM
+
+📈 PERFORMANCE METRICS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Metric                      Current    Target       Status
+  ─────────────────────────────────────────────────────────
+  Average Latency             1,106ms    < 200ms      🔴 8.5x worse
+  P95 Latency (median)        1,500ms    < 500ms      🔴 3x worse
+  Quality Score               6.98/10    > 8.0/10     🟡 Below target
+  Average Duration            71.5s      30-60s       ⚠️  Slightly long
+  Total Tool Calls            40         N/A          ℹ️  Limited use
+
+💡 KEY FINDINGS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ✓ Tool Distribution:
+    • get_menu: 26 calls (most used)
+    • create_order: 8 calls
+    • verify_address: 5 calls
+
+  ✓ Latency Distribution:
+    • 0-500ms: 1 call (3.3%) ✓ Good
+    • 500-1000ms: 5 calls (16.7%) ⚠️  Borderline
+    • 1000-1500ms: 8 calls (26.7%) ✗ Poor
+    • 1500-2000ms: 2 calls (6.7%) ✗ Poor
+    • 2000+ms: 2 calls (6.7%) ✗ Unacceptable
+
+  ✓ Dead Air Correlation:
+    • Calls with 0 tool calls: ~500ms avg dead air
+    • Calls with 2+ tool calls: ~3,900ms avg dead air
+    • Correlation suggests tool processing blocks audio
+
+🔍 WORST PERFORMERS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  1. demo-3e4f2d9828d4
+     Avg Latency: 2,684ms | P95: 3,630ms | Dead Air: 8,053ms | Quality: 7.5
+
+  2. demo-b7fb4e027d28
+     Avg Latency: 2,004ms | P95: 3,000ms | Dead Air: 10,021ms | Quality: 7.6
+
+  3. demo-c31e8157d5a4
+     Avg Latency: 1,806ms | P95: 3,220ms | Dead Air: 5,417ms | Quality: 7.4
+
+  4. demo-da9a37636c48
+     Avg Latency: 1,260ms | P95: 2,212ms | Dead Air: 3,780ms | Quality: 7.4
+
+  5. demo-dbb48c1d9232
+     Avg Latency: 1,141ms | P95: 1,888ms | Dead Air: 5,704ms | Quality: 7.4
+
+🎯 BEST PERFORMERS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  1. demo-8df8c03b815b
+     Avg Latency: 174ms | P95: 174ms | Quality: 7.7 ✓ ACCEPTABLE
+
+  2. demo-8dafefa40ca1
+     Avg Latency: 531ms | P95: 1,372ms | Quality: 8.1 ⚠️  Borderline
+
+  3. demo-87ab8a813c75
+     Avg Latency: 692ms | P95: 1,800ms | Quality: 8.1 ⚠️  Borderline
+
+  4. demo-ba85b4eb467d
+     Avg Latency: 672ms | P95: 1,239ms | Quality: 7.5 ⚠️  Borderline
+
+⚠️  ROOT CAUSE HYPOTHESIS (Priority Order)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  1. Infrastructure/Network Latency (60% likelihood)
+     → High baseline latency even without tool calls
+     → Consistent latency issues across all calls
+     
+  2. Speech Processing Pipeline (40% likelihood)
+     → Audio codec issues, TTS/STT buffering problems
+     → VAD (Voice Activity Detection) misconfiguration
+     
+  3. Tool Integration Overhead (35% likelihood)
+     → Strong correlation between tool calls and dead air
+     → External API response times, database queries
+     
+  4. Gemini AI Model Processing (25% likelihood)
+     → LLM inference time, context window size
+     
+  5. Browser Demo Environment (15% likelihood)
+     → Intentional call limits, WebSocket issues
+
+✅ IMMEDIATE ACTIONS REQUIRED
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  [ ] 1. Investigate Client Disconnect Pattern
+        Review server logs for disconnect triggers
+
+  [ ] 2. Enable Latency Profiling
+        Measure component latency: TTS, STT, LLM, Tool calls
+
+  [ ] 3. Debug Audio Pipeline
+        Investigate dead air correlation with tool calls
+
+  [ ] 4. Set Up Performance Monitoring
+        Dashboard for latency tracking and alerting
+
+  [ ] 5. Test Production Environment
+        Compare with browser demo performance
+
+📁 OUTPUT FILES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ✓ /home/charles2/sailly-browser-demo/ISSUES_REPORT.md
+    Comprehensive markdown report with detailed analysis
+
+  ✓ /home/charles2/sailly-browser-demo/call_analysis.json
+    Structured JSON data for programmatic analysis
+
+  ✓ /tmp/extract_calls.py
+    Python script to extract call metrics
+
+═══════════════════════════════════════════════════════════════════════════════
+  Generated: 2026-05-27 | Scope: 30 most recent calls | Starting: demo-8008b0d9c01f
+═══════════════════════════════════════════════════════════════════════════════
+

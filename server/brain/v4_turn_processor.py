@@ -89,7 +89,10 @@ class V4TurnProcessor:
         self.turn_idx: int = 0
         self.last_turns: list[tuple[str, str]] = []
         self.all_tools: list[str] = []
-
+        
+        # ISSUE 5 Part 2: Pre-cache menu at init to eliminate cold-load on Turn 1
+        self._menu_cache_task: Optional[asyncio.Task] = None
+        
         # NodeMgr stub — brain_service reads node_mgr.current_node_name as fallback
         self.node_mgr = _NodeMgrStub()
 
@@ -147,10 +150,50 @@ class V4TurnProcessor:
             logger.warning("[V4Turn] semantic slot extraction disabled: %s", exc)
             self.slot_extractor = None
             self.slot_extraction_layer = None
+        
+        # ISSUE 5 Part 2: Start menu pre-caching asynchronously at init
+        self._start_menu_precache()
+
+    def _start_menu_precache(self) -> None:
+        """Start menu pre-caching in background to avoid cold-load latency on Turn 1."""
+        if self._menu_cache_task is not None:
+            return
+        try:
+            self._menu_cache_task = asyncio.create_task(self._precache_menu())
+            logger.debug(f"[V4Turn] started background menu pre-caching for tenant={self.tenant_id or 'doboo'}")
+        except Exception as e:
+            logger.warning(f"[V4Turn] could not start menu pre-cache task: {e}")
+
+    async def _precache_menu(self) -> None:
+        """Pre-cache the menu from tenant config or tools."""
+        try:
+            from server.core.tenant_config import get_tenant_registry
+            _tenant_cfg = get_tenant_registry().load_tenant(self.tenant_id or "doboo")
+            if hasattr(_tenant_cfg, "menu") and _tenant_cfg.menu:
+                self.state.cached_menu = _tenant_cfg.menu
+                _n_items = sum(len(v) for v in _tenant_cfg.menu.values() if isinstance(v, list))
+                logger.info(f"[V4Turn] pre-cached menu from tenant config ({_n_items} items)")
+                return
+        except Exception as e:
+            logger.debug(f"[V4Turn] tenant config menu pre-cache failed: {e}")
+        
+        # Fallback: attempt to fetch via execute_tool if available
+        try:
+            from tools.executor import execute_tool
+            _menu_result = await execute_tool("get_menu", {}, self.call_sid, self.tenant_id or "doboo")
+            if isinstance(_menu_result, dict):
+                _menu = _menu_result.get("menu") or _menu_result.get("items") or _menu_result
+                if isinstance(_menu, dict) and _menu:
+                    self.state.cached_menu = _menu
+                    _n_items = sum(len(v) for v in _menu.values() if isinstance(v, list))
+                    logger.info(f"[V4Turn] pre-cached menu via execute_tool ({_n_items} items)")
+        except Exception as e:
+            logger.debug(f"[V4Turn] execute_tool menu pre-cache failed: {e}")
 
     async def start_speculative_semantic_extraction(self, partial_text: str) -> None:
         """Start semantic slot extraction on Flux partial text without mutating durable state."""
-        if os.environ.get("SEMANTIC_SPECULATIVE_ENABLED", "false").lower() not in ("1", "true", "yes"):
+        # ISSUE 5 Part 4: Enable speculative extraction by default
+        if os.environ.get("SEMANTIC_SPECULATIVE_ENABLED", "true").lower() not in ("1", "true", "yes"):
             return
         if not partial_text or self.slot_extraction_layer is None:
             return

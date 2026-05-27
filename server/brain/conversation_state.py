@@ -1128,6 +1128,7 @@ class ConversationState:
     # Stored as list of canonical short names; prices resolved via get_cached_dish_price.
     order_items_extras: List[str] = field(default_factory=list)
     phone_number: Optional[str] = None
+    phone_extracted: bool = False  # Issue 3: Set to True when phone is extracted from STT
     order_created: bool = False
     order_commit_state: CommitGateState = field(default_factory=CommitGateState)
     reservation_commit_state: CommitGateState = field(default_factory=CommitGateState)
@@ -1902,6 +1903,7 @@ class ConversationState:
             "selected_dish": self.selected_dish,
             "order_items_extras": self.order_items_extras,
             "phone_number": self.phone_number,
+            "phone_extracted": self.phone_extracted,
             "order_created": self.order_created,
             "order_commit_state": self.order_commit_state.to_dict(),
             "reservation_commit_state": self.reservation_commit_state.to_dict(),
@@ -2036,6 +2038,7 @@ class ConversationState:
             selected_dish=data.get("selected_dish"),
             order_items_extras=data.get("order_items_extras", []),
             phone_number=data.get("phone_number"),
+            phone_extracted=data.get("phone_extracted", False),
             order_created=data.get("order_created", False),
             order_commit_state=order_gate,
             reservation_commit_state=reservation_gate,
@@ -2126,7 +2129,10 @@ def _menu_item_match_names(item: dict) -> list[str]:
 
 
 def _menu_item_price_and_label(item: dict, fallback_name: str) -> tuple[Optional[float], str]:
-    """Return an orderable price and canonical label for direct or variant-priced items."""
+    """Return an orderable price and canonical label for direct or variant-priced items.
+    
+    ISSUE 4 Part B: For drinks, pick LARGEST size; for non-drinks, pick SMALLEST.
+    """
     name = str(item.get("name") or fallback_name or "").strip()
     price = item.get("price") or item.get("preis")
     if price is not None:
@@ -2151,7 +2157,19 @@ def _menu_item_price_and_label(item: dict, fallback_name: str) -> tuple[Optional
     if not candidates:
         return (None, name)
 
-    _, selected_price, selected_size = sorted(candidates, key=lambda row: (row[0], row[1]))[0]
+    # ISSUE 4 Part B: Detect if this is a drink (check category or name patterns)
+    _is_drink = any(drink_keyword in name.lower() for drink_keyword in (
+        "wasser", "getränk", "getranke", "limonade", "cola", "africola", "bier", "beer",
+        "wein", "wine", "saft", "juice", "tee", "tea", "kaffee", "coffee", "sake", "soju", "asahi", "cass"
+    ))
+    
+    if _is_drink:
+        # For drinks: pick LARGEST size (highest price among eligible variants)
+        _, selected_price, selected_size = sorted(candidates, key=lambda row: (row[0], -row[1]))[0]
+    else:
+        # For non-drinks: pick SMALLEST/CHEAPEST (lowest price among eligible variants)
+        _, selected_price, selected_size = sorted(candidates, key=lambda row: (row[0], row[1]))[0]
+    
     label = f"{name} {selected_size}".strip() if selected_size else name
     return (selected_price, label)
 
@@ -2475,6 +2493,7 @@ def _extract_all_dishes(text: str, items: Optional[List[str]] = None) -> List[st
 
 _FOOD_TOKEN_NORMALIZATIONS = {
     "bebimbap": "bibimbap",
+    "bewimbap": "bibimbap",
     "bibimbab": "bibimbap",
     "bimbap": "bibimbap",
     "bimbab": "bibimbap",

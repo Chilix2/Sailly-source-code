@@ -660,6 +660,44 @@ def _quick_return(
 
 # ── Main pipeline entry point ────────────────────────────────────────────────────
 
+def _check_variants_needed(state) -> tuple[bool, list[str]]:
+    """ISSUE 4 Part A: Check if any order item needs variant selection.
+    
+    Returns: (needs_variants, items_needing_variants)
+    """
+    items = getattr(state, "selected_items", None) or []
+    if not items:
+        sd = getattr(state, "selected_dish", None)
+        items = [sd] if sd else []
+    
+    items_needing_variants = []
+    for item in items:
+        if not item:
+            continue
+        try:
+            # Try to find the item in menu and check for variants
+            from server.brain.conversation_state import resolve_dish_canonical
+            canonical, _ = resolve_dish_canonical(state, item)
+            
+            # Check if menu has variants for this item
+            cached_menu = getattr(state, "cached_menu", {})
+            if isinstance(cached_menu, dict):
+                for category, items_list in cached_menu.items():
+                    if isinstance(items_list, list):
+                        for menu_item in items_list:
+                            if isinstance(menu_item, dict):
+                                menu_name = menu_item.get("name", "")
+                                if canonical and canonical.lower() in menu_name.lower():
+                                    variants = menu_item.get("variants", [])
+                                    if isinstance(variants, list) and len(variants) > 1:
+                                        items_needing_variants.append(item)
+                                    break
+        except Exception as e:
+            logger.debug(f"[v4_pipeline] variant check failed for {item}: {e}")
+    
+    return len(items_needing_variants) > 0, items_needing_variants
+
+
 async def process_turn_v4(
     user_text: str,
     turn_idx: int,
@@ -2339,6 +2377,48 @@ async def process_turn_v4(
             state._readback_already_shown = False
         if not hasattr(state, '_order_readback_confirmed'):
             state._order_readback_confirmed = False
+        
+        # ISSUE 4 Part A: Check if variant selection is needed before showing readback
+        _needs_variants, _variant_items = _check_variants_needed(state)
+        if _needs_variants and not getattr(state, '_variant_prompt_shown', False):
+            # Show variant selection prompt instead of immediate readback
+            state._variant_prompt_shown = True
+            variant_prompt = (
+                f"Welche Variante möchten Sie für {_variant_items[0]} — "
+                f"oder soll ich die größte verfügbare Variante nehmen?"
+            )
+            logger.info(f"[v4_pipeline] T{turn_idx} ISSUE4.A: variant selection needed for {_variant_items}")
+            if tts_callback:
+                try:
+                    await tts_callback(variant_prompt)
+                except Exception as _cb_err:
+                    logger.warning(f"[v4_pipeline] tts_callback raised: {_cb_err}")
+            return _quick_return(
+                variant_prompt, "order_start", intent_result, t0,
+                tools=scheduled_run, next_action="clarify", should_end=False,
+            )
+        
+        # ISSUE 4 Part C: Detect category mention and ask for sub-type before committing
+        from server.brain.slot_extraction_layer import detect_category_mention
+        _mentioned_category = detect_category_mention(user_text)
+        if _mentioned_category and not getattr(state, '_category_submenu_shown', False):
+            # User said just a category name (e.g., "Wasser", "Sushi") — ask for sub-type
+            state._category_submenu_shown = True
+            category_prompt = (
+                f"Gerne! Was möchten Sie aus der Kategorie {_mentioned_category} — "
+                f"oder soll ich Ihnen die beliebtesten Optionen vorschlagen?"
+            )
+            logger.info(f"[v4_pipeline] T{turn_idx} ISSUE4.C: category mention detected: {_mentioned_category}")
+            if tts_callback:
+                try:
+                    await tts_callback(category_prompt)
+                except Exception as _cb_err:
+                    logger.warning(f"[v4_pipeline] tts_callback raised: {_cb_err}")
+            return _quick_return(
+                category_prompt, "order_start", intent_result, t0,
+                tools=scheduled_run + ["get_menu"], next_action="clarify", should_end=False,
+            )
+        
         # Always show readback first; only on turn AFTER readback confirm → commit
         # Guard: enforce readback EVERY order path (not just when _readback_already_shown is False)
         # FIX I1.1_D3: Prevent readback re-display if already shown
@@ -2534,6 +2614,37 @@ async def process_turn_v4(
                 tools=scheduled_run, next_action="clarify", should_end=False,
             )
         
+        # Issue 3: Block commit if phone is "browser_demo" or empty (invalid phone)
+        if not _is_real_phone:
+            if getattr(state, "phone_extracted", False):
+                # Phone was extracted from STT but is invalid/empty — show readback asking for confirmation
+                state.end_call_stage = "phone_readback_pending"
+                phone_text = "Ich habe keine gültige Telefonnummer verstanden. Können Sie bitte Ihre Nummer wiederholen?"
+                logger.warning("[v4_pipeline] T%d create_order blocked: invalid/empty phone despite extraction attempt", turn_idx)
+                if tts_callback:
+                    try:
+                        await tts_callback(phone_text)
+                    except Exception as _cb_err:
+                        logger.warning(f"[v4_pipeline] tts_callback raised: {_cb_err}")
+                return _quick_return(
+                    phone_text, "order_start", intent_result, t0,
+                    tools=scheduled_run, next_action="clarify", should_end=False,
+                )
+            else:
+                # Phone was NOT extracted from STT — ask for phone number
+                state.end_call_stage = "phone_readback_pending"
+                phone_text = "Bevor ich die Bestellung aufnehme, benötige ich Ihre Telefonnummer für die Bestätigungsbenachrichtigung. Können Sie mir Ihre Nummer geben?"
+                logger.info("[v4_pipeline] T%d create_order requires phone number (not yet extracted)", turn_idx)
+                if tts_callback:
+                    try:
+                        await tts_callback(phone_text)
+                    except Exception as _cb_err:
+                        logger.warning(f"[v4_pipeline] tts_callback raised: {_cb_err}")
+                return _quick_return(
+                    phone_text, "order_start", intent_result, t0,
+                    tools=scheduled_run, next_action="clarify", should_end=False,
+                )
+        
         # Safety gate: never attempt create_order without first showing a priced readback to the user.
         # Intended flow: idle → (show readback) → order_pre_commit_readback → (user confirms) → commit → confirmed
         # If readback has NOT been shown yet (_readback_already_shown is False), skip the entire commit block.
@@ -2589,13 +2700,24 @@ async def process_turn_v4(
                 and not getattr(state, "address_verified", False)
             ):
                 try:
+                    # ISSUE 5 Part 3: Parallelize verify_address with menu caching
                     _tenant_city = (
                         getattr(_tcfg_top, "city", None)
                         or ((_tcfg_top.location or {}).get("city") if _tcfg_top else None)
                         or "Deutschland"
                     )
                     verify_args = {"address": delivery_address, "city": _tenant_city, "country": "Deutschland"}
-                    verify_result = await execute_tool("verify_address", verify_args, call_sid, tenant_id)
+                    
+                    # Start both tasks concurrently
+                    verify_task = asyncio.create_task(
+                        execute_tool("verify_address", verify_args, call_sid, tenant_id)
+                    )
+                    menu_cache_task = asyncio.create_task(_ensure_order_menu_cached())
+                    
+                    # Wait for verify_address to complete; menu_cache runs in parallel
+                    verify_result = await asyncio.wait_for(verify_task, timeout=10.0)
+                    # Menu cache will continue in background if not done
+                    
                     commit_tools_run.append("verify_address")
                     logger.info(f"[v4_pipeline] T{turn_idx} verify_address → {verify_result}")
                     # Update state with verified address if available
@@ -2712,14 +2834,54 @@ async def process_turn_v4(
                 name = getattr(state, "customer_name", None) or getattr(state, "first_name", None) or ""
                 name_clause = f" für {name}" if name else ""
                 
+                # ISSUE 6: Build personalized farewell with name, total, and delivery time
+                total_price = getattr(state, "order_total", None) or 0.0
+                try:
+                    total_price = float(total_price)
+                except (ValueError, TypeError):
+                    total_price = 0.0
+                
+                # Get estimated delivery time (from state or config)
+                est_minutes = getattr(state, "estimated_delivery_minutes", None)
+                if est_minutes is None:
+                    # Fall back to tenant config or default
+                    try:
+                        from server.core.tenant_config import get_tenant_registry
+                        _tcfg = get_tenant_registry().load_tenant(tenant_id or "doboo")
+                        est_minutes = (_tcfg.pre_order or {}).get("kitchen_prep_minutes", 30) if hasattr(_tcfg, "pre_order") else 30
+                    except Exception:
+                        est_minutes = 30
+                
+                # Determine delivery vs takeaway
+                _is_delivery_order = getattr(state, "delivery_intended", False) or getattr(state, "delivery_address_mentioned", False)
+                
+                # Build personalized farewell message
+                if name and total_price > 0:
+                    # Full personalized farewell with name, total, and time
+                    if _is_delivery_order:
+                        farewell = (
+                            f"Danke {name}! Ihre Bestellung für €{total_price:.2f} wird in ca. {int(est_minutes)} Minuten ankommen. Guten Appetit!"
+                        )
+                    else:
+                        farewell = (
+                            f"Danke {name}! Ihre Bestellung für €{total_price:.2f} ist in ca. {int(est_minutes)} Minuten bereit. Auf Wiederhören!"
+                        )
+                else:
+                    # Fallback if name or price unavailable
+                    price_clause = f" für €{total_price:.2f}" if total_price > 0 else ""
+                    farewell = f"Vielen Dank! Ihre Bestellung{name_clause}{price_clause} wird in Kürze vorbereitet. Auf Wiederhören!"
+                
                 # Check if SMS will be sent (if messaging_phone is set)
                 messaging_phone = getattr(state, "phone_number", None) or (
                     caller_phone if caller_phone not in ("browser_demo", "", None) else ""
                 )
-                sms_clause = " Sie erhalten eine SMS-Bestätigung." if messaging_phone else ""
+                if messaging_phone and name:
+                    sms_clause = " Sie erhalten eine SMS-Bestätigung."
+                    readback = farewell + sms_clause
+                else:
+                    readback = farewell
                 
-                readback = f"Vielen Dank! Ihre Bestellung{name_clause} wird in Kürze vorbereitet.{sms_clause} Auf Wiederhören!"
-                logger.info(f"[v4_pipeline] T{turn_idx} ORDER COMMITTED → short readback: {readback!r}")
+                logger.info(f"[v4_pipeline] T{turn_idx} ORDER COMMITTED → personalized farewell: {readback!r}")
 
             if tts_callback:
                 try:

@@ -29,14 +29,14 @@ logger = logging.getLogger(__name__)
 COMMIT_TOOLS_REQUIRED_SLOTS: dict[str, list[str]] = {
     "create_reservation": [
         "party_size", "reservation_date", "reservation_time",
-        "customer_name",
+        "customer_name", "phone_number",
     ],
     "modify_reservation": [
         "party_size", "reservation_date", "reservation_time",
-        "customer_name",
+        "customer_name", "phone_number",
     ],
     "create_order": [
-        "order_items", "customer_name",
+        "order_items", "customer_name", "phone_number",
     ],
     "send_sms": ["phone_number"],
     "transfer_to_human": [],
@@ -48,17 +48,13 @@ COMMIT_TOOLS_REQUIRED_SLOTS: dict[str, list[str]] = {
 # Phone is collected AFTER commitment for SMS/callbacks. This allows rush orders
 # to commit immediately without waiting for phone input. Also prevents false
 # blocking when user is reporting billing issue (price complaint) instead of placing order.
-# CRITICAL: phone_number is NEVER required to block order/reservation commit.
-# Phone is collected AFTER commitment for SMS callbacks, not BEFORE.
-# Pickup orders commit with ONLY order_items + customer_name.
-# Delivery orders commit without address verification — address is verified AFTER commit if needed.
-# Phone and delivery_address are collected AFTER commit, not blocking the gate.
-# This allows rush orders (Schnellbestellung) to commit immediately with just name+items.
-# Phone and delivery_address are optional (not blocking).
-# These are collected AFTER commit, not required for the commit gate itself.
+# CRITICAL: Phone is NOW required for ALL order types (delivery, pickup, reservation)
+# Phone is collected BEFORE commitment to ensure SMS delivery (Issue 3).
+# This allows us to send real SMS confirmations instead of "browser_demo" placeholders.
+# Phone and delivery_address are optional for orders when phone extraction fails.
 COMMIT_TOOLS_OPTIONAL_SLOTS: dict[str, list[str]] = {
-    "create_order": ["phone_number", "delivery_address"],
-    "create_reservation": ["phone_number"],
+    "create_order": ["delivery_address"],
+    "create_reservation": [],
 }
 
 COMMIT_TOOLS = set(COMMIT_TOOLS_REQUIRED_SLOTS.keys())
@@ -450,6 +446,10 @@ def _persist_resolved_entities_to_state(resolved_entities: dict, state) -> None:
                 try:
                     setattr(state, slot_key, val)
                     logger.debug(f"[Fix 7] Persisted {entity_key}={val} → state.{slot_key}")
+                    # Issue 3: Set phone_extracted flag when phone is extracted from STT
+                    if entity_key == "phone_number" and val:
+                        setattr(state, "phone_extracted", True)
+                        logger.debug(f"[Fix 7] Issue 3: phone_extracted=True (extracted phone: {val})")
                 except Exception as e:
                     logger.warning(f"[Fix 7] Failed to persist {entity_key} to state: {e}")
 

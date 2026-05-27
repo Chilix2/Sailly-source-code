@@ -115,12 +115,29 @@ class SlotExtractionLayer:
         started = time.monotonic()
         slots = [slot for slot in slots_to_extract if slot in SEMANTIC_SLOT_NAMES]
         deterministic = self._extract_deterministic(user_utterance, current_state, slots)
+        
+        # ISSUE 5 Part 1: Skip LLM on high-confidence deterministic extraction
+        # If deterministic found ≥1 dish + name + address with confidence ≥0.85, skip full LLM
+        _has_dish = deterministic.get("order_items", {}).get("confidence", 0.0) >= 0.85
+        _has_name = deterministic.get("customer_name", {}).get("confidence", 0.0) >= 0.85
+        _has_address = deterministic.get("delivery_address", {}).get("confidence", 0.0) >= 0.85
+        _high_conf_deterministic = _has_dish and _has_name and _has_address
+        
         llm_slots = [
             slot for slot in slots
             if slot not in deterministic
             or float(deterministic[slot].get("confidence", 0.0) or 0.0) < 0.85
             or bool(deterministic[slot].get("correction"))
+            or (slot == "order_items" and self._should_llm_validate_partial_extraction(
+                deterministic.get(slot), user_utterance, current_state
+            ))
         ]
+        
+        # If we have high-confidence deterministic for core ordering signals, skip LLM
+        if _high_conf_deterministic and "order_items" not in llm_slots:
+            llm_slots = []
+            logger.info(f"[semantic_slots] ISSUE5.1: High-confidence deterministic detected; skipping LLM")
+        
         llm_candidates: dict[str, Any] = {}
         llm_timed_out = False
 
@@ -231,6 +248,38 @@ class SlotExtractionLayer:
                 )
 
         return candidates
+
+    def _should_llm_validate_partial_extraction(
+        self, order_items_candidate: dict[str, Any] | None, user_utterance: str, state: Any
+    ) -> bool:
+        """Force LLM fallback when deterministic found items but may have missed some.
+        
+        Heuristic: If utterance contains multiple conjunctions (und/und/,) and we only
+        extracted one item, likely missed additional dishes. Force LLM to validate.
+        """
+        if not order_items_candidate:
+            return False
+        
+        try:
+            items = order_items_candidate.get("value", [])
+            if not isinstance(items, list) or len(items) < 1:
+                return False
+            
+            # Count potential conjunction patterns suggesting multiple dishes
+            lower_text = user_utterance.lower()
+            conjunction_count = (
+                lower_text.count(" und ") +
+                lower_text.count(",") +
+                lower_text.count(";")
+            )
+            
+            # If we see 2+ conjunctions but only extracted 1 item, force LLM validation
+            if conjunction_count >= 2 and len(items) == 1:
+                return True
+            
+            return False
+        except Exception:
+            return False
 
     async def _extract_via_llm(
         self,
@@ -575,3 +624,43 @@ def should_run_semantic_extraction(state: Any, user_text: str = "") -> bool:
     if has_phone_signal:
         return True
     return False
+
+
+def detect_category_mention(user_text: str) -> Optional[str]:
+    """ISSUE 4 Part C: Detect if user mentioned a menu category name (e.g., 'Wasser', 'Wein', 'Sushi').
+    
+    Returns the category name if detected, None otherwise.
+    """
+    lower = (user_text or "").strip().lower()
+    
+    # Known category keywords for restaurants (from doboo.yaml and common patterns)
+    category_keywords = {
+        "wasser": "Getränke",
+        "wein": "Getränke",
+        "sushi": "Sushi",
+        "suchumi": "Sushi",  # common misspelling
+        "rollen": "Sushi",
+        "nigiri": "Sushi",
+        "maki": "Sushi",
+        "bibimbap": "Hauptgerichte",
+        "bulgogi": "Hauptgerichte",
+        "ramyun": "Hauptgerichte",
+        "getränk": "Getränke",
+        "getranke": "Getränke",
+        "limonade": "Getränke",
+        "cola": "Getränke",
+        "bier": "Getränke",
+        "kaffee": "Getränke",
+        "kaffee": "Getränke",
+        "vorspeisen": "Vorspeisen",
+        "vorspeise": "Vorspeisen",
+        "kimchi": "Vorspeisen",
+        "mandu": "Vorspeisen",
+        "dessert": "Desserts",
+    }
+    
+    for keyword, category in category_keywords.items():
+        if keyword in lower:
+            return category
+    
+    return None

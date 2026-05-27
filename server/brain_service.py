@@ -1309,7 +1309,7 @@ class BrowserBrainService(FrameProcessor):
 
     async def _send_greeting(self):
         try:
-            await asyncio.sleep(0.8)
+            await asyncio.sleep(0.05)
             if not self.turn_processor:
                 await self._init_session()
 
