@@ -575,12 +575,40 @@ def slots_for_current_turn(state: Any, user_text: str = "") -> list[str]:
 
 def should_run_semantic_extraction(state: Any, user_text: str = "") -> bool:
     """Return False for low-value turns where deterministic v4 routing is enough."""
-    lower = (user_text or "").lower()
+    lower = (user_text or "").lower().strip()
+    
+    # Empty utterance
+    if not lower:
+        return False
+    
+    # Single-word utterances (except "Ja" / "Nein" confirmations which are checked below)
+    word_count = len(lower.split())
+    if word_count == 1 and not any(token in lower for token in _CONFIRMATION_YES | _CONFIRMATION_NO):
+        return False
+    
+    # Status/presence check signals (no slots to extract)
+    status_signals = (
+        "noch da", "bist du da", "hallo noch", "hörst du", "hoerst du",
+        "verbindung", "verbindungsproblem", "warte", "moment", "hallo", "da",
+    )
+    if any(signal in lower for signal in status_signals):
+        return False
+    
+    # Simple yes/no confirmations (already handled by deterministic extraction)
+    if any(token in lower for token in _CONFIRMATION_YES | _CONFIRMATION_NO):
+        # Only extract if in readback stages where confirmation needs semantic validation
+        if getattr(state, "pending_readback_slots", None):
+            return True
+        if getattr(state, "end_call_stage", "idle") == "order_pre_commit_readback":
+            if any(token in lower for token in _CONFIRMATION_YES | _CONFIRMATION_NO):
+                return False
+            return True
+        return False
+    
+    # Readback stages — always extract to validate slot values
     if getattr(state, "pending_readback_slots", None):
         return True
     if getattr(state, "end_call_stage", "idle") == "order_pre_commit_readback":
-        if any(token in lower for token in _CONFIRMATION_YES | _CONFIRMATION_NO):
-            return False
         return True
     if getattr(state, "end_call_stage", "idle") in {
         "pre_commit_readback",
@@ -589,17 +617,13 @@ def should_run_semantic_extraction(state: Any, user_text: str = "") -> bool:
         "correction_pending",
     }:
         return True
+    
+    # Slot signals — extract for ordering/reservation intent
     slot_signals = (
         "bestell", "liefer", "abhol", "essen", "reserv", "tisch", "person",
         "adresse", "straße", "strasse", "bogen", "telefon", "nummer",
         "kimchi", "bibimbap", "bebimbap", "wasser", "cola",
     )
-    status_signals = (
-        "noch da", "bist du da", "hallo noch", "hörst du", "hoerst du",
-        "verbindung", "verbindungsproblem", "warte", "moment",
-    )
-    if any(signal in lower for signal in status_signals):
-        return False
     phone_only_signals = (
         "telefonnummer", "nummer ist", "meine nummer", "null", "eins", "zwei",
         "drei", "vier", "fünf", "fuenf", "sechs", "sieben", "acht", "neun",
@@ -613,16 +637,22 @@ def should_run_semantic_extraction(state: Any, user_text: str = "") -> bool:
             "bebimbap", "wasser", "cola",
         )
     )
+    
+    # Phone-only utterance without ordering context → skip
     if has_phone_signal and not has_non_phone_slot_signal:
         return False
-    if any(token in lower for token in _CONFIRMATION_YES | _CONFIRMATION_NO):
-        return False
+    
+    # Order or reservation intent
     if getattr(state, "order_intent", False) or getattr(state, "reservation_intent", False):
         return True
+    
+    # Explicit slot signals
     if any(signal in lower for signal in slot_signals):
         return True
+    
     if has_phone_signal:
         return True
+    
     return False
 
 

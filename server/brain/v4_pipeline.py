@@ -46,6 +46,91 @@ _TTS_NON_BOUNDARY_ABBREVIATIONS = (
 )
 
 
+def _normalize_menu_for_cache(menu: dict) -> dict:
+    """Convert menu from any format (nested categories or flat) to canonical flat dict.
+    
+    Returns: {category_name: [{name, price, ...}, ...], ...}
+    Handles both menu.categories[].items[] (nested) and category: items[] (flat).
+    Flattens any variants into separate items with size appended to name.
+    """
+    if not isinstance(menu, dict):
+        return {}
+    
+    canonical: dict = {}
+    
+    # Case 1: Nested format with categories key (menu.categories[])
+    if "categories" in menu:
+        for category in menu.get("categories", []):
+            if not isinstance(category, dict):
+                continue
+            cat_name = category.get("name", "")
+            if not cat_name:
+                continue
+            items = category.get("items", [])
+            if not isinstance(items, list):
+                continue
+            
+            flat_items = []
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                # Flatten variants into separate items
+                variants = item.get("variants", [])
+                if variants and isinstance(variants, list) and len(variants) > 0:
+                    for variant in variants:
+                        if not isinstance(variant, dict):
+                            continue
+                        # Create new item with variant info merged
+                        flat_item = {k: v for k, v in item.items() if k != "variants"}
+                        # Merge variant fields (size, price, etc.)
+                        for vk, vv in variant.items():
+                            if vk == "size" and "size" not in flat_item:
+                                # Append size to name for clarity
+                                flat_item["name"] = f"{item.get('name', '')} {vv}".strip()
+                            elif vk != "size":
+                                flat_item[vk] = vv
+                        flat_items.append(flat_item)
+                else:
+                    # No variants, keep as-is
+                    flat_items.append(item)
+            
+            if flat_items:
+                canonical[cat_name] = flat_items
+    else:
+        # Case 2: Already flat format (category_name: items[])
+        for cat_name, items in menu.items():
+            if cat_name in ("restaurant_info", "weather_location"):
+                continue  # Skip non-menu sections
+            if not isinstance(items, list):
+                continue
+            
+            flat_items = []
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                # Flatten variants into separate items
+                variants = item.get("variants", [])
+                if variants and isinstance(variants, list) and len(variants) > 0:
+                    for variant in variants:
+                        if not isinstance(variant, dict):
+                            continue
+                        flat_item = {k: v for k, v in item.items() if k != "variants"}
+                        for vk, vv in variant.items():
+                            if vk == "size" and "size" not in flat_item:
+                                flat_item["name"] = f"{item.get('name', '')} {vv}".strip()
+                            elif vk != "size":
+                                flat_item[vk] = vv
+                        flat_items.append(flat_item)
+                else:
+                    flat_items.append(item)
+            
+            if flat_items:
+                canonical[cat_name] = flat_items
+    
+    return canonical
+
+
+
 def _split_tts_sentence_chunks(text: str) -> list[str]:
     """Split generated speech into German-safe sentence chunks for TTS streaming."""
     text = (text or "").strip()
@@ -1965,9 +2050,8 @@ async def process_turn_v4(
             state.phone_readback_confirmed = True
             state.end_call_stage = "idle"
             end_call_stage = "idle"
-            _order_readback_confirmed_now = True
-            state.mark_commit_readback_confirmed("create_order")
-            logger.info("[v4_pipeline] T%d phone readback confirmed → proceeding to order commit", turn_idx)
+            _order_readback_confirmed_now = False
+            logger.info("[v4_pipeline] T%d phone readback confirmed → phone gate complete, awaiting order readback", turn_idx)
         elif re.sub(r"\D+", "", user_text or "") and phone_value:
             readback = _format_phone_for_readback(phone_value)
             state.end_call_stage = "phone_readback_pending"
@@ -2117,7 +2201,7 @@ async def process_turn_v4(
     )
 
     async def _ensure_order_menu_cached() -> None:
-        """Load menu once before any priced order readback."""
+        """Load menu once before any priced order readback, with normalization."""
         if getattr(state, "cached_menu", None):
             return
         try:
@@ -2130,9 +2214,10 @@ async def process_turn_v4(
                     scheduled_run.append("get_menu")
                 _menu = _menu_result.get("menu") or _menu_result.get("items") or _menu_result
                 if isinstance(_menu, dict) and _menu:
-                    state.cached_menu = _menu
-                    _n_items = sum(len(v) for v in _menu.values() if isinstance(v, list))
-                    logger.info("[v4_pipeline] T%d loaded menu before order readback (%d items)", turn_idx, _n_items)
+                    normalized_menu = _normalize_menu_for_cache(_menu)
+                    state.cached_menu = normalized_menu
+                    _n_items = sum(len(v) for v in normalized_menu.values() if isinstance(v, list))
+                    logger.info("[v4_pipeline] T%d loaded & normalized menu before order readback (%d items)", turn_idx, _n_items)
                     return
         except Exception as _menu_err:
             logger.warning("[v4_pipeline] T%d get_menu before order readback failed (will use fallback): %s", turn_idx, _menu_err)
@@ -2143,9 +2228,10 @@ async def process_turn_v4(
                 from server.core.tenant_config import get_tenant_registry
                 _tenant_cfg = get_tenant_registry().load_tenant(tenant_id or "doboo")
                 if hasattr(_tenant_cfg, "menu") and _tenant_cfg.menu:
-                    state.cached_menu = _tenant_cfg.menu
-                    _n_items = sum(len(v) for v in _tenant_cfg.menu.values() if isinstance(v, list))
-                    logger.info("[v4_pipeline] T%d loaded menu from tenant config (%d items)", turn_idx, _n_items)
+                    normalized_menu = _normalize_menu_for_cache(_tenant_cfg.menu)
+                    state.cached_menu = normalized_menu
+                    _n_items = sum(len(v) for v in normalized_menu.values() if isinstance(v, list))
+                    logger.info("[v4_pipeline] T%d loaded & normalized menu from tenant config (%d items)", turn_idx, _n_items)
             except Exception as _fallback_err:
                 logger.error("[v4_pipeline] T%d menu fallback also failed — readback will have no prices: %s", turn_idx, _fallback_err)
 

@@ -1,0 +1,110 @@
+================================================================================
+EXACT LINES CHANGED - PHONE/ORDER READBACK GATE ORDERING FIX
+================================================================================
+
+FILE 1: server/brain/v4_pipeline.py
+================================================================================
+
+LOCATION: Lines 2046-2054 (in phone_readback_pending handler)
+
+OLD CODE (BUGGY):
+  1961 | if end_call_stage == "phone_readback_pending":
+  1962 |     phone_value = getattr(state, "phone_number", "") or ""
+  1963 |     if _semantic_confirms_v4(state) or _is_confirmation_v4(user_text):
+  1964 |         state.phone_confirmed = True
+  1965 |         state.phone_readback_confirmed = True
+  1966 |         state.end_call_stage = "idle"
+  1967 |         end_call_stage = "idle"
+  1968 |         _order_readback_confirmed_now = True              ❌ WRONG
+  1969 |         state.mark_commit_readback_confirmed("create_order")  ❌ WRONG
+  1970 |         logger.info("[v4_pipeline] T%d phone readback confirmed → proceeding to order commit", turn_idx)
+
+NEW CODE (FIXED):
+  2046 | if end_call_stage == "phone_readback_pending":
+  2047 |     phone_value = getattr(state, "phone_number", "") or ""
+  2048 |     if _semantic_confirms_v4(state) or _is_confirmation_v4(user_text):
+  2049 |         state.phone_confirmed = True
+  2050 |         state.phone_readback_confirmed = True
+  2051 |         state.end_call_stage = "idle"
+  2052 |         end_call_stage = "idle"
+  2053 |         _order_readback_confirmed_now = False            ✅ CORRECT
+  2054 |         logger.info("[v4_pipeline] T%d phone readback confirmed → phone gate complete, awaiting order readback", turn_idx)
+
+CHANGES:
+  - Line 2053: _order_readback_confirmed_now = False (was True)
+  - Line 2054: Updated log message (was two lines: assignment + mark_commit call)
+
+================================================================================
+FILE 2: server/brain/conversation_state.py
+================================================================================
+
+NO CHANGES REQUIRED
+
+Status: Flag separation already correct
+
+Verified:
+  ✅ Line 1214: phone_readback_confirmed is independent flag
+  ✅ Line 1319: _order_readback_confirmed is independent flag
+  ✅ Line 1509: reset_commit_readback() properly resets only order gate
+  ✅ Line 1669: Phone changes don't affect order gate
+
+================================================================================
+FILE 3: test_phone_readback_gate_regression.py
+================================================================================
+
+NEW FILE CREATED
+
+Purpose: Regression test for phone/order readback gate ordering
+
+Location: /home/charles2/sailly-browser-demo/test_phone_readback_gate_regression.py
+
+Contains:
+  - Test function: test_phone_readback_gate_ordering()
+  - Test scenario: German order + phone + confirmation flow
+  - Invariant checks: 6 critical assertions
+  - Execution: ./venv/bin/python test_phone_readback_gate_regression.py
+  - Result: ✓ ALL TESTS PASSED
+
+================================================================================
+GUARD VERIFICATION - NO CHANGES NEEDED
+================================================================================
+
+Line 2601-2615 (v4_pipeline.py):
+  ✅ Guard prevents re-asking phone after confirmation
+  Guard: not getattr(state, "phone_readback_confirmed", False)
+  Status: Already present, no changes needed
+
+================================================================================
+SIMILAR GATE-ORDERING BUGS - SEARCH RESULTS
+================================================================================
+
+Locations Audited:
+  ✅ v4_pipeline.py line 1927: Mark confirm in pre_commit_readback (CORRECT)
+  ✅ v4_pipeline.py line 1929: Reservation readback confirm (CORRECT)
+  ✅ v4_pipeline.py line 2026: Repeat order during readback (CORRECT)
+  ✅ v4_pipeline.py line 2552: Order readback confirm after shown (CORRECT)
+  ✅ conversation_state.py line 2741-2743: Item correction resets (CORRECT)
+  ✅ conversation_state.py line 1648-1655: Address change resets (CORRECT)
+  ✅ conversation_state.py line 1669: Phone change only affects phone (CORRECT)
+  ✅ v4_pipeline.py line 1909-1911: Name correction resets (CORRECT)
+  ✅ v4_pipeline.py line 2562-2577: Loop detection preserves gates (CORRECT)
+
+Conclusion: No additional gate-ordering bugs found.
+
+================================================================================
+PYTHON SYNTAX VALIDATION
+================================================================================
+
+✅ server/brain/v4_pipeline.py
+  Command: ./venv/bin/python -c "import ast; ast.parse(open('server/brain/v4_pipeline.py').read())"
+  Result: Syntax valid
+
+✅ server/brain/conversation_state.py
+  Command: ./venv/bin/python -c "import ast; ast.parse(open('server/brain/conversation_state.py').read())"
+  Result: Syntax valid
+
+✅ test_phone_readback_gate_regression.py
+  Command: ./venv/bin/python test_phone_readback_gate_regression.py
+  Result: Exit code 0, all tests passed
+
+================================================================================

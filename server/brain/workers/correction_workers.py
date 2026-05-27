@@ -47,7 +47,7 @@ def _detect_corrected_slot(text: str) -> Optional[str]:
 class CorrectionDetector(Worker):
     name = "correction_detector"
     kind = WorkerKind.REQUIRED
-    estimated_latency_ms = 1
+    estimated_latency_ms = 6  # Regex pattern matching
     timeout_ms = 50
 
     async def run(self, ctx: WorkerContext) -> WorkerOutput:
@@ -69,7 +69,7 @@ class CorrectionDetector(Worker):
 class PreviousTurnReferenceResolver(Worker):
     name = "previous_turn_reference_resolver"
     kind = WorkerKind.REQUIRED
-    estimated_latency_ms = 1
+    estimated_latency_ms = 5  # Slot detection + string matching
     timeout_ms = 50
 
     async def run(self, ctx: WorkerContext) -> WorkerOutput:
@@ -87,7 +87,7 @@ class PreviousTurnReferenceResolver(Worker):
 class StateDeltaBuilder(Worker):
     name = "state_delta_builder"
     kind = WorkerKind.REQUIRED
-    estimated_latency_ms = 1
+    estimated_latency_ms = 7  # Slot detection + delta computation
     timeout_ms = 50
 
     async def run(self, ctx: WorkerContext) -> WorkerOutput:

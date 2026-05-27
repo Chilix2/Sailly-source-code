@@ -1,0 +1,11 @@
+{"meta": {"name": "confirmation_intent_no_leak", "description": "REGRESSION: confirmation_intent='unclear' should NOT be read back as 'confirmation_intent: unclear'", "fix_history": ["2026-05-27: Fix internal slot leakage — confirmation_intent never in readback"]}}
+{"role": "user", "text": "Ich dachte, die Gerichte gibt's. Sie stehen doch so bei euch im Menü."}
+{"role": "assert", "type": "forbid", "text": "confirmation_intent"}
+{"role": "assert", "type": "forbid", "text": "confirmation_intent:"}
+{"role": "assert", "type": "forbid", "text": "unclear"}
+{"role": "user", "text": "Doch, ich hätte gerne Bulgogi zum Mitnehmen."}
+{"role": "user", "text": "Philipp Schneider."}
+{"role": "user", "text": "Zero one seven nine three four five six seven eight nine."}
+{"role": "user", "text": "Ja, alles korrekt."}
+{"role": "assert", "type": "tool", "name": "create_order", "at_end": true}
+{"role": "assert", "type": "forbid", "text": "confirmation_intent"}

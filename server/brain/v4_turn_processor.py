@@ -164,14 +164,97 @@ class V4TurnProcessor:
         except Exception as e:
             logger.warning(f"[V4Turn] could not start menu pre-cache task: {e}")
 
+    def _normalize_menu_for_cache(self, menu: dict) -> dict:
+        """Convert menu from any format (nested categories or flat) to canonical flat dict.
+        
+        Returns: {category_name: [{name, price, ...}, ...], ...}
+        Handles both menu.categories[].items[] (nested) and category: items[] (flat).
+        """
+        if not isinstance(menu, dict):
+            return {}
+        
+        canonical: dict = {}
+        
+        # Case 1: Nested format with categories key (menu.categories[])
+        if "categories" in menu:
+            for category in menu.get("categories", []):
+                if not isinstance(category, dict):
+                    continue
+                cat_name = category.get("name", "")
+                if not cat_name:
+                    continue
+                items = category.get("items", [])
+                if not isinstance(items, list):
+                    continue
+                
+                flat_items = []
+                for item in items:
+                    if not isinstance(item, dict):
+                        continue
+                    # Flatten variants into separate items
+                    variants = item.get("variants", [])
+                    if variants and isinstance(variants, list) and len(variants) > 0:
+                        for variant in variants:
+                            if not isinstance(variant, dict):
+                                continue
+                            # Create new item with variant info merged
+                            flat_item = {k: v for k, v in item.items() if k != "variants"}
+                            # Merge variant fields (size, price, etc.)
+                            for vk, vv in variant.items():
+                                if vk == "size" and "size" not in flat_item:
+                                    # Append size to name for clarity
+                                    flat_item["name"] = f"{item.get('name', '')} {vv}".strip()
+                                elif vk != "size":
+                                    flat_item[vk] = vv
+                            flat_items.append(flat_item)
+                    else:
+                        # No variants, keep as-is
+                        flat_items.append(item)
+                
+                if flat_items:
+                    canonical[cat_name] = flat_items
+        else:
+            # Case 2: Already flat format (category_name: items[])
+            for cat_name, items in menu.items():
+                if cat_name in ("restaurant_info", "weather_location"):
+                    continue  # Skip non-menu sections
+                if not isinstance(items, list):
+                    continue
+                
+                flat_items = []
+                for item in items:
+                    if not isinstance(item, dict):
+                        continue
+                    # Flatten variants into separate items
+                    variants = item.get("variants", [])
+                    if variants and isinstance(variants, list) and len(variants) > 0:
+                        for variant in variants:
+                            if not isinstance(variant, dict):
+                                continue
+                            flat_item = {k: v for k, v in item.items() if k != "variants"}
+                            for vk, vv in variant.items():
+                                if vk == "size" and "size" not in flat_item:
+                                    flat_item["name"] = f"{item.get('name', '')} {vv}".strip()
+                                elif vk != "size":
+                                    flat_item[vk] = vv
+                            flat_items.append(flat_item)
+                    else:
+                        flat_items.append(item)
+                
+                if flat_items:
+                    canonical[cat_name] = flat_items
+        
+        return canonical
+
     async def _precache_menu(self) -> None:
         """Pre-cache the menu from tenant config or tools."""
         try:
             from server.core.tenant_config import get_tenant_registry
             _tenant_cfg = get_tenant_registry().load_tenant(self.tenant_id or "doboo")
             if hasattr(_tenant_cfg, "menu") and _tenant_cfg.menu:
-                self.state.cached_menu = _tenant_cfg.menu
-                _n_items = sum(len(v) for v in _tenant_cfg.menu.values() if isinstance(v, list))
+                normalized_menu = self._normalize_menu_for_cache(_tenant_cfg.menu)
+                self.state.cached_menu = normalized_menu
+                _n_items = sum(len(v) for v in normalized_menu.values() if isinstance(v, list))
                 logger.info(f"[V4Turn] pre-cached menu from tenant config ({_n_items} items)")
                 return
         except Exception as e:
@@ -184,8 +267,9 @@ class V4TurnProcessor:
             if isinstance(_menu_result, dict):
                 _menu = _menu_result.get("menu") or _menu_result.get("items") or _menu_result
                 if isinstance(_menu, dict) and _menu:
-                    self.state.cached_menu = _menu
-                    _n_items = sum(len(v) for v in _menu.values() if isinstance(v, list))
+                    normalized_menu = self._normalize_menu_for_cache(_menu)
+                    self.state.cached_menu = normalized_menu
+                    _n_items = sum(len(v) for v in normalized_menu.values() if isinstance(v, list))
                     logger.info(f"[V4Turn] pre-cached menu via execute_tool ({_n_items} items)")
         except Exception as e:
             logger.debug(f"[V4Turn] execute_tool menu pre-cache failed: {e}")
@@ -420,7 +504,26 @@ class V4TurnProcessor:
             speculative_worker_results=getattr(self, "_speculative_worker_results", None),
             speculative_generator_result=speculative_generator_result,
         )
+        spec_worker_results = getattr(self, "_speculative_worker_results", None)
         self._speculative_worker_results = None
+        
+        # Log speculative worker execution and reuse metrics
+        if spec_worker_results:
+            reuse_count = len(spec_worker_results)
+            tools_called = result_dict.get("tools_called", [])
+            reuse_rate = (reuse_count / max(1, len(tools_called))) * 100
+            logger.info(
+                "[V4Turn] speculative_reused: workers=%s (rate=%.1f%%) turn=%s",
+                reuse_count,
+                reuse_rate,
+                self.turn_idx,
+            )
+            if reuse_rate < 30 and self.turn_idx > 5:
+                logger.warning(
+                    "[V4Turn] FAILED: speculative reuse rate < 30%% (%.1f%%) - architecture needs review turn=%s",
+                    reuse_rate,
+                    self.turn_idx,
+                )
 
         # Step 3: maintain turn history for TinyGenerator context window
         # (No explicit persist call needed — process_turn_v4 mutates state in-place.)
@@ -497,7 +600,7 @@ class V4TurnProcessor:
         if speculative_stable:
             try:
                 candidates = await asyncio.wait_for(task, timeout=0.25)
-                logger.info("[V4Turn] reused speculative semantic extraction turn=%s", self.turn_idx)
+                logger.info("[V4Turn] semantic_reused: turn=%s", self.turn_idx)
             except asyncio.TimeoutError:
                 logger.debug("[v4_turn_processor] speculative reuse timeout — falling back to fresh extraction")
                 candidates = None
@@ -678,6 +781,9 @@ class V4TurnProcessor:
         }
         parts = []
         for slot_name, raw in pending.items():
+            # CRITICAL FIX: Never expose internal slots (confirmation_intent) to readback
+            if slot_name == "confirmation_intent":
+                continue
             if not isinstance(raw, dict):
                 continue
             label = labels.get(slot_name, slot_name)

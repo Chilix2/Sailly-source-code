@@ -22,7 +22,7 @@ _GOODBYE_RE = re.compile(
 class GoodbyeDetector(Worker):
     name = "goodbye_detector"
     kind = WorkerKind.REQUIRED
-    estimated_latency_ms = 1
+    estimated_latency_ms = 10  # Deterministic goodbye detection + string matching
     timeout_ms = 50
 
     async def run(self, ctx: WorkerContext) -> WorkerOutput:

@@ -64,13 +64,12 @@ menu:
       description: Vegetarisch frittierte Teigtaschen
   - name: Getränke
     items:
-    - name: Wasser
+    - name: Wasser 0,25L
       description: Still oder Sprudel
-      variants:
-      - size: 0,25L
-        price: 2.9
-      - size: 0,75L
-        price: 7.9
+      price: 2.9
+    - name: Wasser 0,75L
+      description: Still oder Sprudel
+      price: 7.9
     - name: Africola/Africola Zero
       description: 0,25L
       price: 3.0
@@ -455,29 +454,31 @@ tool_data:
       aliases:
       - Djahe Ingwerlimonade
       - Ingwerlimonade
-    - name: Wasser
+    - name: Wasser 0,25L
       description: Still oder Sprudel
-      variants:
-      - size: 0,25L
-        price: 2.9
-        delivery_eligible: true
-      - size: 0,75L
-        price: 7.9
-        delivery_eligible: true
+      price: 2.9
       delivery_eligible: true
       vegetarian: true
       vegan: true
       allergens: []
       aliases:
-      - Mineralwasser
-      - stilles Wasser
-      - Sprudelwasser
+      - Mineralwasser 0,25L
+      - stilles Wasser 0,25L
+      - Sprudelwasser 0,25L
+    - name: Wasser 0,75L
+      description: Still oder Sprudel
+      price: 7.9
+      delivery_eligible: true
+      vegetarian: true
+      vegan: true
+      allergens: []
+      aliases:
+      - Mineralwasser 0,75L
+      - stilles Wasser 0,75L
+      - Sprudelwasser 0,75L
     - name: Africola/Africola Zero
       description: Africola oder Africola Zero, 0,25L
-      variants:
-      - size: 0,25L
-        price: 3.0
-        delivery_eligible: true
+      price: 3.0
       delivery_eligible: true
       vegetarian: true
       vegan: true

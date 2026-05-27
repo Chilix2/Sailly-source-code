@@ -153,7 +153,7 @@ def _parse_date(text: str) -> Optional[str]:
 class DateParser(Worker):
     name = "date_parser"
     kind = WorkerKind.REQUIRED
-    estimated_latency_ms = 1
+    estimated_latency_ms = 3  # Regex date parsing + date arithmetic
     timeout_ms = 50
 
     async def run(self, ctx: WorkerContext) -> WorkerOutput:
@@ -258,7 +258,7 @@ def _parse_time(text: str) -> Optional[str]:
 class TimeParser(Worker):
     name = "time_parser"
     kind = WorkerKind.REQUIRED
-    estimated_latency_ms = 1
+    estimated_latency_ms = 3  # Regex time parsing + timezone validation
     timeout_ms = 50
 
     async def run(self, ctx: WorkerContext) -> WorkerOutput:
@@ -336,7 +336,7 @@ def _parse_party_size(text: str) -> Optional[int]:
 class PartySizeParser(Worker):
     name = "party_size_parser"
     kind = WorkerKind.REQUIRED
-    estimated_latency_ms = 1
+    estimated_latency_ms = 2  # Regex party size parsing
     timeout_ms = 50
 
     async def run(self, ctx: WorkerContext) -> WorkerOutput:
@@ -364,7 +364,7 @@ _RESERVATION_REQUIRED = ["party_size", "reservation_date", "reservation_time"]
 class ReservationSchemaValidator(Worker):
     name = "schema_validator"
     kind = WorkerKind.REQUIRED
-    estimated_latency_ms = 1
+    estimated_latency_ms = 1  # Simple state field checks
     timeout_ms = 50
 
     async def run(self, ctx: WorkerContext) -> WorkerOutput:

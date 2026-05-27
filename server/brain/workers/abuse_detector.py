@@ -33,7 +33,7 @@ _FRUSTRATION_RE = re.compile(
 class AbuseDetector(Worker):
     name = "abuse_detector"
     kind = WorkerKind.REQUIRED
-    estimated_latency_ms = 1
+    estimated_latency_ms = 8  # Deterministic abuse detection + pattern matching
     timeout_ms = 50
 
     async def run(self, ctx: WorkerContext) -> WorkerOutput:

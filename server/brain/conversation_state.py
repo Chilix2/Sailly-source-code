@@ -1610,6 +1610,11 @@ class ConversationState:
             if apply_medium_confidence and confidence >= 0.6:
                 should_apply = True
             if not should_apply:
+                # CRITICAL FIX: Internal slots (confirmation_intent) never go to readback
+                if slot_name == "confirmation_intent":
+                    self.semantic_slot_values["confirmation_intent"] = str(value)
+                    continue
+                
                 if slot_name == "delivery_address":
                     if getattr(candidate, "validator_valid", None) is True:
                         self.delivery_address = str(value).strip()
@@ -1696,8 +1701,17 @@ class ConversationState:
                 except Exception:
                     pending[slot_name] = {"value": value, "confidence": confidence}
             elif slot_name == "confirmation_intent":
+                # CRITICAL FIX: Internal slot - store but never readback to user
                 self.semantic_slot_values["confirmation_intent"] = str(value)
                 applied.append(slot_name)
+                # Skip to next candidate - confirmation_intent should never be in pending_readback_slots
+                if slot_name:
+                    self.semantic_slot_values[slot_name] = (
+                        candidate.to_metric()
+                        if hasattr(candidate, "to_metric")
+                        else {"value": value, "confidence": confidence}
+                    )
+                continue
 
             if slot_name:
                 self.semantic_slot_values[slot_name] = (

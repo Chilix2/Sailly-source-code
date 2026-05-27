@@ -82,15 +82,15 @@ class SpeculativeExecutor:
         )
 
         for worker in plan.required:
-            if worker.estimated_latency_ms > 150 and worker.name not in self._speculative_tasks:
+            if worker.estimated_latency_ms > 0 and worker.name not in self._speculative_tasks:
                 token = asyncio.Event()
                 self._cancel_tokens[worker.name] = token
                 self._speculative_tasks[worker.name] = asyncio.create_task(
                     worker.run_with_cancel(ctx, token)
                 )
-                logger.debug(
-                    f"[SpeculativeExecutor] started {worker.name} speculatively "
-                    f"(estimated={worker.estimated_latency_ms}ms)"
+                logger.info(
+                    f"[SpeculativeExecutor] speculative_worker_started: {worker.name} "
+                    f"(estimated_latency_ms={worker.estimated_latency_ms})"
                 )
 
     async def on_end_of_turn(
@@ -133,9 +133,9 @@ class SpeculativeExecutor:
                         result = task.result()
                         if result.success:
                             reusable[name] = result
-                            logger.debug(
-                                f"[SpeculativeExecutor] reusing {name} result "
-                                f"(latency={result.latency_ms}ms)"
+                            logger.info(
+                                f"[SpeculativeExecutor] speculative_reused: {name} "
+                                f"(latency_ms={result.latency_ms})"
                             )
                     except Exception:
                         pass

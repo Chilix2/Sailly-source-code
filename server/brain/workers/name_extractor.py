@@ -92,7 +92,7 @@ def _clean_name(raw: str) -> Optional[str]:
 class NameExtractor(Worker):
     name = "name_extractor"
     kind = WorkerKind.OPTIONAL
-    estimated_latency_ms = 1
+    estimated_latency_ms = 4  # Multiple regex patterns + validation
     timeout_ms = 100
 
     async def run(self, ctx: WorkerContext) -> WorkerOutput:

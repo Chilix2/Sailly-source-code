@@ -35,7 +35,7 @@ ConfirmResult = Literal["confirm", "deny", "unclear"]
 class ConfirmationParser(Worker):
     name = "confirmation_parser"
     kind = WorkerKind.REQUIRED
-    estimated_latency_ms = 1
+    estimated_latency_ms = 3  # Regex pattern matching on confirmation signals
     timeout_ms = 50
 
     async def run(self, ctx: WorkerContext) -> WorkerOutput:
