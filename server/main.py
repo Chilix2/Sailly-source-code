@@ -778,23 +778,11 @@ async def websocket_demo(websocket: WebSocket):
         import uuid as _uuid
         _early_call_sid = requested_call_sid or f"demo-{_uuid.uuid4().hex[:12]}"
 
-        # Caller audio recorder — callback is wired into the serializer so every
-        # raw WebSocket binary message is captured synchronously before it enters
-        # the Pipecat pipeline queue (race-free).
-        from server.audio_recorder import CallerAudioRecorder as _CallerRecorderClass
-        _early_caller_recorder = _CallerRecorderClass(
-            call_sid=_early_call_sid,
-            credentials_path=os.environ.get(
-                "GOOGLE_APPLICATION_CREDENTIALS",
-                "/home/charles2/.ssh/sailly-voice-agent-key.json",
-            ),
-        )
-
         # Transport — NO VAD here; VAD lives on the context aggregator per Pipecat 0.0.108 API
         transport = FastAPIWebsocketTransport(
             websocket=websocket,
             params=FastAPIWebsocketParams(
-                serializer=BrowserFrameSerializer(on_audio_bytes=_early_caller_recorder.on_audio),
+                serializer=BrowserFrameSerializer(),
                 audio_in_enabled=True,
                 audio_out_enabled=True,
             ),
@@ -824,8 +812,6 @@ async def websocket_demo(websocket: WebSocket):
         logger.info(f"[DEMO] STT service created via provider registry ({type(stt).__name__})")
 
         brain = BrowserBrainService(tenant_id=tenant_id, call_sid=requested_call_sid)
-        # Sync the early caller recorder to use the brain's actual call_sid
-        _early_caller_recorder._call_sid = brain.call_sid
         logger.info("[DEMO] Brain service created")
         _wire_flux_eot_handlers(stt, brain, "DEMO")
 
@@ -891,27 +877,10 @@ async def websocket_demo(websocket: WebSocket):
             )
         )
 
-        # Audio recording — both sides captured, combined into stereo WAV at call end
-        from server.audio_recorder import AgentAudioCapture
+        # Audio recording disabled — not capturing calls
 
-        async def _persist_audio_url(column: str, url: str):
-            try:
-                import asyncpg
-                db_url = os.environ.get("DATABASE_URL")
-                if db_url:
-                    conn = await asyncpg.connect(db_url)
-                    try:
-                        await conn.execute(
-                            f"UPDATE google_calls SET {column}=$1 WHERE call_sid=$2",
-                            url, brain.call_sid,
-                        )
-                    finally:
-                        await conn.close()
-            except Exception as e:
-                logger.warning(f"[AudioRecorder] DB update {column} failed: {e}")
-
-        caller_recorder = _early_caller_recorder   # already collecting audio via serializer
-        agent_audio_recorder = AgentAudioCapture()
+        caller_recorder = None   # audio recording disabled
+        agent_audio_recorder = None
 
         pipeline = Pipeline(
             [
@@ -927,7 +896,6 @@ async def websocket_demo(websocket: WebSocket):
                 tts,
                 tts_timing,             # Phase 9 A1: stamp tts_first_byte_at on first audio chunk
                 tts_watchdog,           # alert + ErrorFrame if TTS stream dies mid-sentence
-                agent_audio_recorder,   # buffer agent PCM16 → GCS on end
                 transport.output(),
                 context_aggregator.assistant(),
             ]
@@ -971,22 +939,9 @@ async def websocket_demo(websocket: WebSocket):
             pass
     finally:
         _active_ws_connections.discard(conn_id)
-        # Upload audio files (runs concurrently while brain persists to DB below)
+        # Audio recording disabled — not capturing calls
         _combined_url: str | None = None
         _agent_url:    str | None = None
-        try:
-            from server.audio_recorder import finalize_all as _finalize_audio
-            _combined_url, _agent_url = await _finalize_audio(
-                call_sid=brain.call_sid if brain else _early_call_sid,
-                credentials_path=os.environ.get(
-                    "GOOGLE_APPLICATION_CREDENTIALS",
-                    "/home/charles2/.ssh/sailly-voice-agent-key.json",
-                ),
-                caller_recorder=_early_caller_recorder,
-                agent_capture=agent_audio_recorder,
-            )
-        except Exception as rec_err:
-            logger.warning(f"[DEMO] Audio finalize error: {rec_err}")
         if brain is not None:
             try:
                 await brain._finalize_session(getattr(brain, "_pending_end_reason", None) or "client_disconnect")
