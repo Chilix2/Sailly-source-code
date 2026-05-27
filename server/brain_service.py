@@ -153,7 +153,7 @@ class BrowserBrainService(FrameProcessor):
 
     def __init__(
         self,
-        tenant_id: str = "doboo",
+        tenant_id: Optional[str] = None,
         caller_phone: str = "browser_demo",
         call_sid_prefix: str = "demo",
         call_sid: str | None = None,
@@ -1351,7 +1351,7 @@ class BrowserBrainService(FrameProcessor):
             # Fallback if no tenant config found
             if not greeting_text:
                 greeting_text = (
-                    "Hallo, hier ist Sailly, die KI-Assistentin vom DOBOO Korean Soulfood — "
+                    "Hallo, hier ist Sailly, die KI-Assistentin — "
                     "schön, dass Sie anrufen! Was kann ich für Sie tun?"
                 )
 
@@ -1361,7 +1361,7 @@ class BrowserBrainService(FrameProcessor):
                     "[BRAIN-GREET] v4 greeting missing 'KI' token — prepending disclosure"
                 )
                 greeting_text = (
-                    "Hallo, hier ist Sailly, die KI-Assistentin von DOBOO. " + greeting_text
+                    "Hallo, hier ist Sailly, die KI-Assistentin. " + greeting_text
                 )
 
             if greeting_text:
