@@ -1,0 +1,35 @@
+# PROTECTED: Websocket Connection Files
+
+## Critical Production Files — Handle With Care
+
+The following files control the live demo websocket connection (`/ws/demo` endpoint). Changes to these files directly affect calling functionality. Before editing, verify that:
+
+1. You understand the change impact on the websocket handshake, session lifecycle, or frame routing
+2. You've tested locally and confirmed the connection still works
+3. The change is intentional (not accidental)
+
+### Protected Files
+
+- `server/main.py` (lines 735-1000+) - WebSocket `/ws/demo` endpoint, transport setup, pipeline initialization
+- `server/brain_service.py` (entire file) - Session management, frame processing, connection lifecycle
+
+### Before Editing These Files
+
+Ask yourself:
+- Is this change necessary for production?
+- Have I tested it locally first?
+- Does it affect the connection handshake, audio flow, or session state?
+
+### If You Need to Modify
+
+1. **Local testing first** — run the dev server and test a call
+2. **Review the change** — use git diff to see exactly what changed
+3. **Document why** — in the commit message, explain the connection-related change
+
+### Override (if absolutely necessary)
+
+To commit changes to these files:
+```bash
+git commit --no-verify
+```
+(This skips the pre-commit hook that normally blocks commits to protected files)

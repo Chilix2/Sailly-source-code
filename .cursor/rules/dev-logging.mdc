@@ -1,0 +1,58 @@
+# Dev Logging Best Practices
+
+## Use the Isolated Dev Logger
+
+When debugging the voice pipeline, use `server.brain.dev_logger` instead of modifying production logs:
+
+```python
+from server.brain.dev_logger import get_dev_logger
+
+dev = get_dev_logger()
+
+# Examples of good dev logging:
+dev.debug("User said: %s", user_text)
+dev.info("Order state → pending_readback")
+dev.warning("create_order blocked - missing phone confirmation")
+dev.error("STT failed with: %s", exception)
+```
+
+## Logging Levels
+
+- **DEBUG** — Granular details for tracing (e.g., partial slot extraction results)
+- **INFO** — Important state changes and milestones (e.g., "order confirmed", "entering correction flow")
+- **WARNING** — Unexpected but non-fatal conditions (e.g., "tool call blocked", "fallback used")
+- **ERROR** — Failures that don't crash the system (e.g., "Haiku fallback failed")
+
+## Rules
+
+1. **Never commit `dev.debug()` spam** — clean up debug logs before pushing
+2. **Keep `dev.info()` for important milestones** — help others understand the flow
+3. **Use descriptive messages** — "order confirmed by user" is better than "ok=true"
+4. **Don't modify `server/main.py` or `server/brain_service.py` logging** — use dev logger instead
+5. **Remove dev logging before final commit** — or mark with `# TODO: remove dev log`
+
+## Example Development Session
+
+```python
+# During development: use dev logger
+dev.debug("Slot extraction result: %s", slots)
+dev.info("Correction detected, entering recovery turn")
+dev.warning("Address verification timed out, using fallback")
+
+# Before committing: remove debug logs, keep only key info logs
+dev.info("Correction detected, entering recovery turn")
+```
+
+## Where to Add Logging
+
+- State machine transitions → `dev.info()`
+- Tool calls (start/end) → `dev.info()`
+- Validation failures → `dev.warning()`
+- Slot extraction results → `dev.debug()` (usually too verbose)
+- Latency checkpoints → `dev.debug()` with timing
+- Error handling → `dev.error()`
+
+## Remember
+
+The dev logger output goes to stdout with a `[DEV ...]` prefix, making it easy to spot and remove later.
+It won't interfere with production logging or test suites.
