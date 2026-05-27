@@ -31,10 +31,16 @@ class SlotValidator:
 
 
 class AddressValidator(SlotValidator):
-    def __init__(self, *, call_sid: str, tenant_id: str, city: str = "Bonn"):
+    def __init__(self, *, call_sid: str, tenant_id: str, city: Optional[str] = None):
+        from server.brain.conversation_state import _get_default_city
+        
         self.call_sid = call_sid
         self.tenant_id = tenant_id
-        self.city = city or "Bonn"
+        # Use passed city, or look up from tenant config, or default
+        if city:
+            self.city = city
+        else:
+            self.city = _get_default_city()
 
     async def validate(self, candidate: SlotCandidate) -> SlotValidationResult:
         address = str(candidate.value or "").strip()
