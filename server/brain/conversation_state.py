@@ -12,6 +12,46 @@ from typing import Any, Optional, List
 logger = logging.getLogger(__name__)
 
 
+# === Global tenant context (set at runtime by v4_turn_processor or main.py) ===
+# This allows module-level functions to access tenant config for de-hardcoding
+_CURRENT_TENANT_CONFIG: Optional[Any] = None
+
+def set_tenant_context(config: Optional[Any]) -> None:
+    """Set the global tenant context for this process/thread.
+    
+    Called by v4_turn_processor.__init__ and main.py to provide tenant-specific
+    config (city, opening_hours, menu items, etc.) to module-level functions.
+    """
+    global _CURRENT_TENANT_CONFIG
+    _CURRENT_TENANT_CONFIG = config
+
+def get_tenant_context() -> Optional[Any]:
+    """Get the currently active tenant config."""
+    return _CURRENT_TENANT_CONFIG
+
+def _get_default_city() -> str:
+    """Get the default city from tenant config, or fallback to 'Bonn' for backward compat."""
+    ctx = get_tenant_context()
+    if ctx and hasattr(ctx, 'city'):
+        return ctx.city
+    return "Bonn"  # Legacy fallback (DOBOO)
+
+def _get_postcode_pattern() -> str:
+    """Get the postcode pattern from tenant config.
+    
+    Returns regex pattern for valid delivery postcodes (e.g. r'53\d{3}' for Bonn).
+    Falls back to '53' for DOBOO if no config available.
+    """
+    ctx = get_tenant_context()
+    if ctx and hasattr(ctx, 'location') and isinstance(ctx.location, dict):
+        # location may have 'postcode_prefix' field (e.g. '53' for Bonn area)
+        pc_prefix = ctx.location.get('postcode_prefix', '')
+        if pc_prefix:
+            return rf"{re.escape(pc_prefix)}\d{{3,4}}"
+    # Default for DOBOO (Bonn area: 53xxx)
+    return r"53\d{3}"
+
+
 # FIX 3: End-of-call state machine for proper multi-intent conclusion
 class EndOfCallState(Enum):
     """States for multi-intent call completion sequence."""
@@ -33,6 +73,16 @@ class OpeningShift:
 # DEPRECATED: _FRIDAY_SPLIT_HOURS was hardcoded for DOBOO only.
 # Now all opening hours come from ctx.opening_hours (TenantConfig).
 # Kept here only for backward compatibility in legacy code paths.
+
+# C2: KNOWN_DISHES is now an empty default — actual values come from tenant config
+# via set_known_items() called in ADKTurnProcessor.__init__().
+# Keeping a short legacy list as ultimate fallback only (loaded when tenant config is unavailable).
+KNOWN_DISHES: List[str] = []  # populated from configs/tenants/<id>.yaml at startup
+
+# Global known items (for backward compatibility when not using tenant config)
+_KNOWN_ITEMS: List[str] = list(KNOWN_DISHES)
+
+
 def set_known_items(items: List[str]):
     """Called at startup to initialize known items from tenant config."""
     global _KNOWN_ITEMS

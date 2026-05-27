@@ -106,8 +106,17 @@ def _build_prompt(
     if ctx.missing_slots:
         logger.info(f"[TinyGenerator] LLM prompted to ask about: {ctx.missing_slots}")
 
+    # Get formality from tenant config (Sie or du)
+    from server.brain.conversation_state import get_tenant_context
+    tenant_ctx = get_tenant_context()
+    formality_rule = "Sie"
+    if tenant_ctx and hasattr(tenant_ctx, 'formality') and tenant_ctx.formality:
+        formality_rule = tenant_ctx.formality
+    
+    formality_instruction = f'Verwende IMMER "{formality_rule}".'
+
     return f"""Du bist Sailly, die KI-Assistentin von {restaurant_identity or "dem Restaurant"}.
-Verwende IMMER "Sie".
+{formality_instruction}
 Antworte in maximal {ctx.response_constraints.max_sentences} Sätzen auf Deutsch.
 
 Gespräch bisher:

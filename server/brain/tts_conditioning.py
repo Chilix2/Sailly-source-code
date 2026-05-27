@@ -27,11 +27,23 @@ logger = logging.getLogger(__name__)
 # ── Layer 1: Permanent persona ─────────────────────────────────────────────────
 
 SAILLY_PERSONA = (
-    "Du bist Sailly, die KI-Sprachassistentin vom Restaurant DOBOO in Bonn. "
+    "Du bist Sailly, die KI-Sprachassistentin. "
     "Deine Stimme ist freundlich-professionell, mittlere Tonhöhe, leicht warm, "
     "nicht süßlich oder überschwänglich. Du klingst wie die Rezeptionistin eines "
-    "guten Restaurants, die gerne hilft — nicht wie eine Callcenter-Stimme."
+    "guten Restaurants, die gerne hilft — nicht wie eine Callcenter-Stimme. "
+    "Deine Identität und Geschäftskontext kommen vom Tenant-Config (system_prompt)."
 )
+
+# tenant_persona() can override SAILLY_PERSONA with tenant-specific config if needed
+def get_tenant_persona_prefix() -> str:
+    """Get tenant-specific persona prefix from TenantConfig.system_prompt or use generic default."""
+    from server.brain.conversation_state import get_tenant_context
+    ctx = get_tenant_context()
+    if ctx and hasattr(ctx, 'system_prompt') and ctx.system_prompt:
+        # Extract persona snippet from tenant's system_prompt if available
+        # For now, just use the generic persona and let system_prompt override in prompt injection
+        pass
+    return SAILLY_PERSONA
 
 
 # ── Layer 2: Situation styles ──────────────────────────────────────────────────
