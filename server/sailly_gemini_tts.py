@@ -261,6 +261,7 @@ class SaillyGeminiTTSService(GeminiTTSService):
         stripped = text.strip()
         if len(stripped) < 3 and not stripped.endswith((".", "!", "?")):
             logger.debug(f"{self}: Skipping trivially short TTS input [{text!r}]")
+            logger.info(f"[TTS_SUPPRESS] reason=text_too_short text='{text[:20]}'")
             return
 
         _, streaming_config = self._build_voice_and_config()
@@ -321,6 +322,7 @@ class SaillyGeminiTTSService(GeminiTTSService):
                         if attempt_idx == 0:
                             logger.warning(f"{self}: No audio frames on attempt 1, retrying without style prompt")
                             continue
+                        logger.info(f"[TTS_SUPPRESS] reason=empty_frames_retry turn={context_id}")
                         return
 
                     # Anomaly check: compare actual vs expected audio byte count
@@ -341,7 +343,11 @@ class SaillyGeminiTTSService(GeminiTTSService):
                             f"Suppressing audio to avoid hallucination playback. "
                             f"Transcript already pushed to browser."
                         )
-                        return  # transcript is in the browser; yield silence
+                        logger.warning(f"[TTSHallucDetect] Suppressing audio, ratio={ratio:.2f}, text_len={len(text)}")
+                        logger.info(f"[TTS_SUPPRESS] reason=halluc_detect turn={context_id}")
+                        for sf in _make_silence_frames(100, _sample_rate):
+                            yield sf
+                        return
 
                     # Normal: yield buffered frames
                     first_frame = True
@@ -389,6 +395,7 @@ class SaillyGeminiTTSService(GeminiTTSService):
                         f"{self}: TTS 429 — all {_TTS_429_MAX_RETRIES} retries failed, "
                         f"emitting silence fallback (call={context_id})"
                     )
+                    logger.info(f"[TTS_SUPPRESS] reason=quota_429 turn={context_id}")
                     _sample_rate = int(self.sample_rate or 24000)
                     for sf in _make_silence_frames(500, _sample_rate):
                         yield sf

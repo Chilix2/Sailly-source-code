@@ -185,8 +185,46 @@ class SlotExtractionLayer:
             except Exception:
                 dishes = []
             if dishes:
+                # Detect size indicator from the utterance (e.g. "0,5L", "groß", "klein")
+                _size_re = re.compile(
+                    r"\b(?:0[.,]\d+\s*[lL]?|\d+[.,]\d+\s*[lL]|groß|klein|mittel|large|small|medium)\b",
+                    re.IGNORECASE,
+                )
+                _size_match = _size_re.search(lower)
+                _detected_size: Optional[str] = None
+                if _size_match:
+                    _detected_size = _size_match.group(0).strip().replace(",", ".")
+
+                # Detect carbonation for water items
+                _carb_map = {
+                    "ohne kohlensäure": "still",
+                    "ohne kohlensaeure": "still",
+                    "still": "still",
+                    "stille": "still",
+                    "sprudelnd": "sprudelnd",
+                    "sprudel": "sprudelnd",
+                    "mit kohlensäure": "sprudelnd",
+                    "mit kohlensaeure": "sprudelnd",
+                    "medium": "medium",
+                }
+                _detected_carb: Optional[str] = None
+                for _kw, _cv in _carb_map.items():
+                    if _kw in lower:
+                        _detected_carb = _cv
+                        break
+
+                item_dicts = []
+                for dish in dishes:
+                    _is_water = dish.lower() in ("wasser", "mineralwasser")
+                    item_dicts.append({
+                        "dish_name": dish,
+                        "quantity": 1,
+                        "variant": None,
+                        "size": _detected_size if len(dishes) == 1 else None,
+                        "carbonation": _detected_carb if _is_water else None,
+                    })
                 candidates["order_items"] = self._raw_candidate(
-                    dishes,
+                    item_dicts,
                     0.9,
                     text,
                     "deterministic",
@@ -290,8 +328,27 @@ class SlotExtractionLayer:
             },
             "order_items": {
                 "type": "array",
-                "items": {"type": "string"},
-                "description": "Bestellte Speisen, Getränke, Mengen und Varianten.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "dish_name": {"type": "string", "description": "Name des Gerichts oder Getränks"},
+                        "quantity": {"type": "integer", "description": "Menge (Standard: 1)"},
+                        "variant": {
+                            "type": ["string", "null"],
+                            "description": "Variante, z.B. 'Rind', 'Vegan', 'Scharf', 'Mild'",
+                        },
+                        "size": {
+                            "type": ["string", "null"],
+                            "description": "Größe, z.B. '0.25L', '0.5L', 'groß', 'klein', 'mittel'",
+                        },
+                        "carbonation": {
+                            "type": ["string", "null"],
+                            "description": "Nur für Wasser: 'still', 'sprudelnd', 'medium'",
+                        },
+                    },
+                    "required": ["dish_name"],
+                },
+                "description": "Bestellte Speisen und Getränke mit Menge, Variante, Größe und (bei Wasser) Kohlensäure.",
             },
             "delivery_date": {
                 "type": "string",
@@ -365,7 +422,12 @@ class SlotExtractionLayer:
             )
             if slot_name == "order_items":
                 items = candidate.value if isinstance(candidate.value, list) else [candidate.value]
-                cleaned_items = [str(item).strip() for item in items if str(item).strip()]
+                cleaned_items: list = []
+                for item in items:
+                    if isinstance(item, dict) and str(item.get("dish_name") or "").strip():
+                        cleaned_items.append(item)
+                    elif not isinstance(item, dict) and str(item).strip():
+                        cleaned_items.append(str(item).strip())
                 if cleaned_items:
                     candidate.value = cleaned_items
                     result.order_items.append(candidate)

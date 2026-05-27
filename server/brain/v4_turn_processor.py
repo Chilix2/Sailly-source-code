@@ -150,7 +150,7 @@ class V4TurnProcessor:
 
     async def start_speculative_semantic_extraction(self, partial_text: str) -> None:
         """Start semantic slot extraction on Flux partial text without mutating durable state."""
-        if os.environ.get("SEMANTIC_SPECULATIVE_ENABLED", "true").lower() not in ("1", "true", "yes"):
+        if os.environ.get("SEMANTIC_SPECULATIVE_ENABLED", "false").lower() not in ("1", "true", "yes"):
             return
         if not partial_text or self.slot_extraction_layer is None:
             return
@@ -453,8 +453,11 @@ class V4TurnProcessor:
         )
         if speculative_stable:
             try:
-                candidates = await task
+                candidates = await asyncio.wait_for(task, timeout=0.25)
                 logger.info("[V4Turn] reused speculative semantic extraction turn=%s", self.turn_idx)
+            except asyncio.TimeoutError:
+                logger.debug("[v4_turn_processor] speculative reuse timeout — falling back to fresh extraction")
+                candidates = None
             except asyncio.CancelledError:
                 candidates = None
             except Exception as exc:
@@ -555,6 +558,10 @@ class V4TurnProcessor:
                     "mit Straße, Hausnummer und Stadt noch einmal."
                 )
             self.state.pending_readback_slots = {}
+            logger.info(
+                f"[CORRECTIONS] T{getattr(self.state, 'turn_counter', '?')} confirmation_intent=no "
+                f"end_call_stage={getattr(self.state, 'end_call_stage', '?')} — entering correction_pending"
+            )
             return "Alles klar, was soll ich ändern?"
 
         applied = self.state.update_state_from_extracted_slots(candidates)

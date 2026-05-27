@@ -383,6 +383,8 @@ async def ensure_turn_metrics_table():
                 has_greeting BOOLEAN DEFAULT FALSE,
                 stt_confidence REAL,
                 build_sha TEXT,
+                tts_suppressed_reason TEXT,
+                acoustic_gap_ms INTEGER,
                 created_at TIMESTAMPTZ DEFAULT NOW()
             )
         """)
@@ -402,6 +404,10 @@ async def ensure_turn_metrics_table():
             "ALTER TABLE google_turn_metrics ADD COLUMN IF NOT EXISTS layer3_changes JSONB",
             # TTS TTFB instrumentation: time from brain_start to first audio byte
             "ALTER TABLE google_turn_metrics ADD COLUMN IF NOT EXISTS tts_ttfb_ms INTEGER",
+            # P1_8: TTS suppression reason (halluc_detect, empty_frames_retry, text_too_short, quota_429)
+            "ALTER TABLE google_turn_metrics ADD COLUMN IF NOT EXISTS tts_suppressed_reason TEXT",
+            # P1_9: Acoustic gap placeholder — not populated yet; reserved for future acoustic silence detection
+            "ALTER TABLE google_turn_metrics ADD COLUMN IF NOT EXISTS acoustic_gap_ms INTEGER",
         ):
             try:
                 await conn.execute(_col_ddl)
@@ -634,6 +640,9 @@ async def persist_call_aggregates(call_sid: str) -> None:
                     ROUND(PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY total_latency_ms))::INT AS p50_latency_ms,
                     ROUND(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY total_latency_ms))::INT AS p95_latency_ms,
                     MAX(total_latency_ms) AS max_latency_ms,
+                    -- P1_9: total_dead_air_ms is MISLABELED — it is SUM(total_latency_ms),
+                    -- i.e. cumulative turn processing delay, NOT acoustic silence between utterances.
+                    -- Column name preserved for backwards compatibility; see acoustic_gap_ms for future real data.
                     COALESCE(SUM(total_latency_ms), 0) AS total_dead_air_ms,
                     COUNT(*) FILTER (
                         WHERE subsystems_fired->>'slot_extractor' = 'completed'
@@ -702,6 +711,7 @@ async def persist_call_aggregates(call_sid: str) -> None:
                 aggregates["p50_latency_ms"],
                 aggregates["p95_latency_ms"],
                 aggregates["max_latency_ms"],
+                # P1_9: mislabeled — stores SUM(total_latency_ms), not acoustic silence
                 int(aggregates["total_dead_air_ms"]) if aggregates["total_dead_air_ms"] is not None else None,
                 aggregates["slot_extractor_success_rate"],
                 aggregates["validation_registry_invocations"],

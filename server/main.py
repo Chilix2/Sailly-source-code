@@ -644,6 +644,9 @@ def _wire_flux_eot_handlers(stt, brain: BrowserBrainService, label: str) -> None
         @stt.event_handler("on_end_of_turn")
         async def _on_end_of_turn(_service, transcript):
             # Ensure speculative tasks are cleaned up on final turn end.
+            # P1_7: set brain._eot_this_turn = True after calling se.on_end_of_turn()
+            # so that the brain_service.process_frame de-dup guard can skip the duplicate
+            # call that would otherwise fire when the LLMContextFrame arrives.
             try:
                 se = brain._get_speculative_executor()
                 if se is not None:
@@ -660,6 +663,8 @@ def _wire_flux_eot_handlers(stt, brain: BrowserBrainService, label: str) -> None
                         final_profile=final_profile,
                     )
                     brain._last_speculative_reused_count = len(reusable)
+                    # P1_7: signal to brain_service that on_end_of_turn was handled here
+                    brain._eot_this_turn = True
             except Exception as exc:
                 logger.debug("[%s] Flux speculative cleanup failed: %s", label, exc)
 

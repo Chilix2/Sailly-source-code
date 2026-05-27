@@ -341,8 +341,8 @@ class BrowserBrainService(FrameProcessor):
                 caller_phone=self.caller_phone or "browser_demo",
                 filler_cb=self._emit_filler_tts,
             )
-        await self._restore_turn_counter_from_postgres()
         logger.info(f"[BRAIN] ADKTurnProcessor ready: {self.call_sid}")
+        asyncio.create_task(self._restore_turn_counter_from_postgres_bg())
 
     async def _restore_turn_counter_from_postgres(self) -> None:
         """Keep resumed browser demo sessions from reusing turn numbers."""
@@ -365,6 +365,13 @@ class BrowserBrainService(FrameProcessor):
                 await conn.close()
         except Exception as e:
             logger.debug(f"[BRAIN] turn counter restore skipped: {e}")
+
+    async def _restore_turn_counter_from_postgres_bg(self) -> None:
+        """Background version of turn counter restore (non-blocking on pipeline startup)."""
+        try:
+            await self._restore_turn_counter_from_postgres()
+        except Exception as e:
+            logger.debug(f"[BRAIN] background turn counter restore failed: {e}")
 
     async def _emit_filler_pcm(self, pcm: bytes) -> None:
         """Phase 8.2 — push pre-baked filler PCM directly into the TTS output
@@ -473,6 +480,18 @@ class BrowserBrainService(FrameProcessor):
                 )
         except Exception as _se_err:
             logger.debug(f"[BRAIN] speculative_executor.on_eager_eot failed: {_se_err}")
+        try:
+            starter = getattr(self.turn_processor, "start_speculative_semantic_extraction", None)
+            if callable(starter) and partial_text:
+                await starter(partial_text)
+        except Exception as _sem_err:
+            logger.debug("[BRAIN] speculative semantic extraction start failed: %s", _sem_err)
+        try:
+            starter = getattr(self.turn_processor, "start_speculative_generator", None)
+            if callable(starter) and partial_text:
+                await starter(partial_text)
+        except Exception as _gen_err:
+            logger.debug("[BRAIN] speculative TinyGenerator start failed: %s", _gen_err)
 
     async def on_flux_turn_resumed(self) -> None:
         """Called when Flux emits TurnResumed — cancel speculative work."""
@@ -482,6 +501,18 @@ class BrowserBrainService(FrameProcessor):
                 await se.on_turn_resumed()
         except Exception as _se_err:
             logger.debug(f"[BRAIN] speculative_executor.on_turn_resumed failed: {_se_err}")
+        try:
+            canceller = getattr(self.turn_processor, "cancel_speculative_semantic_extraction", None)
+            if callable(canceller):
+                await canceller()
+        except Exception as _sem_err:
+            logger.debug("[BRAIN] speculative semantic extraction cancel failed: %s", _sem_err)
+        try:
+            canceller = getattr(self.turn_processor, "cancel_speculative_generator", None)
+            if callable(canceller):
+                await canceller()
+        except Exception as _gen_err:
+            logger.debug("[BRAIN] speculative TinyGenerator cancel failed: %s", _gen_err)
 
     async def _emit_filler_tts(self, text: str) -> None:
         """Push a short filler text to the TTS pipeline immediately — used by the
@@ -551,7 +582,9 @@ class BrowserBrainService(FrameProcessor):
             self._current_tts_turn = self._turn_counter + 1
             timer = LatencyTimer(self.call_sid, self._turn_counter + 1)
             timer.mark("stt_final")
-            
+            # P1_7: reset per-turn EOT de-dup flag at the start of each new turn
+            self._eot_this_turn = False
+
             # Phase 4: Track barge-in attempt
             self._barge_in_attempted_this_turn = True  # User spoke while bot was speaking
             
@@ -590,6 +623,14 @@ class BrowserBrainService(FrameProcessor):
                 # Short, neutral ack — does not pretend to act on the feedback
                 bot_text = "Verstanden, ich habe das notiert."
                 await self._send_to_browser("transcript", speaker="bot", text=bot_text)
+                # P0_3 FIX: Push LLMTextFrame so TTS actually speaks the ack.
+                # Previously this early-return path set the browser transcript but
+                # never sent audio — confirmed silent in 8+ production calls.
+                _turn_counter = self._turn_counter + 1
+                logger.info(f"[TTS] T{_turn_counter} pushing LLMTextFrame: '{bot_text[:50]}'")
+                await self.push_frame(LLMFullResponseStartFrame())
+                await self.push_frame(LLMTextFrame(text=bot_text))
+                await self.push_frame(LLMFullResponseEndFrame())
                 # Log to session if available
                 if self.session:
                     try:
@@ -819,17 +860,27 @@ class BrowserBrainService(FrameProcessor):
                         getattr(se, "_partial_text", "")
                         or getattr(se, "_speculative_tasks", {})
                     ):
-                        turn_idx = getattr(self.turn_processor, "turn_idx", 0) if self.turn_processor else 0
-                        try:
-                            from server.brain.intent_classifier import classify as _classify
-                            final_profile = _classify(user_text, turn_idx=turn_idx).worker_profile
-                        except Exception:
-                            final_profile = None
-                        await se.on_end_of_turn(
-                            user_text,
-                            turn_idx,
-                            final_profile=final_profile,
-                        )
+                        # P1_7: de-dup guard — Flux on_end_of_turn may already have fired
+                        # from main.py's @stt.event_handler("on_end_of_turn") before this
+                        # LLMContextFrame arrived. Skip the duplicate call.
+                        if getattr(self, "_eot_this_turn", False):
+                            logger.warning(
+                                "[BRAIN] on_end_of_turn called twice this turn — skipping duplicate "
+                                "(Flux handler already fired)"
+                            )
+                        else:
+                            turn_idx = getattr(self.turn_processor, "turn_idx", 0) if self.turn_processor else 0
+                            try:
+                                from server.brain.intent_classifier import classify as _classify
+                                final_profile = _classify(user_text, turn_idx=turn_idx).worker_profile
+                            except Exception:
+                                final_profile = None
+                            await se.on_end_of_turn(
+                                user_text,
+                                turn_idx,
+                                final_profile=final_profile,
+                            )
+                            self._eot_this_turn = True
                     speculative_results = se.consume_results() if se is not None else {}
                     if self.turn_processor is not None:
                         self.turn_processor._speculative_worker_results = speculative_results
@@ -846,6 +897,13 @@ class BrowserBrainService(FrameProcessor):
                 result = await self.turn_processor.process_turn(
                     user_text, tts_callback=_tts_push
                 )
+                # P0_5: Wire stt_done_at from LatencyTimer to TurnTimings so tts_ttfb_ms
+                # is correctly computed as time-from-STT-final to first audio byte.
+                _tp_ref = getattr(self, "turn_processor", None)
+                _state_ref = getattr(_tp_ref, "state", None)
+                _tt_ref = getattr(_state_ref, "_turn_timings", None)
+                if _tt_ref is not None and timer.marks.get("stt_final"):
+                    _tt_ref.stt_done_at = timer.marks["stt_final"]
                 _turn_elapsed_ms = int(time.time() * 1000.0 - _turn_started_ms)
                 # PR-16c: prefer _full_response_buf (all chunks including post-barge-in)
                 # over result.clean_text when it contains more data, so bot_text in
@@ -998,15 +1056,14 @@ class BrowserBrainService(FrameProcessor):
                                     )
                             except Exception:
                                 _subsystems_fired = None
-                    except Exception:
-                        pass
 
-                    try:
-                        from server.brain.layer1.persist import build_turn_metrics_extra as _build_turn_metrics_extra
-                    except Exception:
-                        _build_turn_metrics_extra = lambda _s: {}  # noqa: E731
+                            try:
+                                from server.brain.layer1.persist import build_turn_metrics_extra as _build_turn_metrics_extra
+                            except Exception:
+                                _build_turn_metrics_extra = lambda _s: {}  # noqa: E731
 
-                    self._turn_metrics.append({
+                            # Build the base metrics dict
+                            _metrics_dict = {
                         "turn_number": self._turn_counter,
                         "user_text": user_text,
                         "bot_text": result.clean_text,
@@ -1055,12 +1112,6 @@ class BrowserBrainService(FrameProcessor):
                         "subsystems_fired": _subsystems_fired,
                         "tts_rate_pct": getattr(_directive, "prosody_rate_pct", None),
                         "tts_latency_ms": self._last_tts_total_ms,  # Phase 3: end-to-end TTS latency
-                        # Phase 9 A1 — per-stage latency, token counts, and cost_eur
-                        # from TurnTimings. build_turn_metrics_extra calls to_metrics_dict()
-                        # internally and appends cost_eur computed from token counts.
-                        **(_build_turn_metrics_extra(_tp.state)
-                           if _tp and getattr(getattr(_tp, "state", None), "_turn_timings", None)
-                           else {}),
                         # Phase 9 B1 — ERR_* codes collected during tool execution
                         "error_codes": (
                             getattr(_tp, "_current_turn_error_codes", None) or []
@@ -1074,6 +1125,7 @@ class BrowserBrainService(FrameProcessor):
                         "worker_p95_ms": getattr(_tp, "_last_worker_p95_ms", None) if _tp else None,
                         "context_build_ms": getattr(_tp, "_last_context_build_ms", None) if _tp else None,
                         "generator_ttft_ms": getattr(_tp, "_last_generator_ttft_ms", None) if _tp else None,
+                        # Fallback for tts_ttfb_ms; will be overridden by _build_turn_metrics_extra if available
                         "tts_ttfb_ms": getattr(self, "_last_tts_ttfb_ms", None),
                         "eot_event_type": getattr(self, "_last_eot_event_type", None),
                         "eot_confidence": getattr(self, "_last_eot_confidence", None),
@@ -1085,34 +1137,44 @@ class BrowserBrainService(FrameProcessor):
                         "slot_retention_status": getattr(_tp, "_last_slot_retention_status", None) if _tp else None,
                         "validation_passes": getattr(_tp, "_last_validation_passes", None) if _tp else None,
                         "speculative_reused_count": getattr(self, "_last_speculative_reused_count", None),
-                    })
-                    try:
-                        from tools.executor import drain_tool_events as _drain_tool_events
-                        _captured_tool_events = _drain_tool_events(self.call_sid)
+                    }
+
+                            # Phase 9 A1 — per-stage latency, token counts, and cost_eur from TurnTimings.
+                            # Merge TurnTimings metrics (which include tts_ttfb_ms computed from timestamps).
+                            # These authoritative values override any fallback values set above.
+                            if _tp and getattr(getattr(_tp, "state", None), "_turn_timings", None):
+                                _metrics_dict.update(_build_turn_metrics_extra(_tp.state))
+
+                            self._turn_metrics.append(_metrics_dict)
+                            try:
+                                from tools.executor import drain_tool_events as _drain_tool_events
+                                _captured_tool_events = _drain_tool_events(self.call_sid)
+                            except Exception:
+                                _captured_tool_events = []
+                            _captured_tool_names = set()
+                            for _event in _captured_tool_events:
+                                if not isinstance(_event, dict):
+                                    continue
+                                _tool_name = _event.get("tool") or _event.get("name")
+                                if not _tool_name or _tool_name == "end_call":
+                                    continue
+                                if _event.get("turn_number") in (None, 99):
+                                    _event["turn_number"] = self._turn_counter
+                                _captured_tool_names.add(_tool_name)
+                                self._tool_call_events.append(_event)
+                            for _tool_name in list(result.tools_called or []):
+                                if _tool_name and _tool_name != "end_call":
+                                    if _tool_name in _captured_tool_names:
+                                        continue
+                                    self._tool_call_events.append({
+                                        "tool": _tool_name,
+                                        "name": _tool_name,
+                                        "args": {},
+                                        "result_summary": f"Executed during turn {self._turn_counter}",
+                                        "turn_number": self._turn_counter,
+                                    })
                     except Exception:
-                        _captured_tool_events = []
-                    _captured_tool_names = set()
-                    for _event in _captured_tool_events:
-                        if not isinstance(_event, dict):
-                            continue
-                        _tool_name = _event.get("tool") or _event.get("name")
-                        if not _tool_name or _tool_name == "end_call":
-                            continue
-                        if _event.get("turn_number") in (None, 99):
-                            _event["turn_number"] = self._turn_counter
-                        _captured_tool_names.add(_tool_name)
-                        self._tool_call_events.append(_event)
-                    for _tool_name in list(result.tools_called or []):
-                        if _tool_name and _tool_name != "end_call":
-                            if _tool_name in _captured_tool_names:
-                                continue
-                            self._tool_call_events.append({
-                                "tool": _tool_name,
-                                "name": _tool_name,
-                                "args": {},
-                                "result_summary": f"Executed during turn {self._turn_counter}",
-                                "turn_number": self._turn_counter,
-                            })
+                        pass
                 except Exception as me:
                     logger.debug(f"[BRAIN] turn_metrics accumulate failed: {me}")
 
@@ -1159,6 +1221,33 @@ class BrowserBrainService(FrameProcessor):
                         ))
                 except Exception as _shadow_err:
                     logger.debug(f"[BRAIN] shadow intent session failed: {_shadow_err}")
+
+                # ═══════════════════════════════════════════════════════════════════════
+                # P0 FIX: Wire stt_done_at from LatencyTimer to TurnTimings
+                # ═══════════════════════════════════════════════════════════════════════
+                # Problem: tts_ttfb_ms is always NULL in reports because
+                # state._turn_timings.stt_done_at was never set. LatencyTimer has the
+                # stt_final mark, but it wasn't being transferred to TurnTimings.
+                #
+                # Solution: After process_turn() completes, bridge the gap by copying
+                # the stt_final timestamp from LatencyTimer to TurnTimings.stt_done_at.
+                # This allows tts_ttfb_ms (time-to-first-audio) to be accurately
+                # calculated as: stt_done_at → tts_first_byte_time
+                #
+                # When: Right after process_turn() returns, before metrics are persisted
+                # Why:  Ensures _build_turn_metrics_extra() computes tts_ttfb_ms with
+                #       the actual stt_done_at value instead of NULL
+                _tp = getattr(self, "turn_processor", None)
+                if _tp and hasattr(_tp, "state") and hasattr(_tp.state, "_turn_timings"):
+                    _turn_timings = getattr(_tp.state, "_turn_timings", None)
+                    if _turn_timings:
+                        _stt_final_time = timer.marks.get("stt_final")
+                        if _stt_final_time and not _turn_timings.stt_done_at:
+                            _turn_timings.stt_done_at = _stt_final_time
+                            logger.debug(
+                                f"[BRAIN] T{self._turn_counter} wired stt_done_at={_stt_final_time:.3f}s "
+                                f"from LatencyTimer to TurnTimings"
+                            )
 
                 if self._turn_metrics:
                     asyncio.create_task(self._persist_turn_metric_live(dict(self._turn_metrics[-1])))
@@ -1577,6 +1666,7 @@ class BrowserBrainService(FrameProcessor):
         ended_at = _parse_dt(session_data.get("ended_at") or now_dt)
         duration_secs = int(session_data.get("duration_secs") or max(0, time.time() - self._start_ts))
         transcripts = session_data.get("transcripts", [])
+        turn_metrics = list(self._turn_metrics or [])
         
         # Reconstruct full conversation from adk_brain memory if needed
         # (bot responses are stored in state.adk_brain.memory.recent_turns)
@@ -1620,16 +1710,35 @@ class BrowserBrainService(FrameProcessor):
         # registration path is bypassed when USE_ADK_BRAIN is active, so
         # session_data["tool_calls"] stays empty without this sync.
         if not session_data.get("tool_calls"):
-            _all_tools_adk = (
-                session_data.get("state", {})
-                .get("adk_brain", {})
-                .get("all_tools", [])
-            )
-            if _all_tools_adk:
-                session_data["tool_calls"] = [{"tool": t, "name": t} for t in _all_tools_adk]
-                logger.info(
-                    f"[BRAIN] synced {len(_all_tools_adk)} ADK tool(s) into session_data['tool_calls']"
+            try:
+                _all_tools_adk = (
+                    session_data.get("state", {})
+                    .get("adk_brain", {})
+                    .get("all_tools", [])
                 )
+                if _all_tools_adk:
+                    _tool_turn_lookup: dict[str, int] = {}
+                    for _tm in turn_metrics:
+                        try:
+                            _tm_turn = int(_tm.get("turn_number") or 0)
+                        except Exception:
+                            _tm_turn = 0
+                        for _tool_name in _tm.get("tools_called") or []:
+                            if _tool_name and _tool_name not in _tool_turn_lookup:
+                                _tool_turn_lookup[_tool_name] = _tm_turn
+                    session_data["tool_calls"] = [
+                        {
+                            "tool": t,
+                            "name": t,
+                            "turn_number": _tool_turn_lookup.get(t, 0),
+                        }
+                        for t in _all_tools_adk
+                    ]
+                    logger.info(
+                        f"[BRAIN] synced {len(_all_tools_adk)} ADK tool(s) into session_data['tool_calls']"
+                    )
+            except Exception as tool_sync_err:
+                logger.warning("[BRAIN] tool_call reconstruction failed (non-fatal): %s", tool_sync_err)
 
         tool_calls = session_data.get("tool_calls", [])
         if self._tool_call_events:
@@ -1705,62 +1814,68 @@ class BrowserBrainService(FrameProcessor):
 
             # Insert transcripts
             if transcripts:
-                await conn.execute(
-                    "DELETE FROM google_transcripts WHERE call_sid = $1",
-                    self.call_sid,
-                )
-                await conn.executemany(
-                    """
-                    INSERT INTO google_transcripts (call_sid, role, content, turn_number, timestamp)
-                    VALUES ($1, $2, $3, $4, $5)
-                    """,
-                    [
-                        (
-                            self.call_sid,
-                            t.get("role") or ("assistant" if t.get("speaker") == "bot" else "user"),
-                            t.get("text") or t.get("content") or "",
-                            i,
-                            _parse_dt(t.get("timestamp") or t.get("ts")) if (t.get("timestamp") or t.get("ts")) else now_dt,
-                        )
-                        for i, t in enumerate(transcripts)
-                        if isinstance(t, dict)
-                    ],
-                )
-                logger.info(f"[BRAIN] PostgreSQL: {len(transcripts)} transcript rows written")
+                try:
+                    await conn.execute(
+                        "DELETE FROM google_transcripts WHERE call_sid = $1",
+                        self.call_sid,
+                    )
+                    await conn.executemany(
+                        """
+                        INSERT INTO google_transcripts (call_sid, role, content, turn_number, timestamp)
+                        VALUES ($1, $2, $3, $4, $5)
+                        """,
+                        [
+                            (
+                                self.call_sid,
+                                t.get("role") or ("assistant" if t.get("speaker") == "bot" else "user"),
+                                t.get("text") or t.get("content") or "",
+                                i,
+                                _parse_dt(t.get("timestamp") or t.get("ts")) if (t.get("timestamp") or t.get("ts")) else now_dt,
+                            )
+                            for i, t in enumerate(transcripts)
+                            if isinstance(t, dict)
+                        ],
+                    )
+                    logger.info(f"[BRAIN] PostgreSQL: {len(transcripts)} transcript rows written")
+                except Exception as transcript_err:
+                    logger.warning("[BRAIN] transcript write failed (non-fatal): %s", transcript_err)
 
             # Insert tool calls
             if tool_calls:
-                await conn.execute(
-                    "DELETE FROM google_tool_calls WHERE call_sid = $1",
-                    self.call_sid,
-                )
-                await conn.executemany(
-                    """
-                    INSERT INTO google_tool_calls
-                        (call_sid, tool_name, arguments, result_summary, turn_number, called_at)
-                    VALUES ($1, $2, $3, $4, $5, $6)
-                    """,
-                    [
-                        (
-                            self.call_sid,
-                            tc.get("tool", ""),
-                            json.dumps(tc.get("args", {})),
-                            str(tc.get("result_summary") or tc.get("result") or "")[:500],
-                            int(tc.get("turn_number") or i),
-                            _parse_dt(tc.get("timestamp") or tc.get("ts")) if (tc.get("timestamp") or tc.get("ts")) else now_dt,
-                        )
-                        for i, tc in enumerate(tool_calls)
-                        if isinstance(tc, dict)
-                    ],
-                )
-                logger.info(f"[BRAIN] PostgreSQL: {len(tool_calls)} tool call rows written")
+                try:
+                    await conn.execute(
+                        "DELETE FROM google_tool_calls WHERE call_sid = $1",
+                        self.call_sid,
+                    )
+                    await conn.executemany(
+                        """
+                        INSERT INTO google_tool_calls
+                            (call_sid, tool_name, arguments, result_summary, turn_number, called_at)
+                        VALUES ($1, $2, $3, $4, $5, $6)
+                        """,
+                        [
+                            (
+                                self.call_sid,
+                                tc.get("tool", ""),
+                                json.dumps(tc.get("args", {})),
+                                str(tc.get("result_summary") or tc.get("result") or "")[:500],
+                                int(tc.get("turn_number") or 0),
+                                _parse_dt(tc.get("timestamp") or tc.get("ts")) if (tc.get("timestamp") or tc.get("ts")) else now_dt,
+                            )
+                            for tc in tool_calls
+                            if isinstance(tc, dict)
+                        ],
+                    )
+                    logger.info(f"[BRAIN] PostgreSQL: {len(tool_calls)} tool call rows written")
+                except Exception as tool_write_err:
+                    logger.warning("[BRAIN] tool_call write failed (non-fatal): %s", tool_write_err)
 
             # Per-turn metrics (drives the Call Analysis dashboard turn view).
             # Sprint 0 expansion: every observability column is written through
             # the shared persist_turn_metrics path via the fuller INSERT below
             # so the Postgres rows carry slot/validation/mood/loop/subsystem
             # fields (not just latency + text like the legacy path did).
-            if self._turn_metrics:
+            if turn_metrics:
                 try:
                     from server.brain.layer1.persist import build_turn_metrics_extra as _build_turn_metrics_extra
                 except Exception:
@@ -1775,7 +1890,7 @@ class BrowserBrainService(FrameProcessor):
                 def _jd(val):
                     return json.dumps(val, ensure_ascii=False) if val is not None else None
 
-                _turn_numbers = [int(tm.get("turn_number") or 0) for tm in self._turn_metrics]
+                _turn_numbers = [int(tm.get("turn_number") or 0) for tm in turn_metrics]
                 if _turn_numbers:
                     await conn.execute(
                         "DELETE FROM google_turn_metrics WHERE call_sid = $1 AND turn_number = ANY($2::int[])",
@@ -1917,11 +2032,11 @@ class BrowserBrainService(FrameProcessor):
                             tm.get("turn_type"),
                             tm.get("worker_profile"),
                         )
-                        for tm in self._turn_metrics
+                        for tm in turn_metrics
                     ],
                 )
                 logger.info(
-                    f"[BRAIN] PostgreSQL: {len(self._turn_metrics)} turn_metric rows written"
+                    f"[BRAIN] PostgreSQL: {len(turn_metrics)} turn_metric rows written"
                 )
 
         finally:

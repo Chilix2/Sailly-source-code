@@ -1667,7 +1667,11 @@ class ConversationState:
                 applied.append(slot_name)
             elif slot_name == "order_items":
                 items = value if isinstance(value, list) else [value]
-                cleaned = [str(item).strip() for item in items if str(item).strip()]
+                def _item_to_str(it):
+                    if isinstance(it, dict):
+                        return str(it.get("dish_name") or it.get("name") or "").strip()
+                    return str(it).strip()
+                cleaned = [_item_to_str(it) for it in items if _item_to_str(it)]
                 if cleaned:
                     if getattr(candidate, "correction", False):
                         merged_items = cleaned
@@ -3459,14 +3463,21 @@ def update_state_from_utterance(state: ConversationState, utterance: str) -> Non
                 logger.info(f"[ADDRESS_CORRECT] Reset availability/commit gates after address correction")
 
     # Implicit reservation intent: party_size >= 2 without food → reservation
+    # Guard: skip when the caller is already in a delivery flow (P2_13)
+    _order_type = getattr(state, 'order_type', None) or getattr(state, 'delivery_type', None)
+    _is_delivery = (
+        _order_type in ('delivery', 'lieferung', 'liefern')
+        or bool(getattr(state, 'delivery_intended', False))
+    )
     if (
         state.party_size is not None
         and state.party_size >= 2
         and not state.selected_dish
         and not state.order_intent
+        and not _is_delivery
     ):
         state.reservation_intent = True
-    
+
     # FIX F2.3_D3: Explicit callback + date mention = reservation intent
     # When caller says "Rufen Sie mich zurück, ich wollte für Freitag reservieren",
     # extraction above sets reservation_date but never sets reservation_intent flag.
@@ -3489,6 +3500,7 @@ def update_state_from_utterance(state: ConversationState, utterance: str) -> Non
         and state.party_size is not None
         and (state.reservation_date is not None or state.reservation_time is not None)
         and not state.order_intent
+        and not _is_delivery
     ):
         state.reservation_intent = True
 

@@ -389,7 +389,13 @@ def _join_german_list(parts: list[str]) -> str:
     return ", ".join(parts[:-1]) + " und " + parts[-1]
 
 
-def _default_menu_price_label(item: dict) -> tuple[float | None, str]:
+def _default_menu_price_label(item: dict, preferred_size: str | None = None) -> tuple[float | None, str]:
+    """Return (price, label) for a menu item, respecting caller-stated size preference.
+
+    If ``preferred_size`` is given (e.g. "0.5L", "groß"), prefer the variant
+    whose ``size`` field contains that string (case-insensitive) over the cheapest.
+    Falls back to the cheapest delivery-eligible variant when no match is found.
+    """
     name = str(item.get("name") or "").strip()
     price = item.get("price") or item.get("preis")
     if price is not None:
@@ -408,6 +414,13 @@ def _default_menu_price_label(item: dict) -> tuple[float | None, str]:
             candidates.append((not eligible, float(variant_price), size))
     if not candidates:
         return None, name
+    # P2_11: prefer caller-stated size over cheapest variant
+    if preferred_size:
+        _pref = preferred_size.lower().replace(",", ".")
+        for _not_eligible, _vp, _vs in candidates:
+            if not _not_eligible and _pref in _vs.lower().replace(",", "."):
+                label = f"{name} {_vs}".strip() if _vs else name
+                return _vp, label
     _, selected_price, selected_size = sorted(candidates, key=lambda row: (row[0], row[1]))[0]
     label = f"{name} {selected_size}".strip() if selected_size else name
     return selected_price, label
@@ -1053,7 +1066,8 @@ async def process_turn_v4(
         }
         logger.info("[v4_pipeline] T%d multi-intent: reservation + menu price → injected menu_price tool result", turn_idx)
     if intent_result.intent in (IntentKind.UNKNOWN, IntentKind.FAQ):
-        if any(kw in _user_lower_kw for kw in _reservation_keywords):
+        _order_active = getattr(state, 'order_intent', False) or getattr(state, 'end_call_stage', 'idle') not in ('idle', 'correction_pending')
+        if not _order_active and any(kw in _user_lower_kw for kw in _reservation_keywords):
             logger.info(
                 f"[v4_pipeline] T{turn_idx} {intent_result.intent} intent but reservation keywords detected "
                 f"→ overriding profile to reservation_start"
@@ -1660,6 +1674,11 @@ async def process_turn_v4(
 
     # Handle correction pending: reset to idle, let workers update slots, re-evaluate
     if end_call_stage == "correction_pending":
+        logger.info(
+            f"[CORRECTIONS] T{turn_idx} correction_pending recovery: "
+            f"resetting stage=idle, selected_items={getattr(state, 'selected_items', [])}, "
+            f"selected_dish={getattr(state, 'selected_dish', None)}"
+        )
         # If user says "ja" / confirms during correction_pending, they meant "nothing to change"
         # — treat as a re-confirmation rather than a correction input.
         if _semantic_confirms_v4(state) or _is_confirmation_v4(user_text):
@@ -2405,6 +2424,11 @@ async def process_turn_v4(
                             logger.info(f"[v4_pipeline] T{turn_idx} correction → updated items to {_new_dishes}")
                             state.reset_commit_readback("create_order", "order_correction")
                     state.end_call_stage = "correction_pending"
+                    logger.info(
+                        f"[CORRECTIONS] T{turn_idx} entering correction_pending: "
+                        f"user_text_len={len(user_text)}, "
+                        f"dishes_extracted={bool(_new_dishes) if '_new_dishes' in dir() else False}"
+                    )
                     correction_text = "Was möchten Sie ändern?"
                     logger.info(f"[v4_pipeline] T{turn_idx} order pre-commit DENIED → asking correction")
                     if tts_callback:
