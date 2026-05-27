@@ -1,5 +1,0 @@
-{"meta": {"name": "commit_gate_reservation_ambiguous", "description": "Reservation pre-commit summary followed by ambiguous response must not fire create_reservation"}}
-{"role": "user", "text": "Ich möchte einen Tisch für nächsten Freitag um neunzehn Uhr für vier Personen reservieren. Mein Name ist Anna Weber. Meine Nummer ist null eins sieben neun drei vier fünf sechs sieben acht neun."}
-{"role": "assert", "type": "contains", "text": "stimmt"}
-{"role": "user", "text": "Vielleicht, warten Sie kurz."}
-{"role": "assert", "type": "tool_not", "name": "create_reservation", "at_end": true}

@@ -18,6 +18,11 @@ from server.brain.workers.abuse_detector import abuse_detector
 from server.brain.workers.confirmation_parser import confirmation_parser
 from server.brain.workers.goodbye_detector import goodbye_detector
 from server.brain.workers.name_extractor import name_extractor
+from server.brain.workers.order_extractors import (
+    order_address_extractor,
+    order_dish_extractor,
+    order_phone_extractor,
+)
 from server.brain.workers.reservation_workers import (
     date_parser,
     party_size_parser,
@@ -156,7 +161,7 @@ _PROFILES: dict[str, ExecutionPlan] = {
     "order_start": ExecutionPlan(
         profile_name="order_start",
         required=[goodbye_detector, abuse_detector],
-        optional=[name_extractor],
+        optional=[name_extractor, order_dish_extractor, order_address_extractor, order_phone_extractor],
         background=[],
         scheduled_tools=["get_menu"],
         deadline_required_ms=280,
@@ -170,7 +175,7 @@ _PROFILES: dict[str, ExecutionPlan] = {
             state_delta_builder,
             goodbye_detector,
         ],
-        optional=[],
+        optional=[order_dish_extractor, order_address_extractor, order_phone_extractor],
         background=[],
         scheduled_tools=[],
         deadline_required_ms=280,

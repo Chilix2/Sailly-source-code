@@ -107,9 +107,11 @@ class SpeculativeExecutor:
 
         # If profile matches and text is similar enough, reuse results
         profiles_match = (final_profile == self._speculative_profile)
-        text_stable = (
-            self._partial_text and final_text and
-            final_text.startswith(self._partial_text[:max(10, len(self._partial_text) - 5)])
+        partial_stem = (self._partial_text or "")[:8].lower()
+        text_stable = bool(
+            partial_stem
+            and len(partial_stem) >= 8
+            and partial_stem in (final_text or "").lower()
         )
 
         if profiles_match and text_stable:

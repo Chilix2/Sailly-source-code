@@ -1129,6 +1129,7 @@ class ConversationState:
     order_items_extras: List[str] = field(default_factory=list)
     phone_number: Optional[str] = None
     phone_extracted: bool = False  # Issue 3: Set to True when phone is extracted from STT
+    phone_prompt_sent: bool = False
     order_created: bool = False
     order_commit_state: CommitGateState = field(default_factory=CommitGateState)
     reservation_commit_state: CommitGateState = field(default_factory=CommitGateState)
@@ -1918,6 +1919,7 @@ class ConversationState:
             "order_items_extras": self.order_items_extras,
             "phone_number": self.phone_number,
             "phone_extracted": self.phone_extracted,
+            "phone_prompt_sent": self.phone_prompt_sent,
             "order_created": self.order_created,
             "order_commit_state": self.order_commit_state.to_dict(),
             "reservation_commit_state": self.reservation_commit_state.to_dict(),
@@ -2053,6 +2055,7 @@ class ConversationState:
             order_items_extras=data.get("order_items_extras", []),
             phone_number=data.get("phone_number"),
             phone_extracted=data.get("phone_extracted", False),
+            phone_prompt_sent=data.get("phone_prompt_sent", False),
             order_created=data.get("order_created", False),
             order_commit_state=order_gate,
             reservation_commit_state=reservation_gate,
@@ -2701,7 +2704,14 @@ def update_state_from_utterance(state: ConversationState, utterance: str) -> Non
     if any(kw in lower for kw in ORDER_KEYWORDS):
         state.order_intent = True
 
-    if any(kw in lower for kw in RESERVATION_KEYWORDS):
+    _active_order_flow = bool(
+        state.order_intent
+        or state.selected_dish
+        or state.selected_items
+        or state.delivery_intended
+        or state.delivery_confirmed
+    )
+    if any(kw in lower for kw in RESERVATION_KEYWORDS) and not _active_order_flow:
         state.reservation_intent = True
 
     # Fix 2: Extract dish BEFORE checking order_intent

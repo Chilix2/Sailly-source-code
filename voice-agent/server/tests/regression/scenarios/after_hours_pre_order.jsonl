@@ -1,4 +1,0 @@
-{"meta": {"name": "after_hours_pre_order", "description": "Caller orders when restaurant is closed — policy must block create_order and offer Vorbestellung. Note: this assertion is timing-dependent and may pass only outside business hours.", "skip": false}}
-{"role": "user", "text": "Ich möchte jetzt sofort einen Bulgogi bestellen."}
-{"role": "assert", "type": "forbid", "text": "technisches problem"}
-{"role": "assert", "type": "forbid", "text": "[tool:"}

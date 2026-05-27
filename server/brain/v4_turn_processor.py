@@ -308,14 +308,21 @@ class V4TurnProcessor:
 
     async def start_speculative_generator(self, partial_text: str) -> None:
         """Start cache-only TinyGenerator work on Flux partial text."""
-        if os.environ.get("SPECULATIVE_GENERATOR_ENABLED", "false").lower() not in ("1", "true", "yes"):
+        if os.environ.get("SPECULATIVE_GENERATOR_ENABLED", "true").lower() not in ("1", "true", "yes"):
             return
         if not partial_text or self._speculative_generator_task is not None:
             return
         lower = partial_text.lower()
+        speculative_keywords = (
+            "hallo", "karte", "offen", "öffnungszeit", "geöffnet", "noch auf",
+            "preis", "kostet", "haben sie", "habt ihr",
+            "bibimbap", "kimchi", "bulgogi", "tofu", "mandu", "japchae",
+            "bestellen", "bestell", "lieferung", "liefern", "abholen", "abholung",
+            "reservier", "danke", "tschüss", "tschuess", "auf wiederhören",
+        )
         recognizable = (
-            getattr(self.state, "end_call_stage", "idle") in {"idle", "readback_pending"}
-            and any(signal in lower for signal in ("hallo", "karte", "offen", "öffnungszeit", "preis", "haben sie"))
+            getattr(self.state, "end_call_stage", "idle") in {"idle", "readback_pending", "order_pre_commit_readback"}
+            and any(signal in lower for signal in speculative_keywords)
         )
         if not recognizable:
             return
@@ -383,12 +390,12 @@ class V4TurnProcessor:
     async def _consume_speculative_generator(self, user_text: str) -> Optional[dict]:
         task = self._speculative_generator_task
         partial = self._speculative_generator_partial or ""
-        stable_prefix = partial[:max(10, len(partial) - 5)] if partial else ""
+        stable_prefix = partial[:8] if partial else ""
         stable = (
             task is not None
             and self._speculative_generator_turn_idx == self.turn_idx
             and bool(stable_prefix)
-            and user_text.lower().startswith(stable_prefix.lower())
+            and stable_prefix.lower() in user_text.lower()
         )
         self._speculative_generator_task = None
         self._speculative_generator_partial = ""
@@ -463,7 +470,26 @@ class V4TurnProcessor:
         # and by brain_service.py to accumulate per-stage latencies.
         self.state._turn_timings = TurnTimings()
 
+        # If turn 1 races the background pre-cache, wait briefly before any
+        # menu-dependent extraction/readback path can ask for prices.
+        if (
+            not getattr(self.state, "cached_menu", None)
+            and self._menu_cache_task is not None
+            and not self._menu_cache_task.done()
+        ):
+            try:
+                await asyncio.wait_for(self._menu_cache_task, timeout=2.0)
+            except asyncio.TimeoutError:
+                logger.warning("[V4Turn] menu pre-cache timed out before turn processing")
+            except Exception as exc:
+                logger.debug("[V4Turn] menu pre-cache failed before turn processing: %s", exc)
+
         self._semantic_tools_called_this_turn = []
+
+        from server.brain.tier1_regex_slots import apply_tier1_slots
+        tier1_applied = apply_tier1_slots(self.state, user_text)
+        if tier1_applied:
+            logger.info("[V4Turn] tier1_regex_slots applied: %s", sorted(tier1_applied))
 
         semantic_pre_response = await self._run_semantic_slot_extraction(user_text)
         if semantic_pre_response:
@@ -575,6 +601,8 @@ class V4TurnProcessor:
         # Confirmation intent is turn-local. Keeping an old "yes" in durable
         # semantic state can silently advance a later pre-commit gate.
         self.state.semantic_slot_values.pop("confirmation_intent", None)
+        if hasattr(self.state, "pending_readback_slots"):
+            self.state.pending_readback_slots.pop("confirmation_intent", None)
 
         if not should_run_semantic_extraction(self.state, user_text):
             self._last_slot_extraction_latency_ms = 0
@@ -590,12 +618,12 @@ class V4TurnProcessor:
         candidates = None
         task = self._speculative_semantic_task
         partial = self._speculative_semantic_partial or ""
-        stable_prefix = partial[:max(10, len(partial) - 5)] if partial else ""
+        stable_prefix = partial[:8] if partial else ""
         speculative_stable = (
             task is not None
             and self._speculative_semantic_turn_idx == self.turn_idx
             and bool(stable_prefix)
-            and user_text.lower().startswith(stable_prefix.lower())
+            and stable_prefix.lower() in user_text.lower()
         )
         if speculative_stable:
             try:
@@ -708,7 +736,8 @@ class V4TurnProcessor:
                 f"[CORRECTIONS] T{getattr(self.state, 'turn_counter', '?')} confirmation_intent=no "
                 f"end_call_stage={getattr(self.state, 'end_call_stage', '?')} — entering correction_pending"
             )
-            return "Alles klar, was soll ich ändern?"
+            self.state.end_call_stage = "correction_pending"
+            return "Alles klar, was soll ich genau ändern?"
 
         applied = self.state.update_state_from_extracted_slots(candidates)
         self._last_slot_retention_status = {

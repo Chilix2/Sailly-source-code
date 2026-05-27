@@ -31,8 +31,6 @@ from pipecat.transports.websocket.fastapi import (
     FastAPIWebsocketTransport,
     FastAPIWebsocketParams,
 )
-from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.google.tts import GeminiTTSService
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -837,29 +835,11 @@ async def websocket_demo(websocket: WebSocket):
         brain.tts_service = tts
         logger.info("[DEMO] TTS service created")
 
-        # Context aggregator with VAD (not on transport) — matches production
+        # Context aggregator: Deepgram Flux semantic EOT is the sole turn-end source.
         context = LLMContext()
         context_aggregator = LLMContextAggregatorPair(
             context,
-            user_params=LLMUserAggregatorParams(
-                vad_analyzer=SileroVADAnalyzer(
-                    params=VADParams(
-                        min_volume=0.3,  # raised from 0.2 — filters background noise on telephony (vol-03)
-                        start_secs=0.4,  # barge-in fires ~50ms after speech — keep fast
-                        stop_secs=0.8,   # raised from 0.55 — allows natural pauses in long monologues without adding too much latency on short turns
-                        # Architecture note: Silero VAD is NOT redundant with Deepgram
-                        # endpointing — they serve different roles.
-                        # Silero: fast barge-in (~50ms after speech onset, vs 300-600ms for
-                        #   Deepgram's first partial) and noise gating (prevents keyboard/
-                        #   room noise from producing spurious STT transcripts).
-                        # Deepgram endpointing=700: authoritative turn-end inside the audio
-                        #   stream; drives is_final=True which flushes the aggregator.
-                        # Turn boundary = max(stop_secs, endpointing) = max(800ms, 700ms) = 800ms.
-                        # Do NOT remove Silero — without it barge-in degrades by 250-550ms
-                        # and noise gating is lost.
-                    )
-                ),
-            ),
+            user_params=LLMUserAggregatorParams(),
         )
         logger.info("[DEMO] Context aggregator created")
 
@@ -1128,19 +1108,11 @@ async def websocket_demo_text(websocket: WebSocket):
         brain.tts_service = tts
         logger.info("[DEMO_TEXT] TTS service created")
 
-        # Context aggregator with VAD
+        # Context aggregator: Deepgram Flux semantic EOT is the sole turn-end source.
         context = LLMContext()
         context_aggregator = LLMContextAggregatorPair(
             context,
-            user_params=LLMUserAggregatorParams(
-                vad_analyzer=SileroVADAnalyzer(
-                    params=VADParams(
-                        min_volume=0.3,  # raised from 0.2 — filters background noise on telephony (vol-03)
-                        start_secs=0.4,
-                        stop_secs=0.8,
-                    )
-                ),
-            ),
+            user_params=LLMUserAggregatorParams(),
         )
         logger.info("[DEMO_TEXT] Context aggregator created")
 

@@ -29,6 +29,7 @@ from server.brain.context_doc_builder import (
 )
 from server.brain.intent_classifier import classify
 from server.brain.intent_session import IntentKind, IntentResult, TurnType
+from server.brain.order_fsm import OrderFSM, order_stage
 from server.brain.tiny_generator import TinyGenerator
 from server.brain.worker_executor import execute as worker_execute
 from server.brain.worker_router import route
@@ -291,7 +292,15 @@ def _is_confirmation_v4(text: str) -> bool:
 def _format_phone_for_readback(phone: str) -> str:
     """Make phone digits easier to verify over TTS."""
     digits = re.sub(r"\D+", "", phone or "")
-    return " ".join(digits) if digits else (phone or "")
+    return digits if digits else (phone or "")
+
+
+def _phone_prompt_allowed(state) -> bool:
+    """Return True only for the first explicit phone prompt in a call."""
+    if getattr(state, "phone_prompt_sent", False):
+        return False
+    state.phone_prompt_sent = True
+    return True
 
 
 def _semantic_confirmation_value(state) -> str:
@@ -478,8 +487,8 @@ def _default_menu_price_label(item: dict, preferred_size: str | None = None) -> 
     """Return (price, label) for a menu item, respecting caller-stated size preference.
 
     If ``preferred_size`` is given (e.g. "0.5L", "groß"), prefer the variant
-    whose ``size`` field contains that string (case-insensitive) over the cheapest.
-    Falls back to the cheapest delivery-eligible variant when no match is found.
+    whose ``size`` field contains that string (case-insensitive). Falls back to
+    the first delivery-eligible catalog variant, not the cheapest.
     """
     name = str(item.get("name") or "").strip()
     price = item.get("price") or item.get("preis")
@@ -506,9 +515,37 @@ def _default_menu_price_label(item: dict, preferred_size: str | None = None) -> 
             if not _not_eligible and _pref in _vs.lower().replace(",", "."):
                 label = f"{name} {_vs}".strip() if _vs else name
                 return _vp, label
-    _, selected_price, selected_size = sorted(candidates, key=lambda row: (row[0], row[1]))[0]
+    _not_eligible, selected_price, selected_size = next(
+        (row for row in candidates if not row[0]),
+        candidates[0],
+    )
     label = f"{name} {selected_size}".strip() if selected_size else name
     return selected_price, label
+
+
+def _format_menu_for_context(menu: dict, *, limit: int = 20, include_description: bool = False) -> str:
+    """Format tenant/tool menu data as LLM-readable text, never as a raw dict."""
+    normalized = _normalize_menu_for_cache(menu)
+    lines: list[str] = []
+    for _cat_items in normalized.values():
+        if not isinstance(_cat_items, list):
+            continue
+        for _item in _cat_items:
+            if not isinstance(_item, dict):
+                continue
+            price, label = _default_menu_price_label(_item)
+            if not label or price is None:
+                continue
+            desc = str(_item.get("description") or "").strip()
+            if include_description and desc:
+                lines.append(f"{label}: {price:.2f}€ — {desc}")
+            else:
+                lines.append(f"{label}: {price:.2f}€")
+            if len(lines) >= limit:
+                break
+        if len(lines) >= limit:
+            break
+    return "Speisekarte: " + " | ".join(lines) if lines else ""
 
 
 def _menu_item_names(item: dict) -> list[str]:
@@ -861,6 +898,22 @@ async def process_turn_v4(
             profile = _mapped.strip()
     profile = _tenant_resolve_profile(_tcfg_top, profile)
 
+    # P0 idempotency guard: once an order has been committed, never allow the
+    # call to re-enter order collection and fire create_order a second time.
+    if getattr(state, "order_created", False):
+        farewell = "Ihre Bestellung ist bereits aufgenommen. Vielen Dank und auf Wiederhören!"
+        state.end_call_stage = "confirmed"
+        state._pending_bot_response = farewell
+        if tts_callback:
+            try:
+                await tts_callback(farewell)
+            except Exception as _cb_err:
+                logger.warning(f"[v4_pipeline] tts_callback raised: {_cb_err}")
+        return _quick_return(
+            farewell, profile, intent_result, t0,
+            tools=["end_call"], next_action="end_call", should_end=True,
+        )
+
     # Prevent false ordering transition immediately after a menu FAQ answer.
     # When last turn was a menu FAQ response, the caller often mentions food
     # words in their acknowledgement, which the classifier may read as ordering.
@@ -1177,11 +1230,18 @@ async def process_turn_v4(
     ]
     _menu_price_kws = ["was kostet", "wie teuer", "preis", "kosten", "was macht", "was ist der preis"]
     _user_lower_kw = user_text.lower()
+    _keyword_order_active = bool(
+        getattr(state, 'order_intent', False)
+        or getattr(state, 'selected_dish', None)
+        or getattr(state, 'selected_items', None)
+        or getattr(state, 'delivery_intended', False)
+        or getattr(state, 'delivery_confirmed', False)
+    )
     # Multi-intent: reservation + FAQ price question in the same turn
     # → inject a menu_price tool result so the bot answers the FAQ AND starts reservation
     _has_reservation_kw = any(kw in _user_lower_kw for kw in _reservation_keywords)
     _has_menu_price_kw  = any(kw in _user_lower_kw for kw in _menu_price_kws)
-    if _has_reservation_kw and _has_menu_price_kw and "menu_price" not in tool_results:
+    if _has_reservation_kw and _has_menu_price_kw and not _keyword_order_active and "menu_price" not in tool_results:
         tool_results["menu_price"] = {
             "dish": "Bibimbap",
             "price": 13.90,
@@ -1189,7 +1249,7 @@ async def process_turn_v4(
         }
         logger.info("[v4_pipeline] T%d multi-intent: reservation + menu price → injected menu_price tool result", turn_idx)
     if intent_result.intent in (IntentKind.UNKNOWN, IntentKind.FAQ):
-        _order_active = getattr(state, 'order_intent', False) or getattr(state, 'end_call_stage', 'idle') not in ('idle', 'correction_pending')
+        _order_active = _keyword_order_active or getattr(state, 'end_call_stage', 'idle') not in ('idle', 'correction_pending')
         if not _order_active and any(kw in _user_lower_kw for kw in _reservation_keywords):
             logger.info(
                 f"[v4_pipeline] T{turn_idx} {intent_result.intent} intent but reservation keywords detected "
@@ -1384,6 +1444,22 @@ async def process_turn_v4(
             if name not in reusable_speculative
         ]
 
+    for output in list(execution_result.required.values()) + list(execution_result.optional.values()):
+        if not getattr(output, "success", False) or getattr(output, "confidence", 0.0) < 0.75:
+            continue
+        data = output.data or {}
+        if data.get("selected_items") and not getattr(state, "selected_items", None):
+            state.selected_items = list(data["selected_items"])
+            state.selected_dish = state.selected_items[0]
+            state.order_intent = True
+        if data.get("delivery_address") and not getattr(state, "delivery_address", None):
+            state.delivery_address = data["delivery_address"]
+            state.delivery_address_mentioned = True
+            state.delivery_intended = True
+        if data.get("phone_number") and not getattr(state, "phone_number", None):
+            state.phone_number = data["phone_number"]
+            state.phone_extracted = True
+
     # ── Execute business-info tools inline so results land in ctx_doc ────────
     # get_date_info is telemetry-labelled but never truly called when
     # tool_results is None (the common path via v4_turn_processor).
@@ -1539,20 +1615,12 @@ async def process_turn_v4(
                 menu = _menu_critical.get("menu") or _menu_critical.get("items")
                 if menu and isinstance(menu, dict):
                     # CRITICAL: populate state.cached_menu so get_cached_dish_price works in commit gate
-                    state.cached_menu = menu
-                    _n_items = sum(len(v) for v in menu.values() if isinstance(v, list))
+                    state.cached_menu = _normalize_menu_for_cache(menu)
+                    _n_items = sum(len(v) for v in state.cached_menu.values() if isinstance(v, list))
                     logger.info("[v4_pipeline] state.cached_menu populated from inline get_menu (%d items)", _n_items)
-                    _menu_lines = []
-                    for _cat_name, _cat_items in menu.items():
-                        if isinstance(_cat_items, list):
-                            for _item in _cat_items:
-                                if isinstance(_item, dict):
-                                    _iname = _item.get("name", "")
-                                    _iprice, _ilabel = _default_menu_price_label(_item)
-                                    if _ilabel and _iprice is not None:
-                                        _menu_lines.append(f"{_ilabel}: {_iprice:.2f}€")
-                    if _menu_lines:
-                        _pre_ctx_menu_data = "Speisekarte: " + " | ".join(_menu_lines[:15])
+                    _formatted_menu = _format_menu_for_context(menu, limit=15)
+                    if _formatted_menu:
+                        _pre_ctx_menu_data = _formatted_menu
                         logger.info("[v4_pipeline] Menu loaded for dish validation (B2.3_D3)")
                     # CRITICAL FIX H2.2_D3: Validate user's dish claim against actual menu
                     # When user says "Bibimbap steht nicht auf der Karte" but it IS in the menu,
@@ -1655,24 +1723,13 @@ async def process_turn_v4(
                     if menu:
                         # Also update state.cached_menu so get_cached_dish_price works in commit gate
                         if isinstance(menu, dict) and not state.cached_menu:
-                            state.cached_menu = menu
+                            state.cached_menu = _normalize_menu_for_cache(menu)
                         # Format menu as human-readable text so the LLM can present it
                         # directly without having to parse a complex nested dict.
                         if isinstance(menu, dict):
-                            _menu_lines = []
-                            for _cat_name, _cat_items in menu.items():
-                                if isinstance(_cat_items, list):
-                                    for _item in _cat_items:
-                                        if isinstance(_item, dict):
-                                            _iname = _item.get("name", "")
-                                            _iprice, _ilabel = _default_menu_price_label(_item)
-                                            _idesc = _item.get("description", "")
-                                            if _ilabel and _iprice is not None:
-                                                _menu_lines.append(f"{_ilabel}: {_iprice:.2f}€ — {_idesc}" if _idesc else f"{_ilabel}: {_iprice:.2f}€")
-                            if _menu_lines:
-                                ctx_doc.resolved_entities["menu_data"] = "Speisekarte: " + " | ".join(_menu_lines[:20])
-                            else:
-                                ctx_doc.resolved_entities["menu_data"] = str(menu)[:600]
+                            _formatted_menu = _format_menu_for_context(menu, limit=20, include_description=True)
+                            if _formatted_menu:
+                                ctx_doc.resolved_entities["menu_data"] = _formatted_menu
                         else:
                             ctx_doc.resolved_entities["menu_data"] = str(menu)[:600]
                 elif tool_name == "check_availability":
@@ -1788,6 +1845,7 @@ async def process_turn_v4(
 
     # ── POST-COMMIT READBACK STATE MACHINE ──────────────────────────────────────
     end_call_stage = getattr(state, "end_call_stage", "idle")
+    order_fsm = order_stage(end_call_stage)
 
     def _with_name_ack(text: str) -> str:
         ack = getattr(state, "_name_correction_ack_text", "") if getattr(state, "_name_corrected_this_turn", False) else ""
@@ -1796,20 +1854,24 @@ async def process_turn_v4(
         return text
 
     # Handle correction pending: reset to idle, let workers update slots, re-evaluate
-    if end_call_stage == "correction_pending":
+    if order_fsm == OrderFSM.CORRECTION_PENDING:
         logger.info(
             f"[CORRECTIONS] T{turn_idx} correction_pending recovery: "
             f"resetting stage=idle, selected_items={getattr(state, 'selected_items', [])}, "
             f"selected_dish={getattr(state, 'selected_dish', None)}"
         )
-        # If user says "ja" / confirms during correction_pending, they meant "nothing to change"
-        # — treat as a re-confirmation rather than a correction input.
         if _semantic_confirms_v4(state) or _is_confirmation_v4(user_text):
-            logger.info(f"[v4_pipeline] T{turn_idx} correction_pending but user confirmed → re-enter pre_commit_readback")
-            state.end_call_stage = "pre_commit_readback"
-            end_call_stage = "pre_commit_readback"
-            # pre_commit_shown stays True so we don't re-show the summary — fall through
-            # directly to the pre_commit_readback confirmation gate below.
+            correction_text = "Was soll ich genau ändern?"
+            logger.info(f"[v4_pipeline] T{turn_idx} correction_pending + confirmation → asking for concrete correction")
+            if tts_callback:
+                try:
+                    await tts_callback(correction_text)
+                except Exception as _cb_err:
+                    logger.warning(f"[v4_pipeline] tts_callback raised: {_cb_err}")
+            return _quick_return(
+                correction_text, profile, intent_result, t0,
+                tools=[], next_action="clarify", should_end=False,
+            )
         else:
             # D3-style adversarial challenge: user claims ordered item is "not on the menu".
             # If all order slots are still present, the "correction" is invalid —
@@ -2702,22 +2764,24 @@ async def process_turn_v4(
         
         # Issue 3: Block commit if phone is "browser_demo" or empty (invalid phone)
         if not _is_real_phone:
-            if getattr(state, "phone_extracted", False):
-                # Phone was extracted from STT but is invalid/empty — show readback asking for confirmation
-                state.end_call_stage = "phone_readback_pending"
-                phone_text = "Ich habe keine gültige Telefonnummer verstanden. Können Sie bitte Ihre Nummer wiederholen?"
-                logger.warning("[v4_pipeline] T%d create_order blocked: invalid/empty phone despite extraction attempt", turn_idx)
-                if tts_callback:
-                    try:
-                        await tts_callback(phone_text)
-                    except Exception as _cb_err:
-                        logger.warning(f"[v4_pipeline] tts_callback raised: {_cb_err}")
-                return _quick_return(
-                    phone_text, "order_start", intent_result, t0,
-                    tools=scheduled_run, next_action="clarify", should_end=False,
-                )
+            if getattr(state, "phone_prompt_sent", False):
+                logger.info("[v4_pipeline] T%d skipping repeated phone prompt; proceeding without phone", turn_idx)
+                state.phone_confirmed = True
             else:
-                # Phone was NOT extracted from STT — ask for phone number
+                state.phone_prompt_sent = True
+                if getattr(state, "phone_extracted", False):
+                    state.end_call_stage = "phone_readback_pending"
+                    phone_text = "Ich habe keine gültige Telefonnummer verstanden. Können Sie bitte Ihre Nummer wiederholen?"
+                    logger.warning("[v4_pipeline] T%d create_order blocked: invalid/empty phone despite extraction attempt", turn_idx)
+                    if tts_callback:
+                        try:
+                            await tts_callback(phone_text)
+                        except Exception as _cb_err:
+                            logger.warning(f"[v4_pipeline] tts_callback raised: {_cb_err}")
+                    return _quick_return(
+                        phone_text, "order_start", intent_result, t0,
+                        tools=scheduled_run, next_action="clarify", should_end=False,
+                    )
                 state.end_call_stage = "phone_readback_pending"
                 phone_text = "Bevor ich die Bestellung aufnehme, benötige ich Ihre Telefonnummer für die Bestätigungsbenachrichtigung. Können Sie mir Ihre Nummer geben?"
                 logger.info("[v4_pipeline] T%d create_order requires phone number (not yet extracted)", turn_idx)
@@ -2730,7 +2794,6 @@ async def process_turn_v4(
                     phone_text, "order_start", intent_result, t0,
                     tools=scheduled_run, next_action="clarify", should_end=False,
                 )
-        
         # Safety gate: never attempt create_order without first showing a priced readback to the user.
         # Intended flow: idle → (show readback) → order_pre_commit_readback → (user confirms) → commit → confirmed
         # If readback has NOT been shown yet (_readback_already_shown is False), skip the entire commit block.
@@ -2784,6 +2847,7 @@ async def process_turn_v4(
                 and delivery_address
                 and "verify_address" not in commit_tools_run
                 and not getattr(state, "address_verified", False)
+                and not getattr(state, "verify_address_called", False)
             ):
                 try:
                     # ISSUE 5 Part 3: Parallelize verify_address with menu caching
@@ -2801,10 +2865,11 @@ async def process_turn_v4(
                     menu_cache_task = asyncio.create_task(_ensure_order_menu_cached())
                     
                     # Wait for verify_address to complete; menu_cache runs in parallel
-                    verify_result = await asyncio.wait_for(verify_task, timeout=10.0)
+                    verify_result = await asyncio.wait_for(verify_task, timeout=1.5)
                     # Menu cache will continue in background if not done
                     
                     commit_tools_run.append("verify_address")
+                    state.verify_address_called = True
                     logger.info(f"[v4_pipeline] T{turn_idx} verify_address → {verify_result}")
                     # Update state with verified address if available
                     if isinstance(verify_result, dict):
@@ -3063,7 +3128,11 @@ async def process_turn_v4(
                 if not _has_name:
                     _next_q = "Auf welchen Namen darf ich reservieren?"
                 elif not _has_phone:
-                    _next_q = "Welche Telefonnummer darf ich notieren, falls wir Sie zurückrufen müssen?"
+                    if getattr(state, "phone_prompt_sent", False):
+                        _next_q = ""
+                    else:
+                        state.phone_prompt_sent = True
+                        _next_q = "Welche Telefonnummer darf ich notieren, falls wir Sie zurückrufen müssen?"
                 else:
                     _next_q = ""
                 avail_text = (
@@ -3369,6 +3438,12 @@ async def process_turn_v4(
                     ctx_doc.next_action = "commit"
 
         first_missing = ctx_doc.missing_slots[0] if ctx_doc.missing_slots else None
+        if first_missing == "phone_number" and getattr(state, "phone_prompt_sent", False):
+            logger.info("[v4_pipeline] T%d suppressing repeated deterministic phone clarify", turn_idx)
+            ctx_doc.missing_slots = [s for s in ctx_doc.missing_slots if s != "phone_number"]
+            if not ctx_doc.missing_slots:
+                ctx_doc.next_action = "commit"
+            first_missing = ctx_doc.missing_slots[0] if ctx_doc.missing_slots else None
         # Don't fire deterministic "order_items" ask when user already stated a specific
         # item (even off-menu) — let TinyGenerator provide an informed response instead.
         _skip_deterministic = (
@@ -3396,6 +3471,8 @@ async def process_turn_v4(
                 else "Unter welchem Namen darf ich reservieren?"
             )
         if clarify_text:
+            if first_missing == "phone_number":
+                state.phone_prompt_sent = True
             clarify_text = _with_name_ack(clarify_text)
             logger.info(
                 f"[v4_pipeline] T{turn_idx} deterministic clarify for slot={first_missing}"

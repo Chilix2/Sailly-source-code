@@ -1,8 +1,8 @@
 # Sailly Voice Agent
 
 Production browser-based Sailly voice agent for restaurant calls and demos.
-The live host runs this flat tree from `/home/charles2/sailly-browser-demo`.
-GitHub stores the same source under `voice-agent/`.
+The live host and GitHub both use the flat tree at
+`/home/charles2/sailly-browser-demo`.
 
 ## Production Path
 
@@ -75,21 +75,21 @@ Run validation scenarios:
 
 ## GitHub Layout
 
-GitHub repo layout:
+GitHub repo layout matches the live host:
 
 ```text
 Sailly-source-code/
   .github/
   README.md
-  voice-agent/
-    server/
-    configs/
-    tools/
-    frontend/
+  AGENTS.md
+  server/
+  configs/
+  tools/
+  frontend/
+  docs/
 ```
 
-Do not push a duplicate root-level `server/`, `configs/`, or `tools/` tree to
-GitHub. The production app belongs under `voice-agent/` in the GitHub snapshot.
+There is no second copy of the app tree in the repository.
 
 ## Isolation
 

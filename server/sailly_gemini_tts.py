@@ -274,12 +274,12 @@ class SaillyGeminiTTSService(GeminiTTSService):
         _expected_secs: float = max(len(stripped) / _CHARS_PER_SEC_DE, 0.5)
         _expected_bytes: float = _expected_secs * _bytes_per_sec
 
-        # Fix B: Skip buffering for most responses (<4s expected duration)
-        # Raised from 2.0s to 4.0s: the vast majority of bot turns are <4s.
+        # Fix B: Skip buffering for most responses (<8s expected duration).
+        # Raised from 4.0s to 8.0s so order readbacks stream immediately.
         # This reduces the "transcript visible but audio starts 1s later" gap
         # by streaming audio frames immediately instead of collecting all bytes first.
-        # Only very long multi-sentence responses (>4s) still buffer for hallucination detection.
-        _skip_buffer = _expected_secs < 4.0
+        # Only very long multi-sentence responses (>8s) still buffer for diagnostics.
+        _skip_buffer = _expected_secs <= 8.0
         
         # Attempt 1: with style prompt
         # Attempt 2 (fallback): without style prompt — retried when attempt 1 produces
@@ -340,14 +340,10 @@ class SaillyGeminiTTSService(GeminiTTSService):
                     if is_anomalous and attempt_idx == 1:
                         logger.error(
                             f"[TTSHallucDetect] Still anomalous after retry (ratio={ratio:.2f}). "
-                            f"Suppressing audio to avoid hallucination playback. "
+                            f"Bypassing suppression so the user still hears the bot. "
                             f"Transcript already pushed to browser."
                         )
-                        logger.warning(f"[TTSHallucDetect] Suppressing audio, ratio={ratio:.2f}, text_len={len(text)}")
-                        logger.info(f"[TTS_SUPPRESS] reason=halluc_detect turn={context_id}")
-                        for sf in _make_silence_frames(100, _sample_rate):
-                            yield sf
-                        return
+                        logger.warning(f"[TTSHallucDetect] bypassed suppression, ratio={ratio:.2f}, text_len={len(text)}")
 
                     # Normal: yield buffered frames
                     first_frame = True

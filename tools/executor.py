@@ -2048,6 +2048,14 @@ async def _verify_address(args: dict, call_sid: str, tenant_id: Optional[str] = 
     """Validate an address using Google Geocoding API."""
     address = args.get("address", "").strip()
     city = args.get("city", "").strip()
+    if not re.search(r"\d", address):
+        logger.info("[verify_address] Skipping Maps lookup: address has no house number")
+        return {
+            "valid": False,
+            "error": "Hausnummer fehlt",
+            "suggestion": "Bitte nennen Sie Straße, Hausnummer und Stadt noch einmal.",
+            "address": address,
+        }
     country = args.get("country", "Deutschland").strip()
     
     if not address:
@@ -2081,7 +2089,7 @@ async def _verify_address(args: dict, call_sid: str, tenant_id: Optional[str] = 
         from server.core.resilience import with_breaker, BreakerOpenError, MAPS_BREAKER
 
         async def _do_geocode():
-            async with httpx.AsyncClient(timeout=8.0) as client:
+            async with httpx.AsyncClient(timeout=1.5) as client:
                 return await client.get(url, params=params)
 
         try:
@@ -2100,7 +2108,7 @@ async def _verify_address(args: dict, call_sid: str, tenant_id: Optional[str] = 
                 ),
             }
         except (httpx.TimeoutException, asyncio.TimeoutError) as te:
-            logger.warning(f"[verify_address] Timeout after 8.0s for {search_query}: {te}")
+            logger.warning(f"[verify_address] Timeout after 1.5s for {search_query}: {te}")
             return {
                 "valid": False,
                 "error": "Adressvalidierung Timeout",

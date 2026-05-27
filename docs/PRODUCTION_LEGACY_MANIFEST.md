@@ -147,9 +147,5 @@ GitHub production snapshots unless explicitly needed for historical analysis.
 
 ## GitHub Layout Rule
 
-The live host uses the flat tree at `/home/charles2/sailly-browser-demo`.
-GitHub stores that same tree under `voice-agent/`.
-
-Do not push a root-level duplicate app tree to GitHub. The repository root is
-reserved for wrapper metadata such as `.github/`, `.gitignore`, and an index
-README.
+The live host and GitHub both use the flat tree at
+`/home/charles2/sailly-browser-demo`. There is no `voice-agent/` mirror copy.

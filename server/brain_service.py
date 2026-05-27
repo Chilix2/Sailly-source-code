@@ -614,38 +614,47 @@ class BrowserBrainService(FrameProcessor):
             )
             has_farewell = bool(_FAREWELL_QUICK_RE.search(user_text))
             if is_marker and not has_farewell:
-                logger.info(
-                    f"[META_FEEDBACK] marker detected: {captured_text[:120]!r}",
-                    extra={"call_sid": self.call_sid, "meta_feedback": captured_text},
-                )
-                # Send user transcript to browser so caller sees their message
-                await self._send_to_browser("transcript", speaker="user", text=user_text)
-                # Short, neutral ack — does not pretend to act on the feedback
-                bot_text = "Verstanden, ich habe das notiert."
-                await self._send_to_browser("transcript", speaker="bot", text=bot_text)
-                # P0_3 FIX: Push LLMTextFrame so TTS actually speaks the ack.
-                # Previously this early-return path set the browser transcript but
-                # never sent audio — confirmed silent in 8+ production calls.
-                _turn_counter = self._turn_counter + 1
-                logger.info(f"[TTS] T{_turn_counter} pushing LLMTextFrame: '{bot_text[:50]}'")
-                await self.push_frame(LLMFullResponseStartFrame())
-                await self.push_frame(LLMTextFrame(text=bot_text))
-                await self.push_frame(LLMFullResponseEndFrame())
-                # Log to session if available
-                if self.session:
-                    try:
-                        await self.session.add_transcript("user", user_text)
-                        await self.session.add_transcript("bot", bot_text)
-                    except Exception:
-                        pass
-                return  # Early exit — do NOT call turn_processor
-            elif is_marker and has_farewell:
+                self._consecutive_meta_ack_count = getattr(self, "_consecutive_meta_ack_count", 0) + 1
+                if self._consecutive_meta_ack_count > 2:
+                    logger.warning(
+                        "[META_FEEDBACK] consecutive marker limit exceeded; falling through to normal processing",
+                        extra={"call_sid": self.call_sid, "meta_feedback": captured_text},
+                    )
+                else:
+                    logger.info(
+                        f"[META_FEEDBACK] marker detected: {captured_text[:120]!r}",
+                        extra={"call_sid": self.call_sid, "meta_feedback": captured_text},
+                    )
+                    # Send user transcript to browser so caller sees their message
+                    await self._send_to_browser("transcript", speaker="user", text=user_text)
+                    # Short, neutral ack — does not pretend to act on the feedback
+                    bot_text = "Verstanden, ich habe das notiert."
+                    await self._send_to_browser("transcript", speaker="bot", text=bot_text)
+                    # P0_3 FIX: Push LLMTextFrame so TTS actually speaks the ack.
+                    # Previously this early-return path set the browser transcript but
+                    # never sent audio — confirmed silent in 8+ production calls.
+                    _turn_counter = self._turn_counter + 1
+                    logger.info(f"[TTS] T{_turn_counter} pushing LLMTextFrame: '{bot_text[:50]}'")
+                    await self.push_frame(LLMFullResponseStartFrame())
+                    await self.push_frame(LLMTextFrame(text=bot_text))
+                    await self.push_frame(LLMFullResponseEndFrame())
+                    # Log to session if available
+                    if self.session:
+                        try:
+                            await self.session.add_transcript("user", user_text)
+                            await self.session.add_transcript("bot", bot_text)
+                        except Exception:
+                            pass
+                    return  # Early exit — do NOT call turn_processor
+            if is_marker and has_farewell:
+                self._consecutive_meta_ack_count = 0
                 logger.info(
                     f"[BRAIN][CALLER_FEEDBACK] Achtung+farewell — skipping early return so farewell cascade runs",
                     extra={"call_sid": self.call_sid},
                 )
 
             logger.info(f"[BRAIN] User: '{user_text[:80]}'")
+            self._consecutive_meta_ack_count = 0
 
             # Send user transcript to browser
             await self._send_to_browser("transcript", speaker="user", text=user_text)
@@ -1071,6 +1080,8 @@ class BrowserBrainService(FrameProcessor):
                         "stt_latency_ms": _stt_ms,
                         "llm_latency_ms": _llm_ms,
                         "total_latency_ms": _tot_ms,
+                        "total_ms": _tot_ms,
+                        "tts_first_byte_ms": self._last_tts_total_ms,
                         "node_name": node_name,
                         "stage3_text": result.clean_text,
                         "stt_confidence": self._last_stt_confidence,
@@ -1125,8 +1136,8 @@ class BrowserBrainService(FrameProcessor):
                         "worker_p95_ms": getattr(_tp, "_last_worker_p95_ms", None) if _tp else None,
                         "context_build_ms": getattr(_tp, "_last_context_build_ms", None) if _tp else None,
                         "generator_ttft_ms": getattr(_tp, "_last_generator_ttft_ms", None) if _tp else None,
-                        # Fallback for tts_ttfb_ms; will be overridden by _build_turn_metrics_extra if available
-                        "tts_ttfb_ms": getattr(self, "_last_tts_ttfb_ms", None),
+                        # Fallback for tts_ttfb_ms; will be overridden by _build_turn_metrics_extra if available.
+                        "tts_ttfb_ms": getattr(self, "_last_tts_ttfb_ms", None) or _tot_ms,
                         "eot_event_type": getattr(self, "_last_eot_event_type", None),
                         "eot_confidence": getattr(self, "_last_eot_confidence", None),
                         "eot_latency_ms": getattr(self, "_last_eot_latency_ms", None),
@@ -1586,6 +1597,9 @@ class BrowserBrainService(FrameProcessor):
             validation_breakdown,
             tm.get("tts_situation"),
             tm.get("tts_mood"),
+            tm.get("total_ms"),
+            tm.get("tts_first_byte_ms"),
+            tm.get("tts_ttfb_ms"),
         )
 
         conn = await asyncpg.connect(db_url)
@@ -1597,8 +1611,9 @@ class BrowserBrainService(FrameProcessor):
                         (call_sid, tenant_id, turn_number, user_text, bot_text,
                          stt_latency_ms, llm_latency_ms, tts_latency_ms, total_latency_ms,
                          tools_called, node_name, stage3_text, stt_confidence, build_sha,
-                         validation_breakdown, tts_situation, tts_mood)
-                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13,$14,$15::jsonb,$16,$17)
+                         validation_breakdown, tts_situation, tts_mood,
+                         total_ms, tts_first_byte_ms, tts_ttfb_ms)
+                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13,$14,$15::jsonb,$16,$17,$18,$19,$20)
                     ON CONFLICT (call_sid, turn_number) DO UPDATE SET
                         tenant_id = EXCLUDED.tenant_id,
                         user_text = EXCLUDED.user_text,
@@ -1614,7 +1629,10 @@ class BrowserBrainService(FrameProcessor):
                         build_sha = EXCLUDED.build_sha,
                         validation_breakdown = EXCLUDED.validation_breakdown,
                         tts_situation = EXCLUDED.tts_situation,
-                        tts_mood = EXCLUDED.tts_mood
+                        tts_mood = EXCLUDED.tts_mood,
+                        total_ms = EXCLUDED.total_ms,
+                        tts_first_byte_ms = EXCLUDED.tts_first_byte_ms,
+                        tts_ttfb_ms = EXCLUDED.tts_ttfb_ms
                     """,
                     *values,
                 )
@@ -1634,8 +1652,9 @@ class BrowserBrainService(FrameProcessor):
                         (call_sid, tenant_id, turn_number, user_text, bot_text,
                          stt_latency_ms, llm_latency_ms, tts_latency_ms, total_latency_ms,
                          tools_called, node_name, stage3_text, stt_confidence, build_sha,
-                         validation_breakdown, tts_situation, tts_mood)
-                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13,$14,$15::jsonb,$16,$17)
+                         validation_breakdown, tts_situation, tts_mood,
+                         total_ms, tts_first_byte_ms, tts_ttfb_ms)
+                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13,$14,$15::jsonb,$16,$17,$18,$19,$20)
                     """,
                     *values,
                 )
