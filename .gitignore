@@ -45,3 +45,16 @@ partner-local-setup.tar.gz
 DOWNLOAD-ME-*.tar.gz
 scripts/gsm-aws-bedrock-templates/*.value
 **/BedrockAPIKey*.csv
+sailly-voice-agent-key.json
+
+# Brain snapshot backup directories (never commit)
+server/brain/_backup_*/
+
+# Archive docs
+docs/archive/
+
+# Validation/deployment reports
+ANALYSIS_REPORT.json
+COMPLETION_REPORT.txt
+VERIFICATION_COMPLETE.txt
+PHASE_1_READY_FOR_TRACE.txt

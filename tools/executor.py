@@ -293,7 +293,7 @@ async def _post_order_to_pos(webhook_url: str, order: dict, order_id: str) -> No
     # tooling can pick it up later.
     try:
         import redis.asyncio as aioredis
-        _redis_url = os.getenv("REDIS_URL", "redis://localhost:6380")
+        _redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
         _r = aioredis.from_url(_redis_url, decode_responses=True)
         await _r.sadd("orders:pos_failed", order_id)
         await _r.hset(f"order:{order_id}:pos", mapping={
@@ -1060,7 +1060,7 @@ async def _load_unavailable_dishes(tenant_id: Optional[str]) -> set[str]:
     try:
         import redis.asyncio as aioredis
 
-        _redis_url = os.getenv("REDIS_URL", "redis://localhost:6380")
+        _redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
         r = aioredis.from_url(_redis_url, decode_responses=True)
         try:
             data = await r.hgetall(key)
@@ -1202,7 +1202,7 @@ async def _create_order(args: dict, call_sid: str, tenant_id: Optional[str] = No
     if call_sid:
         try:
             import redis.asyncio as aioredis
-            _redis_url = os.getenv("REDIS_URL", "redis://localhost:6380")
+            _redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
             _r = aioredis.from_url(_redis_url, decode_responses=True)
             _idem_key = f"order:idempotency:{call_sid}"
             existing = await _r.get(_idem_key)
@@ -1420,7 +1420,7 @@ async def _create_order(args: dict, call_sid: str, tenant_id: Optional[str] = No
     try:
         import json as _json
         import redis.asyncio as aioredis
-        _redis_url = os.getenv("REDIS_URL", "redis://localhost:6380")
+        _redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
         _r = aioredis.from_url(_redis_url, decode_responses=True)
         # 30-day retention — matches GDPR transcript default; orders are PII.
         await _r.set(f"order:{order_id}", _json.dumps(order, default=str), ex=30 * 24 * 3600)

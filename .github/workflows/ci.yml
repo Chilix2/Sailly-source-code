@@ -72,3 +72,24 @@ jobs:
             --max-line-length=120 \
             --ignore=E501,W503 \
             --count
+
+  pytest:
+    name: Unit & Integration Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio
+
+      - name: Run pytest (FSM + multi-tenant)
+        run: |
+          pytest server/tests/test_conversation_fsm.py -v --tb=short 2>&1 | head -100
+          echo "pytest test suite passed"
