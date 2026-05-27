@@ -33,30 +33,6 @@ class OpeningShift:
 # DEPRECATED: _FRIDAY_SPLIT_HOURS was hardcoded for DOBOO only.
 # Now all opening hours come from ctx.opening_hours (TenantConfig).
 # Kept here only for backward compatibility in legacy code paths.
-def _get_split_hours_from_config(ctx: Any) -> list:
-    """Extract split hours for a specific day from tenant config.
-    
-    TenantConfig.opening_hours is a dict mapping day names to time ranges.
-    For days with break windows, returns a list of OpeningShift tuples.
-    Returns empty list if no config or day not found.
-    """
-    if not hasattr(ctx, 'opening_hours') or not ctx.opening_hours:
-        return []
-    # opening_hours format: {"monday": "...", "friday": "11:30-14:00, 18:00-21:30", ...}
-    # Parse "11:30-14:00, 18:00-21:30" → [OpeningShift(...), OpeningShift(...)]
-    # This is called at validation time with day-of-week key.
-    return []  # Implementation delegated to slot_extractors.py
-
-
-# C2: KNOWN_DISHES is now an empty default — actual values come from tenant config
-# via set_known_items() called in ADKTurnProcessor.__init__().
-# Keeping a short legacy list as ultimate fallback only (loaded when tenant config is unavailable).
-KNOWN_DISHES: List[str] = []  # populated from configs/tenants/<id>.yaml at startup
-
-# Global known items (for backward compatibility when not using tenant config)
-_KNOWN_ITEMS: List[str] = list(KNOWN_DISHES)
-
-
 def set_known_items(items: List[str]):
     """Called at startup to initialize known items from tenant config."""
     global _KNOWN_ITEMS
@@ -814,26 +790,6 @@ def _extract_phone_digits(utterance: str) -> Optional[str]:
 _extract_phone_from_utterance = _extract_phone_digits
 
 
-def _count_digit_tokens(utterance: str) -> int:
-    """Count how many digit tokens (spoken or numeric) are present in an utterance
-    after shorthand expansion. Used to decide whether to RESET the cross-turn
-    buffer (caller repeated the full number) or APPEND to it (caller is adding)."""
-    if not utterance:
-        return 0
-    expanded = _expand_spoken_shorthand(utterance)
-    count = 0
-    for token in expanded.split():
-        t = token.strip(".,!?;:-/")
-        if not t:
-            continue
-        if t.isdigit():
-            count += len(t)
-        elif t in _SPOKEN_DIGITS:
-            count += 1
-    return count
-
-
-# === Bug F: Strip tool-call / code leakage from TTS-bound text ===
 _FORBIDDEN_TTS_PATTERNS = [
     r"TOOL\s+CALL\s*:.*$",
     r"\[TOOL:\s*\w+\s*\]",
@@ -967,56 +923,6 @@ _QTY_NEGATIVE_CONTEXT = (
     "minuten", "minute", "stunde", "stunden",
     "grad", "prozent",
 )
-
-
-def _extract_party_size_strict(utterance: str) -> Optional[int]:
-    """Extract party size ONLY when explicitly stated by caller.
-    
-    Never assume or default. Returns None if no explicit party_size mention found.
-    Requires markers like 'für', 'personen', 'zu zweit', 'wir sind' + a number.
-    CRITICAL FIX: Reject date/address false positives (street numbers, years, times).
-    """
-    if not utterance:
-        return None
-    lower = utterance.lower()
-    # CRITICAL: Only match when BOTH a marker AND a number are present together
-    import re
-    # FALSE-POSITIVE REJECTION: block patterns that look like dates, times, or addresses
-    _false_positive_contexts = (
-        r'\d{1,2}\.\d{1,2}\.\d{4}',  # 23.05.2026 (date)
-        r'\d{1,2}:\d{2}\s*uhr',  # 20:00 Uhr (time)
-        r'straße|strasse|str\.|platz|weg|allee',  # street suffix
-        r'\d{4}\s*(?:personen)?',  # year, e.g. "2026"
-    )
-    for ctx in _false_positive_contexts:
-        if re.search(ctx, lower):
-            # Utterance contains date/time/address context — reject bare numbers as party_size
-            logger.debug(f"[party_size] rejected due to false-positive context: {ctx}")
-            return None
-    
-    party_patterns = [
-        r'(?:für|fuer)\s+(\d{1,2}|zwei|drei|vier|fünf|fuenf|sechs|sieben|acht|neun|zehn)',
-        r'(?:zu\s+)?(zwei|drei|vier|fünf|fuenf|sechs|sieben|acht|neun|zehn|dritt|viert)',
-        r'\b(\d{1,2})\s+(?:person(?:en)?|pers\.?|leute|gäste|gaeste)',
-        r'(?:wir\s+sind\s+zu\s+|es\s+sind\s+)(\d{1,2}|zwei|drei|vier|fünf|fuenf)',
-    ]
-    for pattern in party_patterns:
-        m = re.search(pattern, lower)
-        if m:
-            token = m.group(1).lower()
-            _word_nums = {
-                'zwei': 2, 'drei': 3, 'vier': 4, 'fünf': 5, 'fuenf': 5,
-                'sechs': 6, 'sieben': 7, 'acht': 8, 'neun': 9, 'zehn': 10,
-                'dritt': 3, 'viert': 4,
-            }
-            try:
-                val = int(token) if token.isdigit() else _word_nums.get(token)
-                # Sanity check: party size should be 1-50, not 2026 or 2000
-                if val and 1 <= val <= 50:
-                    return val
-            except ValueError:
-                pass
-    return None
 
 
 def _extract_order_quantity(utterance: str) -> Optional[int]:
@@ -2593,74 +2499,6 @@ def _digits_only(s: str) -> str:
     return re.sub(r"\D", "", s)
 
 
-def normalize_dish_name(dish_input: str, cached_menu: dict | None) -> str | None:
-    """Normalize dish name against cached menu, then KNOWN_DISHES.
-    
-    Returns the canonical dish name if found, None if not on any menu.
-    Prefers cached_menu (real DOBOO data) over KNOWN_DISHES (stale hardcoded list).
-    
-    H2.2_D3 Fix: Validates dish exists on actual menu before order commit.
-    """
-    from difflib import SequenceMatcher
-    
-    if not dish_input:
-        return None
-    
-    target = dish_input.lower().strip()
-    best_match = None
-    best_ratio = 0.0
-    
-    # === Search cached_menu first (authoritative source) ===
-    if cached_menu:
-        for category, items in cached_menu.items():
-            if not isinstance(items, list):
-                continue
-            for item in items:
-                if not isinstance(item, dict):
-                    continue
-                item_name = item.get("name", "")
-                if not item_name:
-                    continue
-                # Exact match wins immediately
-                if target == item_name.lower().strip():
-                    return item_name
-                ratio = SequenceMatcher(None, target, item_name.lower().strip()).ratio()
-                if ratio > best_ratio:
-                    best_ratio = ratio
-                    best_match = item_name
-    
-    # If found with >= 0.75 confidence in cached_menu, return it
-    if best_ratio >= 0.75 and best_match:
-        return best_match
-    
-    # === Fallback to KNOWN_DISHES (stale but at least vetted) ===
-    best_ratio = 0.0
-    best_match = None
-    
-    for known_dish in KNOWN_DISHES:
-        ratio = SequenceMatcher(None, target, known_dish.lower()).ratio()
-        if ratio > best_ratio:
-            best_ratio = ratio
-            best_match = known_dish
-    
-    if best_ratio >= 0.75 and best_match:
-        return best_match
-    
-    # === Not found anywhere ===
-    return None
-
-
-# Shared hour-word lookup used both in update_state_from_utterance and externally
-_HOUR_WORDS = {
-    "zwölf": 12, "zwoelf": 12, "dreizehn": 13, "vierzehn": 14,
-    "fünfzehn": 15, "fuenfzehn": 15, "sechzehn": 16, "siebzehn": 17,
-    "achtzehn": 18, "neunzehn": 19, "zwanzig": 20, "einundzwanzig": 21,
-    "eins": 13, "zwei": 14, "drei": 15, "vier": 16, "fünf": 17,
-    "fuenf": 17, "sechs": 18, "sieben": 19, "acht": 20, "neun": 21,
-    "zehn": 22, "elf": 23,
-}
-
-
 def update_state_from_utterance(state: ConversationState, utterance: str) -> None:
     # FIX I1.1_D3: Initialize readback tracking fields
     if not hasattr(state, '_readback_confirmed_this_turn'):
@@ -3637,60 +3475,6 @@ def update_state_after_bot(state: ConversationState, bot_response: str) -> None:
     dish = _extract_dish(bot_response)
     if dish and dish.lower() in (d.lower() for d in state.all_order_items()):
         state.selected_dish = dish
-
-
-def sanitize_bot_text_against_tool_results(bot_text: str, tool_results: dict) -> str:
-    """Rewrite bot text if tools failed, to avoid false confirmations.
-    Also strips verbatim tool 'message' field content that the LLM echoed.
-
-    F-C Fix: Ensures bot doesn't claim false confirmation when tools error.
-    Sprint B: Extended to strip echoed prose from ALL tool message fields,
-    not just create_order/create_reservation.
-    """
-    if not tool_results:
-        return bot_text
-
-    # ── Strip verbatim tool message fields the LLM may have echoed ──────
-    # When a tool returns {"message": "Adresse bestätigt: Friedrichstr. 20"},
-    # the LLM sometimes pastes this string verbatim. Strip any substring that
-    # is an exact substring of a tool's "message" field.
-    _TOOLS_WITH_MESSAGES = (
-        "verify_address", "get_weather", "get_restaurant_info",
-        "get_nearby_parking", "get_directions", "faq", "check_availability",
-        "get_date_info", "get_caller_history",
-    )
-    for tool_name in _TOOLS_WITH_MESSAGES:
-        result = tool_results.get(tool_name)
-        if not isinstance(result, dict):
-            continue
-        msg = result.get("message") or result.get("result") or ""
-        if not msg or not isinstance(msg, str) or len(msg) < 10:
-            continue
-        if msg[:40] in bot_text:
-            bot_text = bot_text.replace(msg, "").strip()
-            logger.debug(f"[Sanitize] Stripped {tool_name} message echo from bot text")
-
-    # ── Handle tool failures (original logic) ────────────────────────────
-    create_order_failed = (
-        "create_order" in tool_results
-        and tool_results["create_order"].get("error")
-    )
-    create_reservation_failed = (
-        "create_reservation" in tool_results
-        and tool_results["create_reservation"].get("error")
-    )
-
-    if create_order_failed or create_reservation_failed:
-        # Replace "aufgenommen" / "bestätigt" with apology
-        bot_text = re.sub(
-            r"(Ich habe Ihre Bestellung.*?aufgenommen|Bestellung.*?bestätigt|wurde verarbeitet)",
-            "Entschuldigung, Ihre Bestellung konnte leider nicht verarbeitet werden. Bitte versuchen Sie es später erneut oder kontaktieren Sie uns.",
-            bot_text,
-            flags=re.IGNORECASE,
-        )
-        logger.warning(f"[Sanitize] Rewrote bot text due to tool failure")
-
-    return bot_text
 
 
 def sanitize_bot_text_pre_commit(bot_text: str, state: "ConversationState", escalating: bool) -> str:
