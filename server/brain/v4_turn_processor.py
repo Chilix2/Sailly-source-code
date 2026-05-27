@@ -61,7 +61,7 @@ class V4TurnProcessor:
         caller_phone: str = "",
         filler_cb=None,
     ):
-        from server.brain.conversation_state import ConversationState, set_known_items
+        from server.brain.conversation_state import ConversationState, set_known_items, set_tenant_context
         from anthropic import AsyncAnthropic
 
         self.tenant_id = tenant_id
@@ -73,16 +73,17 @@ class V4TurnProcessor:
         # Populate known items from tenant config so dish extraction works
         _tid = tenant_id or "doboo"
         try:
-            import pathlib, yaml as _yaml
-            _cfg_path = pathlib.Path(__file__).parent.parent.parent / "configs" / "tenants" / f"{_tid}.yaml"
-            with open(_cfg_path) as _f:
-                _cfg = _yaml.safe_load(_f)
-            _items = _cfg.get("items", [])
+            from server.core.tenant_config import load_tenant_config
+            _tenant_cfg = load_tenant_config(_tid)
+            # Set global context for module-level functions to access tenant config
+            set_tenant_context(_tenant_cfg)
+            
+            _items = getattr(_tenant_cfg, "items", []) or []
             if _items:
                 set_known_items(_items)
                 logger.debug(f"[V4Turn] loaded {len(_items)} known items for tenant={_tid}")
         except Exception as _e:
-            logger.warning(f"[V4Turn] could not load known items for tenant={_tid}: {_e}")
+            logger.warning(f"[V4Turn] could not load tenant config for tenant={_tid}: {_e}")
 
         # Core state — real ConversationState so all slot extraction works
         self.state = ConversationState()

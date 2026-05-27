@@ -170,7 +170,7 @@ def classify(text: str, turn_idx: int = 0) -> IntentResult:
         # that often accompanies ordering (name, address)
         has_delivery_signal = re.search(
             r"\b(liefern|lieferung|adresse|straße|strasse|plz|postleitzahl|"
-            r"wohnort|ort|stadteil|bezirk|bonner bogen)\b",
+            r"wohnort|ort|stadteil|bezirk)\b",
             lower, re.I
         )
         has_customer_info = re.search(

@@ -62,7 +62,7 @@ VARIATION_POOLS: dict[str, dict[str, list[str]]] = {
         "off_topic_redirect": [
             "Dazu kann ich dir nicht helfen, aber beim Essen oder einer Reservierung bin ich deine Frau!",
             "Das ist nicht meine Stärke, aber gerne helfe ich beim Restaurant weiter.",
-            "Das kann ich nicht — aber lass mich dir beim DOBOO helfen!",
+            "Das kann ich nicht — aber lass mich dir beim Essen helfen!",
             "Dafür bin ich nicht zuständig, aber Essen bestellen oder reservieren — da bin ich die Richtige!",
         ],
         "connection_issue": [
