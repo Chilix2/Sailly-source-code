@@ -1265,8 +1265,16 @@ async def demo_monitor_calls(
 async def demo_live_call_trace(
     call_sid: str,
     tenant: Optional[str] = Query(None),
+    request: Request = None,
 ):
-    """Live call timeline for one call from Redis."""
+    """Live call timeline for one call from Redis.
+    
+    Requires X-Debug-Token header (unless DEBUG_API_TOKEN env var is not set in dev).
+    """
+    # Check debug token
+    if not _check_debug_token(request.headers.get("x-debug-token") if request else None):
+        return JSONResponse(status_code=401, content={"error": "unauthorized"})
+    
     try:
         from server.session import get_redis
         from server.live_call_trace import fetch_live_trace
@@ -1431,6 +1439,21 @@ def _check_admin_token(token: Optional[str]) -> bool:
         # No token configured → refuse all admin writes. Deliberately fail
         # closed so a missing env var can't accidentally expose 86 controls.
         return False
+    return bool(token) and token.strip() == expected
+
+
+def _check_debug_token(token: Optional[str]) -> bool:
+    """Check X-Debug-Token for read-only trace debugging access.
+    
+    Separate from admin token to limit scope: debug token = transcript/trace reads only.
+    """
+    expected = os.getenv("DEBUG_API_TOKEN", "").strip()
+    if not expected:
+        # In dev mode with no token configured, allow (open access)
+        # In prod, set DEBUG_API_TOKEN env var to require token
+        if os.getenv("ENV") == "production":
+            return False
+        return True  # dev default: open
     return bool(token) and token.strip() == expected
 
 
@@ -1642,13 +1665,19 @@ async def get_transfer_context(call_sid: str):
 
 
 @app.get("/api/admin/call/{call_sid}/turns")
-async def get_call_turns(call_sid: str, tenant: str = Query(...)):
+async def get_call_turns(call_sid: str, tenant: str = Query(...), request: Request = None):
     """JSON: per-turn metrics for a specific call.  Powers the turn-viewer UI.
 
     Joins ``google_turn_metrics`` with ``google_transcripts`` so each row
     includes the raw user text + ASR confidence + latencies + tool calls
     + build_sha that produced it.
+    
+    Requires X-Debug-Token header (unless DEBUG_API_TOKEN env var is not set in dev).
     """
+    # Check debug token
+    if not _check_debug_token(request.headers.get("x-debug-token") if request else None):
+        return JSONResponse(status_code=401, content={"error": "unauthorized"})
+    
     try:
         from server.core.tenant_guard import resolve_tenant_id, assert_call_belongs_to_tenant
         tenant_id = resolve_tenant_id(tenant)
@@ -1662,7 +1691,9 @@ async def get_call_turns(call_sid: str, tenant: str = Query(...)):
                     turn_number, user_text, bot_text,
                     stt_latency_ms, llm_latency_ms, total_latency_ms,
                     tools_called, node_name, stage3_text,
-                    stt_confidence, build_sha, tenant_id, created_at
+                    stt_confidence, build_sha, tenant_id, created_at,
+                    layer1_decision, layer2_raw_output, layer3_changes,
+                    stt_ms, extract_ms, l2_ms, tool_ms, tts_ttfb_ms
                 FROM google_turn_metrics
                 WHERE call_sid = $1
                 ORDER BY turn_number ASC
@@ -1700,6 +1731,16 @@ async def get_call_turns(call_sid: str, tenant: str = Query(...)):
                 "build_sha": r["build_sha"],
                 "tenant_id": r["tenant_id"],
                 "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+                # Phase 0B layer trace observability
+                "layer1_decision": r["layer1_decision"],
+                "layer2_raw_output": r["layer2_raw_output"],
+                "layer3_changes": r["layer3_changes"],
+                # Phase 9 stage timings
+                "stt_ms": r["stt_ms"],
+                "extract_ms": r["extract_ms"],
+                "l2_ms": r["l2_ms"],
+                "tool_ms": r["tool_ms"],
+                "tts_ttfb_ms": r["tts_ttfb_ms"],
             }
         )
     return {"call_sid": call_sid, "turn_count": len(turns), "turns": turns}
