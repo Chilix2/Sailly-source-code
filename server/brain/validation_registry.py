@@ -334,6 +334,23 @@ class EagerSlotValidator:
                 "value_hash": val_hash,
             }
         return result
+    
+    def get_validators_run(self) -> list[dict]:
+        """Returns validators_run format for LayerTrace persistence.
+        
+        Format: [{"slot": name, "status": "verified|pending|failed", "duration_ms": ms, "retry": 0}, ...]
+        """
+        result = []
+        for name, e in self._entries.items():
+            result.append({
+                "slot": name,
+                "status": "verified" if e.status == ValidationStatus.VERIFIED else (
+                    "failed" if e.status == ValidationStatus.FAILED else "pending"
+                ),
+                "duration_ms": e.elapsed_ms,
+                "retry": 0,  # retry tracking not yet implemented
+            })
+        return result
 
     # ── Lifecycle ─────────────────────────────────────────────────────────
 

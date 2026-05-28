@@ -613,8 +613,8 @@ class V4TurnProcessor:
             state_snapshot = f"{profile}|{self.state.customer_name}|{self.state.order_items}|{self.state.reservation_date}"
             self._current_layer_trace.layer1_state_hash = hashlib.md5(state_snapshot.encode()).hexdigest()[:16]
             # Validators from validation_registry if available
-            if self.validation_registry and hasattr(self.validation_registry, 'validators_run'):
-                self._current_layer_trace.validators_run = self.validation_registry.validators_run
+            if self.validation_registry:
+                self._current_layer_trace.validators_run = self.validation_registry.get_validators_run()
             
             # Layer 2: LLM output and latency
             self._current_layer_trace.layer2_raw_output = result_dict.get("raw_response", clean)[:500]  # truncate
