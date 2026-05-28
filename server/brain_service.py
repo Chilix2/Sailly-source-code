@@ -1156,6 +1156,11 @@ class BrowserBrainService(FrameProcessor):
                             # These authoritative values override any fallback values set above.
                             if _tp and getattr(getattr(_tp, "state", None), "_turn_timings", None):
                                 _metrics_dict.update(_build_turn_metrics_extra(_tp.state))
+                            
+                            # Phase 0B: LayerTrace observability — layer1_decision, layer2_raw_output, layer3_changes
+                            if _tp and getattr(_tp, "_current_layer_trace", None):
+                                _layer_trace = _tp._current_layer_trace
+                                _metrics_dict.update(_layer_trace.to_db_row())
 
                             self._turn_metrics.append(_metrics_dict)
                             try:
@@ -1948,7 +1953,8 @@ class BrowserBrainService(FrameProcessor):
                          eot_event_type, eot_confidence, eot_latency_ms,
                          backchannel_fired, eot_followed_immediately,
                          slot_extraction_latency_ms, slot_retention_status, validation_passes,
-                         intent, turn_type, worker_profile)
+                         intent, turn_type, worker_profile,
+                         layer1_decision, layer2_raw_output, layer3_changes)
                     VALUES (
                         $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12,$13,$14,$15,
                         $16::jsonb,$17,$18,
@@ -1967,7 +1973,8 @@ class BrowserBrainService(FrameProcessor):
                         $60,$61,$62,$63,$64,$65,
                         $66,$67,$68,$69,$70,
                         $71,$72::jsonb,$73::jsonb,
-                        $74,$75,$76
+                        $74,$75,$76,
+                        $77::jsonb,$78::text,$79::jsonb
                     )
                     """,
                     [
@@ -2051,6 +2058,10 @@ class BrowserBrainService(FrameProcessor):
                             tm.get("intent"),
                             tm.get("turn_type"),
                             tm.get("worker_profile"),
+                            # Phase 0B: Layer trace observability
+                            _jd(tm.get("layer1_decision")),
+                            tm.get("layer2_raw_output"),
+                            _jd(tm.get("layer3_changes")),
                         )
                         for tm in turn_metrics
                     ],

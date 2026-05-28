@@ -102,6 +102,9 @@ class V4TurnProcessor:
         self._last_prompt_tokens_in: int = 0
         self._last_prompt_tokens_out: int = 0
         self._current_turn_error_codes: list = []
+        
+        # LayerTrace — wired in process_turn for full observability
+        self._current_layer_trace: Optional[object] = None
         try:
             from server.brain.validation_registry import ValidationRegistry
             from tools.executor import execute_tool
@@ -462,6 +465,7 @@ class V4TurnProcessor:
         from server.brain.conversation_state import update_state_from_utterance
         from server.brain.v4_pipeline import process_turn_v4
         from server.brain.contracts.turn_timings import TurnTimings
+        from server.brain.contracts.trace import LayerTrace
         import time
 
         # Initialize _turn_timings at the start of each turn for TTS TTFB instrumentation.
@@ -469,6 +473,12 @@ class V4TurnProcessor:
         # _turn_timings is used by the TTS timing processor to stamp tts_first_byte_at
         # and by brain_service.py to accumulate per-stage latencies.
         self.state._turn_timings = TurnTimings()
+        
+        # Initialize LayerTrace for full observability — populated by FSM/LLM/policy layers
+        self._current_layer_trace = LayerTrace(
+            turn_idx=self.turn_idx,
+            call_sid=self.call_sid,
+        )
 
         # If turn 1 races the background pre-cache, wait briefly before any
         # menu-dependent extraction/readback path can ask for prices.
@@ -572,6 +582,30 @@ class V4TurnProcessor:
         self._last_bot_response = clean
         self.turn_idx += 1
         await self._persist_state_safe()
+        
+        # Step 5: populate LayerTrace for observability
+        if self._current_layer_trace:
+            import hashlib
+            # Layer 1: FSM node, forced tools, state hash
+            self._current_layer_trace.layer1_node = profile
+            self._current_layer_trace.layer1_forced_tools = result_dict.get("forced_tools", [])
+            # State hash: CRC of key slots
+            state_snapshot = f"{profile}|{self.state.customer_name}|{self.state.order_items}|{self.state.reservation_date}"
+            self._current_layer_trace.layer1_state_hash = hashlib.md5(state_snapshot.encode()).hexdigest()[:16]
+            # Validators from validation_registry if available
+            if self.validation_registry and hasattr(self.validation_registry, 'validators_run'):
+                self._current_layer_trace.validators_run = self.validation_registry.validators_run
+            
+            # Layer 2: LLM output and latency
+            self._current_layer_trace.layer2_raw_output = result_dict.get("raw_response", clean)[:500]  # truncate
+            
+            # Layer 3: Policy warnings and changes
+            self._current_layer_trace.layer3_warnings = result_dict.get("policy_warnings", [])
+            self._current_layer_trace.layer3_text_changed = result_dict.get("text_was_rewritten", False)
+            self._current_layer_trace.layer3_tools_changed = result_dict.get("tools_were_gated", False)
+            
+            # Store on state for brain_service to access during metrics accumulation
+            self.state._current_layer_trace = self._current_layer_trace
 
         return TurnResult(
             clean_text=clean,
