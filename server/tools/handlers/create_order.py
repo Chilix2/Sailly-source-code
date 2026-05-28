@@ -31,8 +31,10 @@ TOOL_NAME = "create_order"
 
 # ── Phase 6 / Phase 8 constants ──────────────────────────────────────────────
 # Per ceiling-30 (Phase 6) and per-item-30 (Phase 8 8.S2).
+# Phase 3: Now read from ctx (TenantConfig.max_order_quantity) as fallback
 HARD_QUANTITY_CEILING: int = 30
 # Per cap-200 (Phase 6). Phase 8 Layer 3 adds a strict-300 cap on top.
+# Phase 3: Also read from ctx (TenantConfig.max_order_total_eur) as fallback
 MAX_ORDER_TOTAL_EUR: float = 200.0
 # Per per-item-30 (Phase 8 8.S2): total items across all lines.
 HARD_PER_ORDER_TOTAL: int = 100
@@ -65,19 +67,22 @@ async def handle(args: dict, ctx: ToolContext) -> ToolResult:
             error_code=ErrorCode.TOOL_VALIDATION_FAILED,
         )
 
-    # ── 1. Quantity ceiling ───────────────────────────────────────────────────
+    # ── 1. Quantity ceiling (from TenantConfig) ──────────────────────────────
     qty = _extract_quantity(args)
-    if qty > HARD_QUANTITY_CEILING:
+    max_qty = ctx.get_tenant_value("max_order_quantity", default=HARD_QUANTITY_CEILING)
+    max_qty = int(max_qty) if max_qty else HARD_QUANTITY_CEILING
+    
+    if qty > max_qty:
         logger.error(
             "[create_order] REJECTED quantity=%d exceeds ceiling=%d (call_sid=%s)",
-            qty, HARD_QUANTITY_CEILING, ctx.call_sid,
+            qty, max_qty, ctx.call_sid,
         )
         return ToolResult(
             ok=False,
             data={"requires_human": True, "quantity": qty},
             error=(
                 f"Bestellmenge {qty} übersteigt das erlaubte Maximum "
-                f"({HARD_QUANTITY_CEILING}). Catering-Aufträge werden von einem "
+                f"({max_qty}). Catering-Aufträge werden von einem "
                 f"menschlichen Mitarbeiter bearbeitet."
             ),
             error_code=ErrorCode.TOOL_QUANTITY_CAPPED,

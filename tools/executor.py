@@ -1281,13 +1281,18 @@ async def _create_order(args: dict, call_sid: str, tenant_id: Optional[str] = No
     if missing:
         return {"error": f"Fehlende Pflichtfelder: {', '.join(missing)}. Bitte frage den Kunden EINZELN nach jedem fehlenden Feld."}
 
-    # ── Sprint 0: HARD quantity ceiling ─────────────────────────────────────
+    # ── Quantity ceiling (from TenantConfig) ──────────────────────────────────
     # Final line of defence against runaway orders even if the NodeManager
     # guard was skipped (e.g. external tool caller bypassing NodeManager).
+    max_qty_allowed: int = 30  # Phase 3 default
     try:
-        from server.brain.conversation_state import HARD_QUANTITY_CEILING
+        _ctx_state = (context or {}).get("conversation_state")
+        if _ctx_state and hasattr(_ctx_state, "_tenant"):
+            tenant_ctx = getattr(_ctx_state, "_tenant")
+            max_qty_allowed = getattr(tenant_ctx, "max_order_quantity", 30)
     except Exception:
-        HARD_QUANTITY_CEILING = 30  # Phase 6 ceiling-30 safe default
+        pass
+    
     _qty_raw = args.get("quantity") or args.get("order_quantity") or 1
     try:
         _qty = int(_qty_raw)
@@ -1300,16 +1305,16 @@ async def _create_order(args: dict, call_sid: str, tenant_id: Optional[str] = No
             _qty = max(_qty, int(getattr(_ctx_state, "order_quantity", 1) or 1))
         except (TypeError, ValueError):
             pass
-    if _qty > HARD_QUANTITY_CEILING:
+    if _qty > max_qty_allowed:
         logger.error(
-            f"[create_order] REJECTED: quantity {_qty} exceeds HARD_QUANTITY_CEILING "
-            f"({HARD_QUANTITY_CEILING}) — this is a catering request, route to human"
+            f"[create_order] REJECTED: quantity {_qty} exceeds max_order_quantity "
+            f"({max_qty_allowed}) — this is a catering request, route to human"
         )
         return {
             "success": False,
             "error": (
                 f"Bestellmenge {_qty} übersteigt das erlaubte Maximum "
-                f"({HARD_QUANTITY_CEILING}). Catering-Aufträge werden von einem "
+                f"({max_qty_allowed}). Catering-Aufträge werden von einem "
                 f"menschlichen Mitarbeiter bearbeitet."
             ),
             "requires_human": True,

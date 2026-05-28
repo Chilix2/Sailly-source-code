@@ -164,6 +164,12 @@ class TenantConfig(BaseModel):
         description="Max concurrent reservations per 30-minute slot (restaurant capacity)"
     )
 
+    # Order quantity ceiling (Phase 3): guards against catering orders
+    max_order_quantity: int = Field(
+        default=30,
+        description="Hard ceiling on order quantity; above this requires human approval (catering)"
+    )
+
     # Coordinates (for restaurant info, nearby parking, etc.)
     coordinates: Optional[Dict[str, float]] = Field(
         default=None,
