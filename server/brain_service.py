@@ -16,6 +16,7 @@ import time
 import time as _time
 import uuid
 from pathlib import Path
+from typing import Optional
 
 from pipecat.processors.frame_processor import FrameProcessor
 from pipecat.frames.frames import (
