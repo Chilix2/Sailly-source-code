@@ -522,6 +522,11 @@ class V4TurnProcessor:
         # Workers in v4_pipeline handle date/time/party_size/name but NOT phone numbers
         # (phone uses the cross-turn digit-buffer logic in update_state_from_utterance).
         update_state_from_utterance(self.state, user_text)
+        
+        # Stamp extract_done_at (legacy + semantic extraction)
+        if self.state._turn_timings:
+            import time
+            self.state._turn_timings.extract_done_at = time.monotonic()
 
         # Step 2: run v4 pipeline — workers + context_doc + commit gate + TinyGenerator
         # Include current user turn in last_turns so TinyGenerator always sees it in context.
@@ -540,6 +545,21 @@ class V4TurnProcessor:
             speculative_worker_results=getattr(self, "_speculative_worker_results", None),
             speculative_generator_result=speculative_generator_result,
         )
+        
+        # Stamp l2_done_at (LLM call complete) and tool_done_at (tools executed inside process_turn_v4)
+        if self.state._turn_timings:
+            import time
+            self.state._turn_timings.l2_done_at = time.monotonic()
+            # Tools are executed inside process_turn_v4, so tool_done_at ≈ l2_done_at
+            self.state._turn_timings.tool_done_at = self.state._turn_timings.l2_done_at
+            
+            # Extract token counts from result if available
+            if result_dict:
+                self.state._turn_timings.prompt_tokens_in = result_dict.get("prompt_tokens_in", 0) or 0
+                self.state._turn_timings.prompt_tokens_out = result_dict.get("prompt_tokens_out", 0) or 0
+                # Tool durations from result if available
+                if result_dict.get("tool_durations"):
+                    self.state._turn_timings.tool_durations.update(result_dict.get("tool_durations"))
         spec_worker_results = getattr(self, "_speculative_worker_results", None)
         self._speculative_worker_results = None
         
