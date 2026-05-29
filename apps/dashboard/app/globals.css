@@ -1,0 +1,140 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap');
+
+:root {
+  /* Sailly brand theme (light) */
+  --background: #fdfcfb;
+  --surface: #ffffff;
+  --surface2: #f5e9e4;
+  --border: #f5e9e4;
+  --border-glow: #fe9685;
+  --accent: #e60076;
+  --accent-2: #fe9685;
+  --accent-3: #fec081;
+  --accent-warn: hsl(38 90% 55%);
+  --accent-danger: hsl(0 90% 55%);
+  --text: #0f172b;
+  --text-muted: #667892;
+  --text-dim: #a0aab8;
+
+  /* shadcn/ui CSS variables */
+  --background-shade: 0 0% 100%;
+  --foreground-shade: 240 10% 3.9%;
+  --card-shade: 0 0% 100%;
+  --card-foreground-shade: 240 10% 3.9%;
+  --popover-shade: 0 0% 100%;
+  --popover-foreground-shade: 240 10% 3.9%;
+  --muted-shade: 240 4.8% 95.9%;
+  --muted-foreground-shade: 240 3.8% 46.1%;
+  --accent-shade: 329 100% 45%;
+  --accent-foreground-shade: 0 0% 98%;
+  --destructive-shade: 0 84.2% 60.2%;
+  --destructive-foreground-shade: 0 0% 98%;
+  --border-shade: 240 5.9% 90%;
+  --input-shade: 240 5.9% 90%;
+  --ring-shade: 329 100% 45%;
+  --radius: 0.75rem;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+  color-scheme: light;
+}
+
+body {
+  /* Brand warm gradient background */
+  background: 
+    radial-gradient(circle at 15% 50%, rgba(254, 192, 129, 0.15), transparent 25%),
+    radial-gradient(circle at 85% 30%, rgba(254, 150, 133, 0.15), transparent 25%),
+    radial-gradient(circle at 50% 80%, rgba(230, 0, 118, 0.05), transparent 50%),
+    #fdfcfb;
+  background-attachment: fixed;
+  color: var(--text);
+  font-family: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-feature-settings: "rlig" 1, "calt" 1;
+  line-height: 1.6;
+  overflow-x: hidden;
+}
+
+/* Monospace for numbers and code */
+code, pre, .mono {
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* Clean card styling */
+.glass {
+  @apply bg-white border border-[#f5e9e4] rounded-xl shadow-sm;
+}
+
+.glass-hover {
+  @apply glass transition-all duration-200 hover:border-[#e8d8d2] hover:shadow-md;
+}
+
+/* Status indicators */
+.status-dot {
+  @apply w-2 h-2 rounded-full;
+}
+
+.status-dot-success {
+  @apply status-dot bg-accent-3 animate-pulse;
+}
+
+.status-dot-warning {
+  @apply status-dot bg-accent-warn animate-pulse;
+}
+
+.status-dot-danger {
+  @apply status-dot bg-accent-danger animate-pulse;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--background);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--border-glow);
+}
+
+/* Dense table styling */
+.table-dense tr {
+  @apply py-1.5 px-2;
+}
+
+.table-dense td {
+  @apply py-1.5 px-2 text-sm;
+}
+
+/* Monospace helpers */
+.font-mono {
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* Utility classes */
+.text-balance {
+  text-wrap: balance;
+}
+
+.animate-fade-in {
+  @apply animate-fade-up;
+}
+
