@@ -1612,11 +1612,14 @@ class BrowserBrainService(FrameProcessor):
             validation_breakdown,
             tm.get("tts_situation"),
             tm.get("tts_mood"),
+            tm.get("stt_ms"),
+            tm.get("extract_ms"),
+            tm.get("l2_ms"),
+            tm.get("tool_ms"),
             tm.get("total_ms"),
             tm.get("tts_first_byte_ms"),
             tm.get("tts_ttfb_ms"),
-            # Phase 0B: per-layer observability (mirrors the finalize batch INSERT
-            # so live telephony rows are not blind on layer1/2/3).
+            # Phase 0B: per-layer observability
             _jd(tm.get("layer1_decision")),
             tm.get("layer2_raw_output"),
             _jd(tm.get("layer3_changes")),
@@ -1632,10 +1635,11 @@ class BrowserBrainService(FrameProcessor):
                          stt_latency_ms, llm_latency_ms, tts_latency_ms, total_latency_ms,
                          tools_called, node_name, stage3_text, stt_confidence, build_sha,
                          validation_breakdown, tts_situation, tts_mood,
-                         total_ms, tts_first_byte_ms, tts_ttfb_ms,
+                         stt_ms, extract_ms, l2_ms, tool_ms, total_ms, tts_first_byte_ms, tts_ttfb_ms,
                          layer1_decision, layer2_raw_output, layer3_changes)
-                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13,$14,$15::jsonb,$16,$17,$18,$19,$20,
-                            $21::jsonb,$22::text,$23::jsonb)
+                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13,$14,$15::jsonb,$16,$17,
+                            $18,$19,$20,$21,$22,$23,$24,
+                            $25::jsonb,$26::text,$27::jsonb)
                     ON CONFLICT (call_sid, turn_number) DO UPDATE SET
                         tenant_id = EXCLUDED.tenant_id,
                         user_text = EXCLUDED.user_text,
@@ -1652,6 +1656,10 @@ class BrowserBrainService(FrameProcessor):
                         validation_breakdown = EXCLUDED.validation_breakdown,
                         tts_situation = EXCLUDED.tts_situation,
                         tts_mood = EXCLUDED.tts_mood,
+                        stt_ms = EXCLUDED.stt_ms,
+                        extract_ms = EXCLUDED.extract_ms,
+                        l2_ms = EXCLUDED.l2_ms,
+                        tool_ms = EXCLUDED.tool_ms,
                         total_ms = EXCLUDED.total_ms,
                         tts_first_byte_ms = EXCLUDED.tts_first_byte_ms,
                         tts_ttfb_ms = EXCLUDED.tts_ttfb_ms,
@@ -1678,10 +1686,11 @@ class BrowserBrainService(FrameProcessor):
                          stt_latency_ms, llm_latency_ms, tts_latency_ms, total_latency_ms,
                          tools_called, node_name, stage3_text, stt_confidence, build_sha,
                          validation_breakdown, tts_situation, tts_mood,
-                         total_ms, tts_first_byte_ms, tts_ttfb_ms,
+                         stt_ms, extract_ms, l2_ms, tool_ms, total_ms, tts_first_byte_ms, tts_ttfb_ms,
                          layer1_decision, layer2_raw_output, layer3_changes)
-                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13,$14,$15::jsonb,$16,$17,$18,$19,$20,
-                            $21::jsonb,$22::text,$23::jsonb)
+                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13,$14,$15::jsonb,$16,$17,
+                            $18,$19,$20,$21,$22,$23,$24,
+                            $25::jsonb,$26::text,$27::jsonb)
                     """,
                     *values,
                 )
