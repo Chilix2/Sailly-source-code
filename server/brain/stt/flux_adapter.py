@@ -15,8 +15,8 @@ Key concepts:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any, Dict, Optional
+from dataclasses import dataclass
+from typing import Any, Optional
 
 # German disfluency tokens that suggest the caller hasn't finished speaking.
 DISFLUENCY_ENDINGS: frozenset = frozenset({

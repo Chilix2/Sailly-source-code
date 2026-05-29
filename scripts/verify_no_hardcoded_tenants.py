@@ -65,6 +65,7 @@ EXCLUDED_FILES: Tuple[str, ...] = (
     "adk_runner.py",                     # legacy runner — replaced by adk_turn_processor.py
     "conversation_nodes.py",             # shim file pointing to new node structure
     "conversation_loop.py",              # legacy loop — not active in production
+    "v4_pipeline_legacy.py",             # archived v4 pipeline — not in production path
 )
 
 # Directories containing LLM prompt files where dish names appear legitimately as examples.

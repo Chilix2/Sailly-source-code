@@ -174,7 +174,7 @@ class OrderItemValidator(SlotValidator):
 
     def _menu_names(self) -> list[str]:
         cached_menu = getattr(self.state, "cached_menu", None)
-        names: list[str] = ["Bibimbap", "Kimchi", "Bulgogi", "Mandu", "Wasser", "Cola"]
+        names: list[str] = []
         if isinstance(cached_menu, dict):
             items = cached_menu.get("items") or cached_menu.get("menu") or []
             if isinstance(items, list):

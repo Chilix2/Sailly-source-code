@@ -448,6 +448,12 @@ async def finalize_call_monitoring(
     )
     await _maybe_redis_append_completed(completed)
     asyncio.create_task(_check_alerts())
+    
+    # ────────────────────────────────────────────────────────────────────────
+    # TRIGGER SCENARIO CLASSIFICATION (per-call, automatic)
+    # ────────────────────────────────────────────────────────────────────────
+    # Classify this call immediately and store scenario_tags in CallMetric.extra
+    asyncio.create_task(_classify_call_scenario_async(call_sid, completed))
 
 
 def _rows_from_memory(window_secs: float, now: float) -> List[dict]:
@@ -764,3 +770,109 @@ def weekly_review_report(n_failed_calls: int = 5) -> str:
         "Use weekly_review_report_async() for Redis-backed 7-day stats.",
     ]
     return "\n".join(lines)
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# PER-CALL SCENARIO CLASSIFICATION (triggered on finalize)
+# ────────────────────────────────────────────────────────────────────────────
+
+
+async def _classify_call_scenario_async(
+    call_sid: str,
+    completed: CallMetric,
+) -> None:
+    """
+    Classify a call scenario immediately after it's finalized.
+    
+    Runs asynchronously as a fire-and-forget task. Classification results
+    are stored in Postgres and will be available via the API for the debugger.
+    """
+    try:
+        # Avoid double-classification
+        if completed.extra.get("scenario_tags"):
+            return
+
+        # Import here to avoid circular deps
+        from server.classification.scenario_classifier import classify_call_scenario
+        from server.db.postgres import get_async_session
+        from sqlalchemy import text
+        import json
+
+        # Get call data from Postgres
+        async_session = await get_async_session()
+
+        # Fetch transcripts
+        query = """
+            SELECT user_text, bot_text, layer3_changes
+            FROM google_transcripts gt
+            JOIN google_turn_metrics gtm ON gt.call_id = gtm.call_id
+            WHERE gt.call_id = (
+                SELECT call_id FROM google_calls WHERE call_sid = :call_sid LIMIT 1
+            )
+            ORDER BY gt.turn_number ASC
+        """
+
+        async with async_session() as session:
+            result = await session.execute(
+                text(query), {"call_sid": call_sid}
+            )
+            transcript_rows = result.fetchall()
+
+            # Build transcript text
+            transcript_text = "\n".join(
+                [
+                    f"User: {row[0] or ''}\nBot: {row[1] or ''}"
+                    for row in transcript_rows
+                ]
+            )
+
+            # Get layer3 changes from first row if available
+            layer3_changes = None
+            if transcript_rows:
+                layer3_changes = transcript_rows[0][2]
+
+            # Classify
+            scenario_tags = await classify_call_scenario(
+                call_sid=call_sid,
+                transcript_text=transcript_text,
+                tools_called=completed.tools_called,
+                turn_count=completed.turn_count,
+                duration_secs=completed.duration_secs,
+                fulfilled=completed.fulfilled,
+                end_reason=completed.end_reason,
+                layer3_changes=layer3_changes,
+            )
+
+            # Store in Postgres
+            update_query = """
+                UPDATE google_calls
+                SET extra = JSONB_SET(
+                    COALESCE(extra, '{}'::jsonb),
+                    '{scenario_tags}',
+                    :scenario_tags::jsonb
+                ),
+                updated_at = NOW()
+                WHERE call_sid = :call_sid
+            """
+
+            await session.execute(
+                text(update_query),
+                {
+                    "call_sid": call_sid,
+                    "scenario_tags": json.dumps(scenario_tags),
+                },
+            )
+            await session.commit()
+
+            logger.info(
+                f"[Classify] Auto-classified {call_sid}: "
+                f"{scenario_tags['primary_scenario']} "
+                f"(phase {scenario_tags['scenario_phase']}, "
+                f"conf={scenario_tags['confidence']})"
+            )
+
+    except Exception as e:
+        logger.warning(
+            f"[Classify] Failed to auto-classify {call_sid}: {e}",
+            exc_info=True,
+        )

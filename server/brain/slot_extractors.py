@@ -188,7 +188,7 @@ def extract_menu_items(
     Extract menu items from user utterance using fuzzy matching.
     
     Args:
-        text: User utterance (e.g. "Ich hätte gerne zwei Bibimbap und ein Kimchi")
+        text: User utterance (e.g. "Ich hätte gerne zwei Hauptgerichte und ein Getränk")
         ctx: TenantConfig with menu items
         category: Filter by category (e.g. "hauptgerichte") or None for all
         fuzzy_threshold: Rapifuzz token_set_ratio threshold (0.0-1.0)
@@ -288,9 +288,9 @@ def extract_address(text: str, ctx: Any) -> Optional[Address]:
     
     text = text.strip()
     
-    # Default values from context
-    default_city = "Bonn"  # fallback
-    postcode_pattern = r"53\d{3}"  # fallback for DOBOO (Bonn area)
+    # Default values from context (overridden below when ctx.location is set)
+    default_city = ""
+    postcode_pattern = r"\d{5}"
     
     if ctx and hasattr(ctx, 'location'):
         if isinstance(ctx.location, dict):

@@ -1,17 +1,21 @@
 name: Deploy
 
 on:
-  push:
-    branches:
-      - main
-      - staging
-      - refactor/phase-9-production-support
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Deploy target
+        required: true
+        default: prod
+        type: choice
+        options:
+          - prod
+          - staging
 
 jobs:
   deploy:
     name: Rolling Deploy
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging'
 
     steps:
       - uses: actions/checkout@v4
@@ -23,12 +27,12 @@ jobs:
 
       - name: Pick env file
         run: |
-          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
-            cp configs/env/.env.prod .env
-            echo "DEPLOY_ENV=prod" >> "$GITHUB_ENV"
-          else
+          if [ "${{ github.event.inputs.environment }}" = "staging" ]; then
             cp configs/env/.env.staging .env
             echo "DEPLOY_ENV=staging" >> "$GITHUB_ENV"
+          else
+            cp configs/env/.env.prod .env
+            echo "DEPLOY_ENV=prod" >> "$GITHUB_ENV"
           fi
 
       - name: Run DB migrations
