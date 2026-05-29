@@ -1678,6 +1678,44 @@ coordinates:
   lat: 50.7365
   lng: 7.1053
 
+# ── Priority 1 Hardcodes (extracted from v4_pipeline_legacy.py, conversation_state.py) ────
+
+# B6: Multi-intent fallback dish (reservation + menu price question in same turn)
+multi_intent_fallback_dish:
+  dish: "Bibimbap"
+  price: 13.90
+  note: "Unser Bibimbap kostet 13,90 Euro. Darf ich gleichzeitig Ihre Reservierung aufnehmen?"
+
+# #5: Friday split hours (lunch 11:30–14:00, dinner 18:00–21:30)
+friday_hours_lunch: "11:30–14:00"
+friday_hours_dinner: "18:00–21:30"
+
+# B7: Menu items known to NOT exist (prevent PREIS_FALSCH errors)
+menu_items_nonexistent:
+  - "kimchi jjigae"
+  - "kimchi jjigae stew"
+  - "kimchi jjige"
+
+# B8: Variant fallbacks for dish extraction (common menu variants not always in items list)
+dish_variants_fallback:
+  - "Korean Pancake Kimchi"
+  - "Bibimbap Rind"
+
+# #6: Farewell options (rotating phrases to avoid repetition)
+farewell_options_list:
+  - "Vielen Dank und auf Wiederhören!"
+  - "Alles klar — wir freuen uns auf Sie! Auf Wiederhören!"
+  - "Perfekt, bis dann — auf Wiederhören!"
+
+# Post-commitment farewell (after order/reservation committed, user speaks again)
+post_commit_farewell_options:
+  - "Bis bald bei uns — auf Wiederhören!"
+  - "Wir freuen uns auf Sie — auf Wiederhören!"
+  - "Gerne — auf Wiederhören!"
+
+# Idempotency guard farewell (order already created)
+order_already_created_farewell: "Ihre Bestellung ist bereits aufgenommen. Vielen Dank und auf Wiederhören!"
+
 # Phase 8 — hallucination blacklist (per-tenant extension of GLOBAL_BLACKLIST in blacklist.py)
 hallucination_blacklist:
   - reservierungssystem online

@@ -188,6 +188,37 @@ coordinates:
   lat: 50.9375
   lng: 6.9603
 
+# ── Priority 1 Hardcodes (extracted fields with Pizzeria Napoli defaults) ────
+
+# B6: Multi-intent fallback dish (not used in current pizzeria flow, but required)
+multi_intent_fallback_dish:
+  dish: "Margherita"
+  price: 8.50
+  note: "Unsere Margherita kostet 8,50 Euro."
+
+# #5: Friday split hours (Pizzeria is open continuously, so no split)
+friday_hours_lunch: null
+friday_hours_dinner: null
+
+# B7: Menu items known to NOT exist
+menu_items_nonexistent: []
+
+# B8: Variant fallbacks for dish extraction
+dish_variants_fallback: []
+
+# #6: Farewell options (rotating phrases)
+farewell_options_list:
+  - "Vielen Dank und auf Wiederhören!"
+  - "Guten Appetit — auf Wiederhören!"
+
+# Post-commitment farewell
+post_commit_farewell_options:
+  - "Bis bald bei uns — auf Wiederhören!"
+  - "Wir freuen uns auf Sie — auf Wiederhören!"
+
+# Idempotency guard farewell
+order_already_created_farewell: "Ihre Bestellung ist bereits aufgenommen. Vielen Dank und auf Wiederhören!"
+
 # Delivery zone configuration
 delivery:
   rejected_cities: []  # Pizzeria accepts deliveries across Köln

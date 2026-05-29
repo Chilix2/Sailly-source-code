@@ -1530,11 +1530,11 @@ class ConversationState:
             skipped.append("phone")
         return skipped
 
-    def cart_subtotal(self) -> float:
+    def cart_subtotal(self, tenant_id: Optional[str] = None) -> float:
         """Sum of prices for all cart items using get_cached_dish_price. Returns 0.0 on total lookup failure."""
         total = 0.0
         for item in self.all_order_items():
-            price = get_cached_dish_price(self, item)
+            price = get_cached_dish_price(self, item, tenant_id=tenant_id)
             if price:
                 total += price
         return total
@@ -2175,7 +2175,7 @@ def _menu_item_price_and_label(item: dict, fallback_name: str) -> tuple[Optional
     return (selected_price, label)
 
 
-def get_cached_dish_price(state: "ConversationState", dish_name: str) -> Optional[float]:
+def get_cached_dish_price(state: "ConversationState", dish_name: str, tenant_id: Optional[str] = None) -> Optional[float]:
     """Case-insensitive price lookup against the cached menu (get_menu tool result).
 
     CRITICAL FIX I2.1_D3: NEVER invent prices. ALWAYS query cached_menu first.
@@ -2223,11 +2223,19 @@ def get_cached_dish_price(state: "ConversationState", dish_name: str) -> Optiona
     
     # CRITICAL: Reject non-existent menu items BEFORE any price lookup.
     # Prevents PREIS_FALSCH by blocking fallback/invented prices for items not on menu.
-    # DOBOO menu does NOT include "Kimchi Jjigae" as a current orderable dish.
-    _KNOWN_NONEXISTENT = {"kimchi jjigae", "kimchi jjigae stew", "kimchi jjige"}
-    if dish_name.lower().strip() in _KNOWN_NONEXISTENT:
+    # B7: Use tenant config for menu items known to NOT exist
+    _nonexistent_items = []
+    if tenant_id:
+        try:
+            from server.core.tenant_config import load_tenant_config
+            _tcfg = load_tenant_config(tenant_id)
+            _nonexistent_items = _tcfg.menu_items_nonexistent or []
+        except Exception as _e:
+            logger.debug(f"[get_cached_dish_price] Failed to load tenant config for {tenant_id}: {_e}")
+    
+    if dish_name.lower().strip() in _nonexistent_items:
         logger.warning(
-            f"[get_cached_dish_price] BLOCKING price for {dish_name!r} — not on DOBOO menu"
+            f"[get_cached_dish_price] BLOCKING price for {dish_name!r} — not on menu (tenant-configured nonexistent list)"
         )
         return None
     
@@ -2425,9 +2433,13 @@ def _extract_all_dishes(text: str, items: Optional[List[str]] = None) -> List[st
                 _already_found_dishes.add(candidate)
 
     # Some menu words may be omitted from known_items in older cached tenant configs.
-    # Keep common explicit DOBOO items available so validation corrections and
-    # variants like "Bibimbap Rind" cannot be silently downgraded or dropped.
-    variant_fallbacks = ("Korean Pancake Kimchi", "Bibimbap Rind")
+    # B8: Use tenant config for variant fallbacks to preserve common menu variants
+    # (common explicit items available so validation corrections and variants
+    # like "Bibimbap Rind" cannot be silently downgraded or dropped).
+    variant_fallbacks = ["Korean Pancake Kimchi", "Bibimbap Rind"]
+    # Note: tenant-specific fallbacks would be injected here if items param is a dict
+    # with a __tenant_id attribute, but for now we use defaults
+    
     for fallback in variant_fallbacks:
         fallback_l = fallback.lower()
         if re.search(rf"\b{re.escape(fallback_l)}\b", lower, re.IGNORECASE):
@@ -2508,8 +2520,24 @@ def _normalize_food_tokens(text: str) -> str:
     return normalized
 
 
-def _dish_fuzzy_aliases(items: Optional[List[str]]) -> List[str]:
+def _dish_fuzzy_aliases(items: Optional[List[str]], tenant_id: Optional[str] = None) -> List[str]:
+    # B8: Start with common dishes; add tenant-specific fallbacks if available
     aliases = ["Bibimbap", "Kimchi", "Bulgogi", "Mandu", "Wasser", "Cola"]
+    
+    # Add tenant-specific variant fallbacks if configured
+    if tenant_id:
+        try:
+            from server.core.tenant_config import load_tenant_config
+            _tcfg = load_tenant_config(tenant_id)
+            if _tcfg.dish_variants_fallback:
+                # Extract first words from variants (e.g. "Korean Pancake Kimchi" → "Korean")
+                for variant in _tcfg.dish_variants_fallback:
+                    first = str(variant).strip().split()[0] if str(variant).strip() else ""
+                    if len(first) >= 4 and first not in aliases:
+                        aliases.append(first)
+        except Exception:
+            pass  # Silently ignore config errors in fuzzy matching
+    
     for dish in items or []:
         first = str(dish).strip().split()[0] if str(dish).strip() else ""
         if len(first) >= 4:

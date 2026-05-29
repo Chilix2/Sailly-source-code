@@ -575,7 +575,12 @@ def _suggest_menu_alternatives(state, missing_item: str, *, limit: int = 3) -> l
             "Wasser",
         ]
     elif "kimchi" in missing:
-        preferred_names = ["Kimchi", "Korean Pancake Kimchi", "Kimchi Fries"]
+        # B8: Use tenant config for dish variant fallbacks
+        _tenant = _ltc_top(tenant_id) if '_ltc_top' in dir() or 'tenant_id' in locals() else None
+        if _tenant and _tenant.dish_variants_fallback and any("kimchi" in v.lower() for v in _tenant.dish_variants_fallback):
+            preferred_names = [v for v in _tenant.dish_variants_fallback if "kimchi" in v.lower()]
+        else:
+            preferred_names = ["Kimchi", "Korean Pancake Kimchi", "Kimchi Fries"]
 
     suggestions: list[str] = []
 
@@ -901,7 +906,8 @@ async def process_turn_v4(
     # P0 idempotency guard: once an order has been committed, never allow the
     # call to re-enter order collection and fire create_order a second time.
     if getattr(state, "order_created", False):
-        farewell = "Ihre Bestellung ist bereits aufgenommen. Vielen Dank und auf Wiederhören!"
+        # #6: Use tenant config for order-already-created farewell
+        farewell = _tcfg_top.order_already_created_farewell if _tcfg_top else "Ihre Bestellung ist bereits aufgenommen. Vielen Dank und auf Wiederhören!"
         state.end_call_stage = "confirmed"
         state._pending_bot_response = farewell
         if tts_callback:
@@ -1242,12 +1248,13 @@ async def process_turn_v4(
     _has_reservation_kw = any(kw in _user_lower_kw for kw in _reservation_keywords)
     _has_menu_price_kw  = any(kw in _user_lower_kw for kw in _menu_price_kws)
     if _has_reservation_kw and _has_menu_price_kw and not _keyword_order_active and "menu_price" not in tool_results:
-        tool_results["menu_price"] = {
-            "dish": "Bibimbap",
-            "price": 13.90,
-            "note": "Unser Bibimbap kostet 13,90 Euro. Darf ich gleichzeitig Ihre Reservierung aufnehmen?",
-        }
-        logger.info("[v4_pipeline] T%d multi-intent: reservation + menu price → injected menu_price tool result", turn_idx)
+        # B6: Use tenant config for multi-intent fallback dish
+        _fallback_dish = _tcfg_top.multi_intent_fallback_dish if _tcfg_top else None
+        if _fallback_dish:
+            tool_results["menu_price"] = _fallback_dish
+            logger.info("[v4_pipeline] T%d multi-intent: reservation + menu price → injected menu_price tool result from config", turn_idx)
+        else:
+            logger.warning("[v4_pipeline] T%d multi_intent_fallback_dish not configured for tenant %s", turn_idx, tenant_id)
     if intent_result.intent in (IntentKind.UNKNOWN, IntentKind.FAQ):
         _order_active = _keyword_order_active or getattr(state, 'end_call_stage', 'idle') not in ('idle', 'correction_pending')
         if not _order_active and any(kw in _user_lower_kw for kw in _reservation_keywords):
@@ -1654,10 +1661,15 @@ async def process_turn_v4(
             _fri_res = await _et_fri("get_date_info", {"date": "übermorgen"}, call_sid, tenant_id)
             if isinstance(_fri_res, dict):
                 tool_results["get_date_info"] = _fri_res
-                # DOBOO Friday: always split hours (11:30–14:00 lunch, 18:00–21:30 dinner)
-                ctx_doc.resolved_entities["friday_opening_hours_lunch"] = "11:30–14:00"
-                ctx_doc.resolved_entities["friday_opening_hours_dinner"] = "18:00–21:30"
-                logger.info("[v4_pipeline] Friday split hours injected: lunch 11:30–14:00, dinner 18:00–21:30")
+                # #5: Use tenant config for Friday split hours (if configured)
+                _fri_lunch = _tcfg_top.friday_hours_lunch if _tcfg_top else None
+                _fri_dinner = _tcfg_top.friday_hours_dinner if _tcfg_top else None
+                if _fri_lunch and _fri_dinner:
+                    ctx_doc.resolved_entities["friday_opening_hours_lunch"] = _fri_lunch
+                    ctx_doc.resolved_entities["friday_opening_hours_dinner"] = _fri_dinner
+                    logger.info(f"[v4_pipeline] Friday split hours injected: lunch {_fri_lunch}, dinner {_fri_dinner}")
+                else:
+                    logger.debug("[v4_pipeline] Friday split hours not configured for tenant %s (using normal hours)", tenant_id)
         except Exception as _e_fri:
             logger.debug("[v4_pipeline] Friday split-hours detection failed (non-fatal): %s", _e_fri)
 
@@ -2162,11 +2174,12 @@ async def process_turn_v4(
         and not _reservation_still_pending
     )
     if _post_commit_stage:
-        _post_confirm_farewells = [
+        # #6: Use tenant config for post-commitment farewell options
+        _post_confirm_farewells = (_tcfg_top.post_commit_farewell_options if _tcfg_top and _tcfg_top.post_commit_farewell_options else [
             "Bis bald bei uns — auf Wiederhören!",
             "Wir freuen uns auf Sie — auf Wiederhören!",
             "Gerne — auf Wiederhören!",
-        ]
+        ])
         _pf_idx = getattr(state, "_post_farewell_idx", 0)
         post_farewell = _post_confirm_farewells[_pf_idx % len(_post_confirm_farewells)]
         state._post_farewell_idx = (_pf_idx + 1) % len(_post_confirm_farewells)
@@ -2190,12 +2203,12 @@ async def process_turn_v4(
         _is_explicit_confirm = any(p in user_text.lower() for p in _confirm_extras)
         if _semantic_confirms_v4(state) or _is_confirmation_v4(user_text) or _is_explicit_confirm:
             state.end_call_stage = "confirmed"
-            # Vary farewell to avoid repeating the same confirmation phrase
-            _farewell_options = [
+            # #6: Use tenant config for farewell options (rotating to avoid repetition)
+            _farewell_options = (_tcfg_top.farewell_options_list if _tcfg_top and _tcfg_top.farewell_options_list else [
                 "Vielen Dank und auf Wiederhören!",
                 "Alles klar — wir freuen uns auf Sie! Auf Wiederhören!",
                 "Perfekt, bis dann — auf Wiederhören!",
-            ]
+            ])
             _farewell_idx = getattr(state, "_farewell_variant_idx", 0)
             farewell = _farewell_options[_farewell_idx % len(_farewell_options)]
             state._farewell_variant_idx = (_farewell_idx + 1) % len(_farewell_options)

@@ -212,6 +212,55 @@ class TenantConfig(BaseModel):
         description="Known menu item names for ASR keyword biasing and NLU slot extraction"
     )
 
+    # ── Priority 1 Hardcodes Extraction ────────────────────────────────────────
+    # These fields replace hardcoded values in v4_pipeline_legacy.py and conversation_state.py
+    
+    # B6: Multi-intent fallback dish for menu_price injection (reservation + FAQ price intent)
+    multi_intent_fallback_dish: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Fallback dish for multi-intent (reservation + menu_price): {name, price, note}"
+    )
+
+    # #5: Friday split hours (if restaurant is closed midday Friday)
+    friday_hours_lunch: Optional[str] = Field(
+        default=None,
+        description="Friday lunch hours (e.g. '11:30–14:00'); None if not split"
+    )
+    friday_hours_dinner: Optional[str] = Field(
+        default=None,
+        description="Friday dinner hours (e.g. '18:00–21:30'); None if not split"
+    )
+
+    # B7: Menu items that definitely don't exist (prevent price_falsch)
+    menu_items_nonexistent: List[str] = Field(
+        default_factory=list,
+        description="List of canonical menu item names known to NOT exist on this menu (e.g. ['kimchi jjigae'])"
+    )
+
+    # B8: Variant fallbacks for dish extraction (handle common menu variants)
+    dish_variants_fallback: List[str] = Field(
+        default_factory=list,
+        description="Known dish variant names for fallback when exact match not found (e.g. ['Korean Pancake Kimchi', 'Bibimbap Rind'])"
+    )
+
+    # #6: Farewell options for post-confirmation and general completion
+    farewell_options_list: List[str] = Field(
+        default_factory=list,
+        description="Rotating farewell phrases after confirmation (e.g. ['Vielen Dank und auf Wiederhören!', ...])"
+    )
+
+    # Post-commitment farewell options (after order/reservation committed, user speaks again)
+    post_commit_farewell_options: List[str] = Field(
+        default_factory=list,
+        description="Short farewell options after commitment (e.g. ['Bis bald bei uns — auf Wiederhören!', ...])"
+    )
+
+    # Idempotency guard farewell (order already created)
+    order_already_created_farewell: str = Field(
+        default="Ihre Bestellung ist bereits aufgenommen. Vielen Dank und auf Wiederhören!",
+        description="Farewell when order was already created (idempotency guard)"
+    )
+
     # Extra ASR keyword lists for order, menu, reservation and FAQ domains
     extra_order_keywords: List[str] = Field(default_factory=list)
     extra_menu_keywords: List[str] = Field(default_factory=list)
