@@ -209,7 +209,27 @@ class ConversationFSM:
         """
         text_lower = user_utterance.lower()
         
-        # Detect intent from keywords
+        # Check if intent already set in slots from previous turn
+        if slots.intent == "order":
+            logger.debug("Order intent already set; transitioning to INFO")
+            return {
+                'phase': ConversationPhase.GREETING,
+                'response_intent': 'continue_order_flow',
+                'slots_updated': slots.to_dict(),
+                'tool_calls': [],
+                'next_state': ConversationPhase.INFO,
+            }
+        elif slots.intent == "reservation":
+            logger.debug("Reservation intent already set; transitioning to INFO")
+            return {
+                'phase': ConversationPhase.GREETING,
+                'response_intent': 'continue_reservation_flow',
+                'slots_updated': slots.to_dict(),
+                'tool_calls': [],
+                'next_state': ConversationPhase.INFO,
+            }
+        
+        # Detect intent from keywords in current utterance
         order_keywords = ["bestell", "essen", "lieferung", "mitnahme", "takeaway", "order"]
         reservation_keywords = ["reservier", "tisch", "platz", "buchen", "tisch buchen"]
         

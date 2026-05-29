@@ -122,7 +122,9 @@ def _state_to_slots(state: object) -> ConversationSlots:
         reservation_date=getattr(state, 'reservation_date', None),
         reservation_time=getattr(state, 'reservation_time', None),
         party_size=getattr(state, 'reservation_party_size', None),
-        intent=getattr(state, 'order_intent', None),
+        # Convert ConversationState booleans back to FSM intent strings
+        intent=("order" if getattr(state, 'order_intent', False) else 
+                "reservation" if getattr(state, 'reservation_intent', False) else None),
         confirmed=getattr(state, 'order_confirmed', False),
     )
 
@@ -148,8 +150,12 @@ def _slots_to_state(slots: ConversationSlots, state: object) -> None:
         state.reservation_time = slots.reservation_time
     if slots.party_size:
         state.reservation_party_size = slots.party_size
+    # Convert FSM intent string ("order"/"reservation") to ConversationState booleans
     if slots.intent:
-        state.order_intent = slots.intent
+        if slots.intent == "order":
+            state.order_intent = True
+        elif slots.intent == "reservation":
+            state.reservation_intent = True
     state.order_confirmed = slots.confirmed
 
 
@@ -160,7 +166,7 @@ async def _fsm_dispatch(
     user_text: str,
     turn_idx: int,
     executor: Optional[object],
-) -> tuple[Optional[ConversationSlots], list[str]]:  # (updated_slots, tools_called)
+) -> tuple[Optional[ConversationSlots], list[str], dict]:  # (updated_slots, tools_called)
     """Dispatch to conversation_fsm.step() with proper ctx handling.
     
     ConversationFSM.step() is SYNCHRONOUS and returns a decision dict, not updated slots.
@@ -168,7 +174,7 @@ async def _fsm_dispatch(
     """
     if ctx is None:
         logger.error("[v4_pipeline_clean] ctx is None; FSM dispatch not possible")
-        return None, []
+        return None, [], {}
     try:
         from server.brain.conversation_fsm import ConversationFSM
         # Instantiate FSM with context
@@ -205,7 +211,7 @@ async def _fsm_dispatch(
         
         # Return updated slots from decision (slots object, not dict)
         # FSM returns slots.to_dict() in decision, so we use the original slots object
-        return slots, tools_called
+        return slots, tools_called, decision
         
     except ImportError as e:
         logger.error(f"[v4_pipeline_clean] ConversationFSM import failed: {e}")
@@ -351,7 +357,7 @@ async def process_turn_v4(
         )
     
     slots = _state_to_slots(state)
-    updated_slots, tools_called = await _fsm_dispatch(
+    updated_slots, tools_called, fsm_decision = await _fsm_dispatch(
         slots=slots,
         ctx=ctx,
         state=state,
@@ -402,6 +408,18 @@ async def process_turn_v4(
     
     elapsed_ms = (time.monotonic() - t0) * 1000
     
+    # Map FSM phase to node name for routing
+    phase_str = str(fsm_decision.get('next_state', 'GREETING')) if fsm_decision else 'GREETING'
+    phase_to_node = {
+        'ConversationPhase.GREETING': 'greeting',
+        'ConversationPhase.INFO': 'info_collect',
+        'ConversationPhase.ORDER_OR_RESERVE': 'order_or_reserve',
+        'ConversationPhase.READBACK': 'readback',
+        'ConversationPhase.COMMITTED': 'committed',
+        'ConversationPhase.POST_COMMIT': 'post_commit',
+    }
+    node_name = phase_to_node.get(phase_str, 'greeting')
+    
     return {
         'clean_text': user_text,
         'raw_response': response_text,
@@ -409,4 +427,5 @@ async def process_turn_v4(
         'should_end': should_end,
         'end_reason': 'farewell' if should_end else '',
         'elapsed_ms': elapsed_ms,
+        'node_name': node_name,
     }
