@@ -97,6 +97,12 @@ tools:
         reason: { type: string }
       required: ["reason"]
 
+location:
+  address: "Hohe Straße 12, 50667 Köln"
+  city: "Köln"
+  postcode_prefix: "50"  # Köln postcode region
+  parking: "Parkhaus Domplatte 200m entfernt."
+
 practice:
   name: Pizzeria Napoli
   location: Hohe Straße 12, 50667 Köln
@@ -181,3 +187,8 @@ extra_faq_keywords:
 coordinates:
   lat: 50.9375
   lng: 6.9603
+
+# Delivery zone configuration
+delivery:
+  rejected_cities: []  # Pizzeria accepts deliveries across Köln
+  rejected_postcode_prefixes: []  # No postcode restrictions

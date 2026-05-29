@@ -39,7 +39,7 @@ def _get_default_city() -> str:
 def _get_postcode_pattern() -> str:
     """Get the postcode pattern from tenant config.
     
-    Returns regex pattern for valid delivery postcodes (e.g. r'53\d{3}' for Bonn).
+    Returns regex pattern for valid delivery postcodes (e.g. r'53\\d{3}' for Bonn).
     Falls back to '53' for DOBOO if no config available.
     """
     ctx = get_tenant_context()
@@ -1749,20 +1749,35 @@ class ConversationState:
         if len(a) < 8:
             return False
         has_digit = bool(re.search(r"\d", a))
-        # CRITICAL FIX H2.2_D3: Reject Munich/non-Bonn delivery addresses
-        # Restaurant is in Bonn (53113) — reject addresses in Munich (80335) or other cities
-        _reject_cities = ("münchen", "muenchen", "munich", "80335")
-        _reject_postcodes = ("80", "81", "82", "83", "84", "85")  # Munich postcode prefixes
+        
+        # Extract rejected cities and postcodes from tenant config
+        ctx = get_tenant_context()
+        _reject_cities = []
+        _reject_postcodes = []
+        if ctx and hasattr(ctx, 'delivery_config') and isinstance(ctx.delivery_config, dict):
+            _reject_cities = ctx.delivery_config.get('rejected_cities', [])
+            _reject_postcodes = ctx.delivery_config.get('rejected_postcode_prefixes', [])
+        
+        # Fall back to DOBOO defaults (Bonn only, reject Munich)
+        if not _reject_cities:
+            _reject_cities = ["münchen", "muenchen", "munich", "80335"]
+        if not _reject_postcodes:
+            _reject_postcodes = ["80", "81", "82", "83", "84", "85"]
+        
         _addr_lower = a.lower()
         if any(city in _addr_lower for city in _reject_cities):
             return False
         if any(_addr_lower.startswith(pc) for pc in _reject_postcodes):
             return False
-        # Only accept Bonn postcode (53xxx) for delivery
-        if not re.search(r"53\d{3}", a):
-            # If no postcode found, check if Bonn is mentioned
-            if "bonn" not in _addr_lower and "bonn-beuel" not in _addr_lower:
+        
+        # Get accepted postcode prefix from config
+        postcode_pattern = _get_postcode_pattern()
+        if not re.search(postcode_pattern, a):
+            # If no postcode found, check if the restaurant's city is mentioned
+            default_city = _get_default_city().lower()
+            if default_city not in _addr_lower and f"{default_city}-beuel" not in _addr_lower:
                 return False
+        
         if self.address_verified and has_digit:
             return True
         semantic_address = self.semantic_slot_values.get("delivery_address")

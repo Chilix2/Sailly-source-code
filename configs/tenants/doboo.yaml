@@ -14,6 +14,7 @@ location:
   address: "Friedrich-Ebert-Allee 69, 53113 Bonn"
   address_secondary: "Eingang Adalbert-Stifter-Straße"
   city: "Bonn"
+  postcode_prefix: "53"  # Bonn postcode region
   lat: 50.7323
   lng: 7.0954
   parking: "Öffentliches Parkhaus 'Friedrichstraße' 100m entfernt. Straßenparkplätze verfügbar."
@@ -1568,6 +1569,8 @@ max_order_total_eur: 200
 # delivery zone configuration (optional — absence means no zone restriction)
 delivery:
   zone_polygon: []  # list of [lat, lng] pairs; empty = no restriction
+  rejected_cities: ["münchen", "muenchen", "munich"]
+  rejected_postcode_prefixes: ["80", "81", "82", "83", "84", "85"]
 
 # faqs: static FAQ entries for the faq handler (static-with-llm-fallback decision)
 # Each entry has keywords (for matching) and an answer (German).

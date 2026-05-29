@@ -720,7 +720,7 @@ class V4TurnProcessor:
             "delivery_address": AddressValidator(
                 call_sid=self.call_sid,
                 tenant_id=self.tenant_id if self.tenant_id else "",
-                city="Bonn",
+                city=self._tenant.city if self._tenant else "Bonn",
             ),
             "phone": PhoneValidator(),
             "order_items": OrderItemValidator(self.state),

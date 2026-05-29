@@ -129,6 +129,13 @@ class TenantConfig(BaseModel):
         description="Pipeline overrides: enabled_profiles, intent_overrides, profile_overrides"
     )
 
+    # Delivery zone configuration (Phase 6 extraction: no more hardcoded Bonn/Munich logic)
+    delivery_config: Dict[str, Any] = Field(
+        default_factory=dict,
+        validation_alias="delivery",
+        description="Delivery rules: rejected_cities (list), rejected_postcode_prefixes (list), zone_polygon (list)"
+    )
+
     # C2: Restaurant identity fields — now sourced from YAML; avoid hardcoding in Python
     restaurant_name: str = Field(
         default="",
@@ -140,7 +147,7 @@ class TenantConfig(BaseModel):
     )
     location: Optional[Dict[str, Any]] = Field(
         default=None,
-        description="Location dict: address, city, lat, lng, parking"
+        description="Location dict: address, city, lat, lng, parking, postcode_prefix (e.g. '53' for Bonn)"
     )
     opening_hours: Optional[Dict[str, Any]] = Field(
         default=None,
