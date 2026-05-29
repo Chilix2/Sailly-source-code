@@ -1693,7 +1693,9 @@ async def get_call_turns(call_sid: str, tenant: str = Query(...), request: Reque
                     tools_called, node_name, stage3_text,
                     stt_confidence, build_sha, tenant_id, created_at,
                     layer1_decision, layer2_raw_output, layer3_changes,
-                    stt_ms, extract_ms, l2_ms, tool_ms, tts_ttfb_ms
+                    stt_ms, extract_ms, l2_ms, tool_ms, tts_ttfb_ms,
+                    intent, turn_type, worker_profile,
+                    tts_situation, tts_mood, validation_breakdown
                 FROM google_turn_metrics
                 WHERE call_sid = $1
                 ORDER BY turn_number ASC
@@ -1741,6 +1743,15 @@ async def get_call_turns(call_sid: str, tenant: str = Query(...), request: Reque
                 "l2_ms": r["l2_ms"],
                 "tool_ms": r["tool_ms"],
                 "tts_ttfb_ms": r["tts_ttfb_ms"],
+                # Routing context (populated today via shadow classify)
+                "intent": r["intent"],
+                "turn_type": r["turn_type"],
+                "worker_profile": r["worker_profile"],
+                # Final pipeline text + adaptive TTS conditioning
+                "stage3_text": r["stage3_text"],
+                "tts_situation": r["tts_situation"],
+                "tts_mood": r["tts_mood"],
+                "validation_breakdown": r["validation_breakdown"],
             }
         )
     return {"call_sid": call_sid, "turn_count": len(turns), "turns": turns}

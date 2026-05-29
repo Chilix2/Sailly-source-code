@@ -142,6 +142,14 @@ class ADKTurnProcessor:
         # Lazy-initialized Gemini runner (LLM client only — no AudioInjector/TTS)
         self._gemini_runner = None
 
+        # Per-turn observability trace (LayerTrace); read by brain_service during
+        # metrics accumulation to persist layer1_decision/layer2_raw_output/layer3_changes.
+        self._current_layer_trace = None
+        # Per-turn ExecutionSpan trace (Phase 2); read by brain_service for the
+        # google_turn_spans table / execution_trace exposure.
+        self._span_collector = None
+        self._execution_spans = []
+
     def _get_gemini_runner(self):
         """Lazy-initialize Tier2AudioRunner for LLM calls only."""
         if self._gemini_runner is None:
@@ -207,6 +215,15 @@ class ADKTurnProcessor:
                 should_end=True,
                 end_reason="error_fallback",
             )
+            # Populate LayerTrace for error fallback path (must happen on ALL exit paths)
+            try:
+                from server.brain.contracts.trace import LayerTrace
+                trace = LayerTrace(turn_idx=self.turn_idx, call_sid=self.call_sid)
+                trace.layer1_node = "error_fallback"
+                trace.layer2_raw_output = result.raw_response[:500]
+                self._current_layer_trace = trace
+            except Exception:
+                self._current_layer_trace = None
 
         # Persist after every turn (even errors) so reconnect can restore
         try:
@@ -241,15 +258,33 @@ class ADKTurnProcessor:
         end_reason: str = ""
         turn_tools: List[str] = []
         bot_response: str = ""
+        # Reset per-turn observability trace so a stale trace can't leak forward.
+        self._current_layer_trace = None
+        # Phase 2: per-turn ExecutionSpan collector (OTel gen_ai-shaped). t0 anchors
+        # all relative timings. Defensive — never breaks the live turn.
+        import time as _time_mod
+        from server.brain.contracts.trace import TurnSpanCollector
+
+        self._span_collector = TurnSpanCollector(_time_mod.monotonic())
+        self._execution_spans = []
 
         # ── Update state from customer utterance ─────────────── [validated ~251]
         update_state_from_utterance(self.state, user_text)
 
         # ── NODE SELECTION (code, not LLM) ──────────────────── [validated ~254]
+        _span_t = self._span_collector.now_ms()
         node = self.node_mgr.select_node(self.state, user_text)
+        self._span_collector.add(
+            1, "classify", f"select_node → {node.name}", _span_t, io={"node": node.name}
+        )
 
         # ── Prerequisites (forced tools BEFORE LLM) ─────────── [validated ~258]
+        _span_t = self._span_collector.now_ms()
         forced_tools = self.node_mgr.check_prerequisites(node, self.state)
+        self._span_collector.add(
+            1, "prereq", "check_prerequisites", _span_t,
+            io={"forced_tools": list(forced_tools or [])},
+        )
 
         # ── Build context with memory compression ────────────── [validated ~261]
         context_prompt = self.memory.build_context(
@@ -262,9 +297,18 @@ class ADKTurnProcessor:
             gemini_runner._active_prompt_override = context_prompt  # [validated ~274]
 
             # ── Call Gemini with node's micro-prompt ─────────── [validated ~278]
+            _span_t = self._span_collector.now_ms()
             bot_response = await gemini_runner._call_gemini_lm(
                 user_message=user_text,
                 context=self.memory.build_history(),
+            )
+            self._span_collector.add(
+                2, "chat", "TinyGenerator LLM", _span_t,
+                model=(
+                    getattr(gemini_runner, "model", None)
+                    or getattr(gemini_runner, "_model_name", None)
+                ),
+                io={"chars_out": len(bot_response or "")},
             )
 
             # Parse tool calls from response [validated ~286]
@@ -361,9 +405,11 @@ class ADKTurnProcessor:
                 f"request_callback_called={getattr(self.state, 'request_callback_called', '?')}, "
                 f"transfer_to_tier2_called={getattr(self.state, 'transfer_to_tier2_called', '?')}"
             )
+            _span_t = self._span_collector.now_ms()
             bot_response = self.node_mgr.check_forced_commits(
                 self.state, bot_response, self.turn_idx, user_text, self.all_tools
             )
+            self._span_collector.add(1, "commit_gate", "check_forced_commits", _span_t)
             logger.info(
                 f"  T{self.turn_idx}: POST-forced_commits state flags - "
                 f"escalation_requested={getattr(self.state, 'escalation_requested', '?')}, "
@@ -393,6 +439,7 @@ class ADKTurnProcessor:
             # ── A2: Validation layer — policy guard ───────────── [validated ~430]
             # Final gate: blocks structurally invalid calls even if
             # forced commits or LLM erroneously included them.
+            _span_t = self._span_collector.now_ms()
             validated_tools = [t for t in turn_tools if _validate_tool_call(t, self.state, self.all_tools)]
             blocked_tools = set(turn_tools) - set(validated_tools)
             if blocked_tools:
@@ -402,6 +449,11 @@ class ADKTurnProcessor:
                     ).strip()
                     logger.warning(f"  T{self.turn_idx}: POLICY BLOCKED {_bt}")
                 turn_tools = validated_tools
+            self._span_collector.add(
+                3, "policy", "validate_tool_call", _span_t,
+                status="blocked" if blocked_tools else "ok",
+                io={"blocked": sorted(blocked_tools), "allowed": list(validated_tools)},
+            )
 
             # Track state from final tools [validated ~444]
             if "ai_greeting" in turn_tools:
@@ -441,10 +493,15 @@ class ADKTurnProcessor:
                     continue
 
                 if args is not None:
+                    _span_t = self._span_collector.now_ms()
                     try:
                         from tools.executor import execute_tool
                         result = await execute_tool(tool_name, args, self.call_sid, self.tenant_id)
                         tool_results[tool_name] = result
+                        self._span_collector.add(
+                            1, "execute_tool", tool_name, _span_t,
+                            io={"args_keys": sorted(args.keys())},
+                        )
                         logger.info(f"  T{self.turn_idx}: TOOL executed: {tool_name} -> {str(result)[:100]}")
                         if self.session:
                             try:
@@ -452,6 +509,10 @@ class ADKTurnProcessor:
                             except Exception as _se:
                                 logger.warning(f"[ADKTurn] Session tool_call log failed: {_se}")
                     except Exception as exec_err:
+                        self._span_collector.add(
+                            1, "execute_tool", tool_name, _span_t,
+                            status="error", io={"error": str(exec_err)[:200]},
+                        )
                         logger.error(f"  T{self.turn_idx}: TOOL error ({tool_name}): {exec_err}", exc_info=True)
                         tool_results[tool_name] = {"error": str(exec_err)}
                         bot_response = re.sub(
@@ -573,6 +634,48 @@ class ADKTurnProcessor:
 
         # Strip [TOOL:...] tags for TTS
         clean_text = re.sub(r"\[TOOL:\w+\]\s*", "", bot_response).strip()
+
+        # ── LayerTrace observability (populates google_turn_metrics.layer1_decision /
+        #    layer2_raw_output / layer3_changes) ──────────────────────────────────
+        # This is the LIVE processor; brain_service reads _tp._current_layer_trace
+        # during metrics accumulation. Without this the per-layer columns stay NULL.
+        # Additive only — no behaviour change. Layer 3 stays honest "empty" until a
+        # real policy layer exists.
+        try:
+            import hashlib
+            from server.brain.contracts.trace import LayerTrace
+
+            trace = LayerTrace(turn_idx=self.turn_idx, call_sid=self.call_sid)
+            # Layer 1 (Orchestrator): selected node, forced tools, state hash.
+            trace.layer1_node = node.name
+            trace.layer1_forced_tools = list(forced_tools or [])
+            _snap = "|".join(
+                str(getattr(self.state, _f, None))
+                for _f in (
+                    "customer_name",
+                    "selected_dish",
+                    "order_items",
+                    "reservation_date",
+                    "reservation_time",
+                    "party_size",
+                    "phone_number",
+                )
+            )
+            trace.layer1_state_hash = hashlib.md5(_snap.encode()).hexdigest()[:16]
+            # Layer 2 (LLM): raw model output (truncated; final text after tag-strip
+            # is bot_text). Raw is not separated from final in this pipeline.
+            trace.layer2_raw_output = (bot_response or "")[:500]
+            # Layer 3 (Policy): no dedicated policy layer yet — leave honest empty.
+            self._current_layer_trace = trace
+        except Exception as _trace_err:
+            logger.debug("[ADKTurn] LayerTrace build skipped: %s", _trace_err)
+            self._current_layer_trace = None
+
+        # Phase 2: freeze the per-turn ExecutionSpan trace for persistence.
+        try:
+            self._execution_spans = list(getattr(self._span_collector, "spans", []) or [])
+        except Exception:
+            self._execution_spans = []
 
         return TurnResult(
             clean_text=clean_text,

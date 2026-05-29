@@ -307,6 +307,8 @@ async def record_call_metric(call_sid: str, metric_type: str, value) -> None:
 
         asyncio.create_task(_maybe_redis_append_completed(metric))
         asyncio.create_task(_check_alerts())
+        # Per-call automatic scenario classification (fire-and-forget).
+        asyncio.create_task(_classify_call_scenario_async(call_sid, metric))
 
 
 def monitoring_outcome_already_recorded(call_sid: str) -> bool:
@@ -783,96 +785,105 @@ async def _classify_call_scenario_async(
 ) -> None:
     """
     Classify a call scenario immediately after it's finalized.
-    
-    Runs asynchronously as a fire-and-forget task. Classification results
-    are stored in Postgres and will be available via the API for the debugger.
+
+    Fire-and-forget; never raises into the call path. The transcript is read
+    from google_turn_metrics (same source the debugger reads), and tools /
+    turn_count / duration / outcome come from the in-memory CallMetric.
+
+    The result is attached to the live CallMetric (so the monitor API exposes it
+    via extra.scenario_tags), the Redis row is refreshed, and a durable copy is
+    written to google_calls.metadata.
     """
     try:
-        # Avoid double-classification
+        # Avoid double-classification.
         if completed.extra.get("scenario_tags"):
             return
 
-        # Import here to avoid circular deps
         from server.classification.scenario_classifier import classify_call_scenario
-        from server.db.postgres import get_async_session
-        from sqlalchemy import text
-        import json
+        from server.database import get_pool
 
-        # Get call data from Postgres
-        async_session = await get_async_session()
+        pool = await get_pool()
 
-        # Fetch transcripts
-        query = """
-            SELECT user_text, bot_text, layer3_changes
-            FROM google_transcripts gt
-            JOIN google_turn_metrics gtm ON gt.call_id = gtm.call_id
-            WHERE gt.call_id = (
-                SELECT call_id FROM google_calls WHERE call_sid = :call_sid LIMIT 1
-            )
-            ORDER BY gt.turn_number ASC
-        """
+        # The turns are written shortly after the outcome is recorded, so retry
+        # a few times to absorb the write race before giving up.
+        rows: list = []
+        for attempt in range(4):
+            async with pool.acquire() as conn:
+                rows = await conn.fetch(
+                    """
+                    SELECT user_text, bot_text, layer3_changes
+                    FROM google_turn_metrics
+                    WHERE call_sid = $1
+                    ORDER BY turn_number ASC
+                    """,
+                    call_sid,
+                )
+            if rows:
+                break
+            await asyncio.sleep(2.0)
 
-        async with async_session() as session:
-            result = await session.execute(
-                text(query), {"call_sid": call_sid}
-            )
-            transcript_rows = result.fetchall()
+        if not rows:
+            logger.info("[Classify] %s: no turns found, skipping", call_sid)
+            return
 
-            # Build transcript text
-            transcript_text = "\n".join(
-                [
-                    f"User: {row[0] or ''}\nBot: {row[1] or ''}"
-                    for row in transcript_rows
-                ]
-            )
+        transcript_text = "\n".join(
+            f"User: {r['user_text'] or ''}\nBot: {r['bot_text'] or ''}" for r in rows
+        )
 
-            # Get layer3 changes from first row if available
-            layer3_changes = None
-            if transcript_rows:
-                layer3_changes = transcript_rows[0][2]
+        layer3_changes = None
+        raw_l3 = rows[0]["layer3_changes"]
+        if raw_l3:
+            try:
+                layer3_changes = json.loads(raw_l3) if isinstance(raw_l3, str) else raw_l3
+            except Exception:
+                layer3_changes = None
 
-            # Classify
-            scenario_tags = await classify_call_scenario(
-                call_sid=call_sid,
-                transcript_text=transcript_text,
-                tools_called=completed.tools_called,
-                turn_count=completed.turn_count,
-                duration_secs=completed.duration_secs,
-                fulfilled=completed.fulfilled,
-                end_reason=completed.end_reason,
-                layer3_changes=layer3_changes,
-            )
+        scenario_tags = await classify_call_scenario(
+            call_sid=call_sid,
+            transcript_text=transcript_text,
+            tools_called=completed.tools_called,
+            turn_count=completed.turn_count or len(rows),
+            duration_secs=completed.duration_secs,
+            fulfilled=completed.fulfilled,
+            end_reason=completed.end_reason or "disconnect",
+            layer3_changes=layer3_changes,
+        )
 
-            # Store in Postgres
-            update_query = """
-                UPDATE google_calls
-                SET extra = JSONB_SET(
-                    COALESCE(extra, '{}'::jsonb),
-                    '{scenario_tags}',
-                    :scenario_tags::jsonb
-                ),
-                updated_at = NOW()
-                WHERE call_sid = :call_sid
-            """
+        # 1) Attach to the live CallMetric → monitor API memory rows expose it.
+        completed.extra["scenario_tags"] = scenario_tags
 
-            await session.execute(
-                text(update_query),
-                {
-                    "call_sid": call_sid,
-                    "scenario_tags": json.dumps(scenario_tags),
-                },
-            )
-            await session.commit()
+        # 2) Refresh the Redis row so it also carries scenario_tags.
+        try:
+            await _maybe_redis_append_completed(completed)
+        except Exception:
+            pass
 
-            logger.info(
-                f"[Classify] Auto-classified {call_sid}: "
-                f"{scenario_tags['primary_scenario']} "
-                f"(phase {scenario_tags['scenario_phase']}, "
-                f"conf={scenario_tags['confidence']})"
-            )
+        # 3) Best-effort durable copy in google_calls.metadata (existing JSONB).
+        try:
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    """
+                    UPDATE google_calls
+                    SET metadata = JSONB_SET(
+                        COALESCE(metadata, '{}'::jsonb),
+                        '{scenario_tags}',
+                        $2::jsonb
+                    )
+                    WHERE call_sid = $1
+                    """,
+                    call_sid,
+                    json.dumps(scenario_tags),
+                )
+        except Exception as pe:
+            logger.debug("[Classify] PG persist skipped for %s: %s", call_sid, pe)
+
+        logger.info(
+            "[Classify] %s -> %s phase %s (conf=%s)",
+            call_sid,
+            scenario_tags.get("primary_scenario"),
+            scenario_tags.get("scenario_phase"),
+            scenario_tags.get("confidence"),
+        )
 
     except Exception as e:
-        logger.warning(
-            f"[Classify] Failed to auto-classify {call_sid}: {e}",
-            exc_info=True,
-        )
+        logger.warning("[Classify] Failed to auto-classify %s: %s", call_sid, e, exc_info=True)

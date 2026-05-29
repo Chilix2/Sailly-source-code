@@ -1162,6 +1162,11 @@ class BrowserBrainService(FrameProcessor):
                                 _layer_trace = _tp._current_layer_trace
                                 _metrics_dict.update(_layer_trace.to_db_row())
 
+                            # Phase 2: ExecutionSpan trace (flat google_turn_spans rows).
+                            _metrics_dict["execution_spans"] = list(
+                                getattr(_tp, "_execution_spans", None) or []
+                            )
+
                             self._turn_metrics.append(_metrics_dict)
                             try:
                                 from tools.executor import drain_tool_events as _drain_tool_events
@@ -1585,6 +1590,10 @@ class BrowserBrainService(FrameProcessor):
 
         tools_called = json.dumps(tm.get("tools_called") or [])
         validation_breakdown = json.dumps(tm.get("validation_breakdown") or {})
+
+        def _jd(val):
+            return json.dumps(val, ensure_ascii=False) if val is not None else None
+
         values = (
             self.call_sid,
             self.tenant_id,
@@ -1606,6 +1615,11 @@ class BrowserBrainService(FrameProcessor):
             tm.get("total_ms"),
             tm.get("tts_first_byte_ms"),
             tm.get("tts_ttfb_ms"),
+            # Phase 0B: per-layer observability (mirrors the finalize batch INSERT
+            # so live telephony rows are not blind on layer1/2/3).
+            _jd(tm.get("layer1_decision")),
+            tm.get("layer2_raw_output"),
+            _jd(tm.get("layer3_changes")),
         )
 
         conn = await asyncpg.connect(db_url)
@@ -1618,8 +1632,10 @@ class BrowserBrainService(FrameProcessor):
                          stt_latency_ms, llm_latency_ms, tts_latency_ms, total_latency_ms,
                          tools_called, node_name, stage3_text, stt_confidence, build_sha,
                          validation_breakdown, tts_situation, tts_mood,
-                         total_ms, tts_first_byte_ms, tts_ttfb_ms)
-                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13,$14,$15::jsonb,$16,$17,$18,$19,$20)
+                         total_ms, tts_first_byte_ms, tts_ttfb_ms,
+                         layer1_decision, layer2_raw_output, layer3_changes)
+                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13,$14,$15::jsonb,$16,$17,$18,$19,$20,
+                            $21::jsonb,$22::text,$23::jsonb)
                     ON CONFLICT (call_sid, turn_number) DO UPDATE SET
                         tenant_id = EXCLUDED.tenant_id,
                         user_text = EXCLUDED.user_text,
@@ -1638,7 +1654,10 @@ class BrowserBrainService(FrameProcessor):
                         tts_mood = EXCLUDED.tts_mood,
                         total_ms = EXCLUDED.total_ms,
                         tts_first_byte_ms = EXCLUDED.tts_first_byte_ms,
-                        tts_ttfb_ms = EXCLUDED.tts_ttfb_ms
+                        tts_ttfb_ms = EXCLUDED.tts_ttfb_ms,
+                        layer1_decision = EXCLUDED.layer1_decision,
+                        layer2_raw_output = EXCLUDED.layer2_raw_output,
+                        layer3_changes = EXCLUDED.layer3_changes
                     """,
                     *values,
                 )
@@ -1659,8 +1678,10 @@ class BrowserBrainService(FrameProcessor):
                          stt_latency_ms, llm_latency_ms, tts_latency_ms, total_latency_ms,
                          tools_called, node_name, stage3_text, stt_confidence, build_sha,
                          validation_breakdown, tts_situation, tts_mood,
-                         total_ms, tts_first_byte_ms, tts_ttfb_ms)
-                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13,$14,$15::jsonb,$16,$17,$18,$19,$20)
+                         total_ms, tts_first_byte_ms, tts_ttfb_ms,
+                         layer1_decision, layer2_raw_output, layer3_changes)
+                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13,$14,$15::jsonb,$16,$17,$18,$19,$20,
+                            $21::jsonb,$22::text,$23::jsonb)
                     """,
                     *values,
                 )

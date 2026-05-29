@@ -124,6 +124,20 @@ async def extract_scenario_features(
         )
 
         raw_json = response.content[0].text.strip()
+        # Models often wrap JSON in ```json ... ``` fences or add prose; unwrap it.
+        if raw_json.startswith("```"):
+            raw_json = raw_json[3:]
+            if raw_json[:4].lower() == "json":
+                raw_json = raw_json[4:]
+            raw_json = raw_json.strip()
+            if raw_json.endswith("```"):
+                raw_json = raw_json[:-3].strip()
+        if not raw_json.startswith("{"):
+            import re
+
+            match = re.search(r"\{.*\}", raw_json, re.DOTALL)
+            if match:
+                raw_json = match.group(0)
         result = json.loads(raw_json)
 
         logger.info(

@@ -511,6 +511,13 @@ class V4TurnProcessor:
             self._last_bot_response = clean
             self.turn_idx += 1
             await self._persist_state_safe()
+            
+            # Populate LayerTrace for semantic readback path (must happen on ALL exit paths)
+            if self._current_layer_trace:
+                self._current_layer_trace.layer1_node = "semantic_slot_readback"
+                self._current_layer_trace.layer2_raw_output = clean[:500]
+                self.state._current_layer_trace = self._current_layer_trace
+            
             return TurnResult(
                 clean_text=clean,
                 raw_response=clean,
@@ -623,9 +630,10 @@ class V4TurnProcessor:
             self._current_layer_trace.layer3_warnings = result_dict.get("policy_warnings", [])
             self._current_layer_trace.layer3_text_changed = result_dict.get("text_was_rewritten", False)
             self._current_layer_trace.layer3_tools_changed = result_dict.get("tools_were_gated", False)
-            
-            # Store on state for brain_service to access during metrics accumulation
-            self.state._current_layer_trace = self._current_layer_trace
+        
+        # Always store on state for brain_service to access during metrics accumulation.
+        # This happens on ALL paths: main return, semantic early return, and any future paths.
+        self.state._current_layer_trace = self._current_layer_trace
 
         return TurnResult(
             clean_text=clean,
