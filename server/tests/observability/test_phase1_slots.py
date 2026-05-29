@@ -36,7 +36,7 @@ def test_slot_extraction_and_retention():
         print("  ✓ Name extracted successfully")
     else:
         print("  ✗ Name NOT extracted!")
-        return False
+        raise AssertionError("customer_name was not extracted")
     
     # Scenario 2: Verify name persists in turn 2 without being asked again
     print("\n[Scenario 2] Verify name persists without re-asking")
@@ -79,7 +79,7 @@ def test_slot_extraction_and_retention():
     if "customer_name" in ctx.missing_slots:
         print("  ✗ FAIL: customer_name marked as missing even though it's in state!")
         print("    This is the root cause of re-asking bug")
-        return False
+        raise AssertionError("customer_name was marked as missing")
     else:
         print("  ✓ customer_name NOT in missing_slots (correct)")
     
@@ -95,7 +95,7 @@ def test_slot_extraction_and_retention():
         print("  ✓ Phone extracted successfully")
     else:
         print("  ✗ Phone NOT extracted!")
-        return False
+        raise AssertionError("phone_number was not extracted")
     
     # Turn 3: verify both name and phone persist
     print("\n[Scenario 4] Turn 3 - both slots should persist")
@@ -119,7 +119,7 @@ def test_slot_extraction_and_retention():
     missing_required = [s for s in ["customer_name", "phone_number"] if s in ctx2.missing_slots]
     if missing_required:
         print(f"  ✗ FAIL: Should not ask for {missing_required} again!")
-        return False
+        raise AssertionError(f"required slots were re-asked: {missing_required}")
     else:
         print("  ✓ Both name and phone NOT re-asked (correct)")
     
@@ -134,9 +134,7 @@ def test_slot_extraction_and_retention():
     print("  - State not being passed correctly to context_doc_builder")
     print("  - LLM ignoring VALIDIERTE_FAKTEN section")
     
-    return True
-
 
 if __name__ == "__main__":
-    success = test_slot_extraction_and_retention()
-    sys.exit(0 if success else 1)
+    test_slot_extraction_and_retention()
+    sys.exit(0)
