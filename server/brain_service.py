@@ -1309,13 +1309,27 @@ class BrowserBrainService(FrameProcessor):
                     await self.push_frame(EndFrame())
             except Exception as e:
                 logger.error(f"[BRAIN] Turn error: {e}", exc_info=True)
+                err_text = "Entschuldigung, ein technisches Problem. Bitte versuchen Sie es erneut."
+                fallback_metric = self._append_fallback_turn_metric(
+                    user_text=user_text,
+                    bot_text=err_text,
+                    timer=timer,
+                    error=e,
+                    node_name="turn_error",
+                )
+                if fallback_metric:
+                    try:
+                        asyncio.create_task(
+                            self.persist_turn_metric(dict(fallback_metric), path_type="live")
+                        )
+                    except Exception:
+                        pass
                 # Close any open TTS stream before emitting error audio
                 if _streamed_chunks:
                     try:
                         await self.push_frame(LLMFullResponseEndFrame())
                     except Exception:
                         pass
-                err_text = "Entschuldigung, ein technisches Problem. Bitte versuchen Sie es erneut."
                 await self._send_to_browser("transcript", speaker="bot", text=err_text)
                 tts_err = _sanitize_for_tts(err_text)
                 if tts_err:
@@ -1574,6 +1588,153 @@ class BrowserBrainService(FrameProcessor):
         finally:
             await conn.close()
 
+    def _append_fallback_turn_metric(
+        self,
+        user_text: str,
+        bot_text: str,
+        timer: Optional[LatencyTimer] = None,
+        error: Exception | None = None,
+        node_name: str = "fallback",
+    ) -> dict | None:
+        """Append a minimal metric row when the normal turn path aborts.
+
+        This is observability-only: it does not mutate FSM state or tool decisions.
+        It prevents client disconnects / turn exceptions from producing a call row
+        with zero per-turn evidence.
+        """
+        try:
+            if self._turn_metrics:
+                last = self._turn_metrics[-1]
+                if last.get("user_text") == user_text and int(last.get("turn_number") or 0) == self._turn_counter:
+                    return None
+
+            self._turn_counter += 1
+            marks = getattr(timer, "marks", {}) if timer else {}
+            t_start = marks.get("stt_final") or marks.get("brain_start")
+            t_end = marks.get("tts_text_pushed") or marks.get("tts_first_chunk") or time.monotonic()
+            total_ms = int(max(0.0, (t_end - t_start) * 1000)) if t_start else 0
+            error_text = str(error)[:300] if error else None
+            span = {
+                "span_id": uuid.uuid4().hex[:12],
+                "parent_span_id": None,
+                "layer": 1,
+                "operation": "turn_error" if error else "reconstructed",
+                "name": node_name,
+                "model": None,
+                "latency_ms": total_ms,
+                "ttft_ms": None,
+                "status": "error" if error else "ok",
+                "tokens_in": None,
+                "tokens_out": None,
+                "finish_reason": None,
+                "io": {"error": error_text} if error_text else {},
+            }
+            metric = {
+                "turn_number": self._turn_counter,
+                "user_text": user_text or "",
+                "bot_text": bot_text or "",
+                "tools_called": [],
+                "stt_latency_ms": 0,
+                "llm_latency_ms": total_ms,
+                "tts_latency_ms": 0,
+                "total_latency_ms": total_ms,
+                "total_ms": total_ms or None,
+                "node_name": node_name,
+                "stage3_text": bot_text or "",
+                "stt_confidence": getattr(self, "_last_stt_confidence", None),
+                "validation_breakdown": {},
+                "tts_situation": None,
+                "tts_mood": None,
+                "error_codes": ["ERR_TURN_EXCEPTION"] if error else [],
+                "layer1_decision": {
+                    "node": node_name,
+                    "forced_tools": [],
+                    "state_hash": "",
+                    "validators_run": [],
+                    "error": error_text,
+                },
+                "layer2_raw_output": bot_text or "",
+                "layer3_changes": {
+                    "warnings": [{"type": "turn_error", "message": error_text}] if error_text else [],
+                    "text_changed": False,
+                    "tools_changed": False,
+                },
+                "execution_spans": [span],
+            }
+            self._turn_metrics.append(metric)
+            logger.warning(
+                "[BRAIN] fallback metric appended call=%s turn=%s node=%s",
+                self.call_sid,
+                metric["turn_number"],
+                node_name,
+            )
+            return metric
+        except Exception as metric_err:
+            logger.warning("[BRAIN] fallback metric append failed: %s", metric_err)
+            return None
+
+    def _reconstruct_turn_metrics_from_transcripts(self, transcripts: list[dict]) -> list[dict]:
+        """Build minimal turn metrics from transcript pairs if hot-path metrics are empty."""
+        reconstructed: list[dict] = []
+        try:
+            pending_user = None
+            for item in transcripts or []:
+                if not isinstance(item, dict):
+                    continue
+                role = item.get("role") or item.get("speaker")
+                text = item.get("text") or item.get("content") or ""
+                if role in ("user", "customer"):
+                    pending_user = text
+                    continue
+                if role in ("assistant", "bot") and pending_user is not None:
+                    turn_number = len(reconstructed) + 1
+                    reconstructed.append({
+                        "turn_number": turn_number,
+                        "user_text": pending_user or "",
+                        "bot_text": text or "",
+                        "tools_called": [],
+                        "stt_latency_ms": 0,
+                        "llm_latency_ms": 0,
+                        "tts_latency_ms": 0,
+                        "total_latency_ms": 0,
+                        "node_name": "reconstructed",
+                        "stage3_text": text or "",
+                        "stt_confidence": None,
+                        "validation_breakdown": {},
+                        "layer1_decision": {
+                            "node": "reconstructed",
+                            "forced_tools": [],
+                            "state_hash": "",
+                            "validators_run": [],
+                        },
+                        "layer2_raw_output": text or "",
+                        "layer3_changes": {
+                            "warnings": [{"type": "reconstructed_from_transcript"}],
+                            "text_changed": False,
+                            "tools_changed": False,
+                        },
+                        "execution_spans": [{
+                            "span_id": uuid.uuid4().hex[:12],
+                            "parent_span_id": None,
+                            "layer": 1,
+                            "operation": "reconstructed",
+                            "name": "transcript_pair",
+                            "model": None,
+                            "latency_ms": 0,
+                            "ttft_ms": None,
+                            "status": "ok",
+                            "tokens_in": None,
+                            "tokens_out": None,
+                            "finish_reason": None,
+                            "io": {"source": "finalize_transcripts"},
+                        }],
+                    })
+                    pending_user = None
+        except Exception as err:
+            logger.warning("[BRAIN] metric reconstruction from transcripts failed: %s", err)
+            return []
+        return reconstructed
+
     async def persist_turn_metric(
         self,
         tm: dict,
@@ -1715,6 +1876,50 @@ class BrowserBrainService(FrameProcessor):
                                 $25::jsonb,$26::text,$27::jsonb)
                         """,
                         *values,
+                    )
+                spans_to_write = []
+                for span_dict in tm.get("execution_spans") or []:
+                    spans_to_write.append((
+                        self.call_sid,
+                        int(tm.get("turn_number") or 0),
+                        self.tenant_id,
+                        span_dict.get("span_id"),
+                        span_dict.get("parent_span_id"),
+                        span_dict.get("layer"),
+                        span_dict.get("operation"),
+                        span_dict.get("name"),
+                        span_dict.get("model"),
+                        int(span_dict.get("latency_ms") or 0),
+                        int(span_dict.get("ttft_ms") or 0) if span_dict.get("ttft_ms") else None,
+                        span_dict.get("status"),
+                        int(span_dict.get("tokens_in") or 0) if span_dict.get("tokens_in") else None,
+                        int(span_dict.get("tokens_out") or 0) if span_dict.get("tokens_out") else None,
+                        span_dict.get("finish_reason"),
+                        _jd(span_dict.get("io")),
+                    ))
+                if spans_to_write:
+                    await conn.executemany(
+                        """
+                        INSERT INTO google_turn_spans
+                            (call_sid, turn_number, tenant_id, span_id, parent_span_id, layer,
+                             operation, name, model, latency_ms, ttft_ms, status,
+                             tokens_in, tokens_out, finish_reason, io)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16::jsonb)
+                        ON CONFLICT (call_sid, turn_number, span_id) DO UPDATE SET
+                            parent_span_id = EXCLUDED.parent_span_id,
+                            layer = EXCLUDED.layer,
+                            operation = EXCLUDED.operation,
+                            name = EXCLUDED.name,
+                            model = EXCLUDED.model,
+                            latency_ms = EXCLUDED.latency_ms,
+                            ttft_ms = EXCLUDED.ttft_ms,
+                            status = EXCLUDED.status,
+                            tokens_in = EXCLUDED.tokens_in,
+                            tokens_out = EXCLUDED.tokens_out,
+                            finish_reason = EXCLUDED.finish_reason,
+                            io = EXCLUDED.io
+                        """,
+                        spans_to_write,
                     )
             finally:
                 await conn.close()
@@ -1953,6 +2158,16 @@ class BrowserBrainService(FrameProcessor):
                 if len(merged) > len(transcripts):
                     logger.info(f"[BRAIN] Reconstructing transcripts: {len(transcripts)} → {len(merged)} (kept greeting={greeting is not None})")
                     transcripts = merged
+
+        if not turn_metrics and transcripts:
+            turn_metrics = self._reconstruct_turn_metrics_from_transcripts(transcripts)
+            if turn_metrics:
+                self._turn_metrics = list(turn_metrics)
+                logger.warning(
+                    "[BRAIN] Reconstructed %s turn metric row(s) from transcripts for %s",
+                    len(turn_metrics),
+                    self.call_sid,
+                )
         
         # Sync ADK brain tool history into session_data["tool_calls"] if pipeline
         # did not already populate it.  ADK brain tracks executed tools internally

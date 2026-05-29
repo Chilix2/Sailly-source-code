@@ -467,8 +467,8 @@ class TestPersistTurnMetricEdgeCases:
 
                 assert captured_values
                 # tools_called should be JSON-encoded
-                assert isinstance(captured_values[8], str)
-                assert json.loads(captured_values[8]) == ["check_availability"]
+                assert isinstance(captured_values[9], str)
+                assert json.loads(captured_values[9]) == ["check_availability"]
 
     @pytest.mark.asyncio
     async def test_none_handling_in_optional_fields(

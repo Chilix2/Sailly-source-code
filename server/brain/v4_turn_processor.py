@@ -105,6 +105,8 @@ class V4TurnProcessor:
         
         # LayerTrace — wired in process_turn for full observability
         self._current_layer_trace: Optional[object] = None
+        self._span_collector = None
+        self._execution_spans: list[dict] = []
         try:
             from server.brain.validation_registry import ValidationRegistry
             from tools.executor import execute_tool
@@ -465,7 +467,7 @@ class V4TurnProcessor:
         from server.brain.conversation_state import update_state_from_utterance
         from server.brain.v4_pipeline import process_turn_v4
         from server.brain.contracts.turn_timings import TurnTimings
-        from server.brain.contracts.trace import LayerTrace
+        from server.brain.contracts.trace import LayerTrace, TurnSpanCollector
         import time
 
         # Initialize _turn_timings at the start of each turn for TTS TTFB instrumentation.
@@ -479,6 +481,8 @@ class V4TurnProcessor:
             turn_idx=self.turn_idx,
             call_sid=self.call_sid,
         )
+        self._span_collector = TurnSpanCollector(time.monotonic())
+        self._execution_spans = []
 
         # If turn 1 races the background pre-cache, wait briefly before any
         # menu-dependent extraction/readback path can ask for prices.
@@ -501,8 +505,16 @@ class V4TurnProcessor:
         if tier1_applied:
             logger.info("[V4Turn] tier1_regex_slots applied: %s", sorted(tier1_applied))
 
+        _semantic_span_start = self._span_collector.now_ms()
         semantic_pre_response = await self._run_semantic_slot_extraction(user_text)
         if semantic_pre_response:
+            self._span_collector.add(
+                1,
+                "classify",
+                "semantic_slot_readback",
+                _semantic_span_start,
+                io={"matched": True},
+            )
             clean = semantic_pre_response
             if user_text:
                 self.last_turns.append(("user", user_text))
@@ -517,6 +529,7 @@ class V4TurnProcessor:
                 self._current_layer_trace.layer1_node = "semantic_slot_readback"
                 self._current_layer_trace.layer2_raw_output = clean[:500]
                 self.state._current_layer_trace = self._current_layer_trace
+            self._execution_spans = list(getattr(self._span_collector, "spans", []) or [])
             
             return TurnResult(
                 clean_text=clean,
@@ -539,6 +552,7 @@ class V4TurnProcessor:
         # Include current user turn in last_turns so TinyGenerator always sees it in context.
         turns_with_current = list(self.last_turns) + ([("user", user_text)] if user_text else [])
         speculative_generator_result = await self._consume_speculative_generator(user_text)
+        _pipeline_span_start = self._span_collector.now_ms()
         result_dict = await process_turn_v4(
             user_text=user_text,
             turn_idx=self.turn_idx,
@@ -551,6 +565,17 @@ class V4TurnProcessor:
             caller_phone=self.caller_phone,
             speculative_worker_results=getattr(self, "_speculative_worker_results", None),
             speculative_generator_result=speculative_generator_result,
+        )
+        self._span_collector.add(
+            2,
+            "chat",
+            "process_turn_v4",
+            _pipeline_span_start,
+            model=getattr(self._llm_client, "model", None),
+            io={
+                "profile": result_dict.get("profile") or result_dict.get("node_name"),
+                "chars_out": len(result_dict.get("raw_response") or result_dict.get("clean_text") or ""),
+            },
         )
         
         # Stamp l2_done_at (LLM call complete) and tool_done_at (tools executed inside process_turn_v4)
@@ -603,6 +628,25 @@ class V4TurnProcessor:
         tools = result_dict.get("tools_called", [])
         if self._semantic_tools_called_this_turn:
             tools = list(dict.fromkeys(list(tools or []) + self._semantic_tools_called_this_turn))
+        _tool_durations = result_dict.get("tool_durations") or {}
+        for _tool_name in tools or []:
+            self._execution_spans.append({
+                "span_id": f"tool_{self.turn_idx}_{len(self._execution_spans)}",
+                "parent_span_id": None,
+                "layer": 1,
+                "operation": "execute_tool",
+                "name": _tool_name,
+                "model": None,
+                "t_start_ms": None,
+                "t_end_ms": None,
+                "latency_ms": int(_tool_durations.get(_tool_name) or 0),
+                "ttft_ms": None,
+                "status": "ok",
+                "tokens_in": None,
+                "tokens_out": None,
+                "finish_reason": None,
+                "io": {"source": "process_turn_v4.tools_called"},
+            })
         for t in tools:
             if t not in self.all_tools:
                 self.all_tools.append(t)
@@ -617,7 +661,18 @@ class V4TurnProcessor:
             self._current_layer_trace.layer1_node = profile
             self._current_layer_trace.layer1_forced_tools = result_dict.get("forced_tools", [])
             # State hash: CRC of key slots
-            state_snapshot = f"{profile}|{self.state.customer_name}|{self.state.order_items}|{self.state.reservation_date}"
+            state_snapshot = "|".join(
+                str(getattr(self.state, field_name, ""))
+                for field_name in (
+                    "customer_name",
+                    "order_items",
+                    "selected_dish",
+                    "reservation_date",
+                    "reservation_time",
+                    "party_size",
+                    "phone_number",
+                )
+            )
             self._current_layer_trace.layer1_state_hash = hashlib.md5(state_snapshot.encode()).hexdigest()[:16]
             # Validators from validation_registry if available
             if self.validation_registry:
@@ -634,6 +689,7 @@ class V4TurnProcessor:
         # Always store on state for brain_service to access during metrics accumulation.
         # This happens on ALL paths: main return, semantic early return, and any future paths.
         self.state._current_layer_trace = self._current_layer_trace
+        self._execution_spans = list(getattr(self._span_collector, "spans", []) or []) + list(self._execution_spans)
 
         return TurnResult(
             clean_text=clean,
