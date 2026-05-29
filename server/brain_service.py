@@ -1272,7 +1272,7 @@ class BrowserBrainService(FrameProcessor):
                             )
 
                 if self._turn_metrics:
-                    asyncio.create_task(self._persist_turn_metric_live(dict(self._turn_metrics[-1])))
+                    asyncio.create_task(self.persist_turn_metric(dict(self._turn_metrics[-1]), path_type="live"))
 
                 if self.session:
                     try:
@@ -1574,8 +1574,28 @@ class BrowserBrainService(FrameProcessor):
         finally:
             await conn.close()
 
-    async def _persist_turn_metric_live(self, tm: dict) -> None:
-        """Best-effort live write for the Call Analysis turn view."""
+    async def persist_turn_metric(
+        self,
+        tm: dict,
+        path_type: str = "live",
+        call_id: int | None = None,
+        conn: "asyncpg.Connection | None" = None,
+    ) -> None:
+        """
+        Unified metric writer for all three execution paths: live (ADK), finalize (batch), text_mode.
+
+        path_type: "live" (single live call), "finalize" (batch finalization), "text_mode" (text-only pipeline)
+        call_id: required for "finalize" and "text_mode" paths
+        conn: optional pre-existing connection (for "finalize" path reuse in bulk writes)
+
+        Live path: minimal columns, direct asyncpg.connect(), ON CONFLICT with fallback
+        Finalize path: full observability columns, executemany() via pre-existing conn
+        Text mode path: calls database.persist_turn_metrics() for single metric
+        """
+        if path_type not in ("live", "finalize", "text_mode"):
+            logger.warning(f"[METRICS] Unknown path_type={path_type}, skipping")
+            return
+
         db_url = os.environ.get("DATABASE_URL")
         if not db_url:
             return
@@ -1588,114 +1608,289 @@ class BrowserBrainService(FrameProcessor):
         except Exception:
             build_sha = None
 
-        tools_called = json.dumps(tm.get("tools_called") or [])
-        validation_breakdown = json.dumps(tm.get("validation_breakdown") or {})
-
         def _jd(val):
+            """JSON-dump a value or return None if it's None."""
             return json.dumps(val, ensure_ascii=False) if val is not None else None
 
-        values = (
-            self.call_sid,
-            self.tenant_id,
-            int(tm.get("turn_number") or 0),
-            tm.get("user_text") or "",
-            tm.get("bot_text") or "",
-            int(tm.get("stt_latency_ms") or 0),
-            int(tm.get("llm_latency_ms") or 0),
-            int(tm.get("tts_latency_ms") or 0),
-            int(tm.get("total_latency_ms") or 0),
-            tools_called,
-            tm.get("node_name"),
-            tm.get("stage3_text") or tm.get("bot_text") or "",
-            tm.get("stt_confidence"),
-            build_sha,
-            validation_breakdown,
-            tm.get("tts_situation"),
-            tm.get("tts_mood"),
-            tm.get("stt_ms"),
-            tm.get("extract_ms"),
-            tm.get("l2_ms"),
-            tm.get("tool_ms"),
-            tm.get("total_ms"),
-            tm.get("tts_first_byte_ms"),
-            tm.get("tts_ttfb_ms"),
-            # Phase 0B: per-layer observability
-            _jd(tm.get("layer1_decision")),
-            tm.get("layer2_raw_output"),
-            _jd(tm.get("layer3_changes")),
-        )
+        # ===== LIVE PATH: minimal columns, immediate single write =====
+        if path_type == "live":
+            tools_called = json.dumps(tm.get("tools_called") or [])
+            validation_breakdown = json.dumps(tm.get("validation_breakdown") or {})
 
-        conn = await asyncpg.connect(db_url)
-        try:
+            values = (
+                self.call_sid,
+                self.tenant_id,
+                int(tm.get("turn_number") or 0),
+                tm.get("user_text") or "",
+                tm.get("bot_text") or "",
+                int(tm.get("stt_latency_ms") or 0),
+                int(tm.get("llm_latency_ms") or 0),
+                int(tm.get("tts_latency_ms") or 0),
+                int(tm.get("total_latency_ms") or 0),
+                tools_called,
+                tm.get("node_name"),
+                tm.get("stage3_text") or tm.get("bot_text") or "",
+                tm.get("stt_confidence"),
+                build_sha,
+                validation_breakdown,
+                tm.get("tts_situation"),
+                tm.get("tts_mood"),
+                tm.get("stt_ms"),
+                tm.get("extract_ms"),
+                tm.get("l2_ms"),
+                tm.get("tool_ms"),
+                tm.get("total_ms"),
+                tm.get("tts_first_byte_ms"),
+                tm.get("tts_ttfb_ms"),
+                _jd(tm.get("layer1_decision")),
+                tm.get("layer2_raw_output"),
+                _jd(tm.get("layer3_changes")),
+            )
+
+            conn = await asyncpg.connect(db_url)
             try:
-                await conn.execute(
-                    """
-                    INSERT INTO google_turn_metrics
-                        (call_sid, tenant_id, turn_number, user_text, bot_text,
-                         stt_latency_ms, llm_latency_ms, tts_latency_ms, total_latency_ms,
-                         tools_called, node_name, stage3_text, stt_confidence, build_sha,
-                         validation_breakdown, tts_situation, tts_mood,
-                         stt_ms, extract_ms, l2_ms, tool_ms, total_ms, tts_first_byte_ms, tts_ttfb_ms,
-                         layer1_decision, layer2_raw_output, layer3_changes)
-                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13,$14,$15::jsonb,$16,$17,
-                            $18,$19,$20,$21,$22,$23,$24,
-                            $25::jsonb,$26::text,$27::jsonb)
-                    ON CONFLICT (call_sid, turn_number) DO UPDATE SET
-                        tenant_id = EXCLUDED.tenant_id,
-                        user_text = EXCLUDED.user_text,
-                        bot_text = EXCLUDED.bot_text,
-                        stt_latency_ms = EXCLUDED.stt_latency_ms,
-                        llm_latency_ms = EXCLUDED.llm_latency_ms,
-                        tts_latency_ms = EXCLUDED.tts_latency_ms,
-                        total_latency_ms = EXCLUDED.total_latency_ms,
-                        tools_called = EXCLUDED.tools_called,
-                        node_name = EXCLUDED.node_name,
-                        stage3_text = EXCLUDED.stage3_text,
-                        stt_confidence = EXCLUDED.stt_confidence,
-                        build_sha = EXCLUDED.build_sha,
-                        validation_breakdown = EXCLUDED.validation_breakdown,
-                        tts_situation = EXCLUDED.tts_situation,
-                        tts_mood = EXCLUDED.tts_mood,
-                        stt_ms = EXCLUDED.stt_ms,
-                        extract_ms = EXCLUDED.extract_ms,
-                        l2_ms = EXCLUDED.l2_ms,
-                        tool_ms = EXCLUDED.tool_ms,
-                        total_ms = EXCLUDED.total_ms,
-                        tts_first_byte_ms = EXCLUDED.tts_first_byte_ms,
-                        tts_ttfb_ms = EXCLUDED.tts_ttfb_ms,
-                        layer1_decision = EXCLUDED.layer1_decision,
-                        layer2_raw_output = EXCLUDED.layer2_raw_output,
-                        layer3_changes = EXCLUDED.layer3_changes
-                    """,
-                    *values,
-                )
-            except Exception as e:
-                # Older deployments may not yet have a unique constraint for
-                # ON CONFLICT. Fall back to delete+insert for this turn only.
-                if "no unique or exclusion constraint" not in str(e):
-                    raise
+                try:
+                    await conn.execute(
+                        """
+                        INSERT INTO google_turn_metrics
+                            (call_sid, tenant_id, turn_number, user_text, bot_text,
+                             stt_latency_ms, llm_latency_ms, tts_latency_ms, total_latency_ms,
+                             tools_called, node_name, stage3_text, stt_confidence, build_sha,
+                             validation_breakdown, tts_situation, tts_mood,
+                             stt_ms, extract_ms, l2_ms, tool_ms, total_ms, tts_first_byte_ms, tts_ttfb_ms,
+                             layer1_decision, layer2_raw_output, layer3_changes)
+                        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13,$14,$15::jsonb,$16,$17,
+                                $18,$19,$20,$21,$22,$23,$24,
+                                $25::jsonb,$26::text,$27::jsonb)
+                        ON CONFLICT (call_sid, turn_number) DO UPDATE SET
+                            tenant_id = EXCLUDED.tenant_id,
+                            user_text = EXCLUDED.user_text,
+                            bot_text = EXCLUDED.bot_text,
+                            stt_latency_ms = EXCLUDED.stt_latency_ms,
+                            llm_latency_ms = EXCLUDED.llm_latency_ms,
+                            tts_latency_ms = EXCLUDED.tts_latency_ms,
+                            total_latency_ms = EXCLUDED.total_latency_ms,
+                            tools_called = EXCLUDED.tools_called,
+                            node_name = EXCLUDED.node_name,
+                            stage3_text = EXCLUDED.stage3_text,
+                            stt_confidence = EXCLUDED.stt_confidence,
+                            build_sha = EXCLUDED.build_sha,
+                            validation_breakdown = EXCLUDED.validation_breakdown,
+                            tts_situation = EXCLUDED.tts_situation,
+                            tts_mood = EXCLUDED.tts_mood,
+                            stt_ms = EXCLUDED.stt_ms,
+                            extract_ms = EXCLUDED.extract_ms,
+                            l2_ms = EXCLUDED.l2_ms,
+                            tool_ms = EXCLUDED.tool_ms,
+                            total_ms = EXCLUDED.total_ms,
+                            tts_first_byte_ms = EXCLUDED.tts_first_byte_ms,
+                            tts_ttfb_ms = EXCLUDED.tts_ttfb_ms,
+                            layer1_decision = EXCLUDED.layer1_decision,
+                            layer2_raw_output = EXCLUDED.layer2_raw_output,
+                            layer3_changes = EXCLUDED.layer3_changes
+                        """,
+                        *values,
+                    )
+                except Exception as e:
+                    # Older deployments may not have unique constraint for ON CONFLICT.
+                    # Fall back to delete+insert for this turn only.
+                    if "no unique or exclusion constraint" not in str(e):
+                        raise
+                    await conn.execute(
+                        "DELETE FROM google_turn_metrics WHERE call_sid = $1 AND turn_number = $2",
+                        self.call_sid,
+                        int(tm.get("turn_number") or 0),
+                    )
+                    await conn.execute(
+                        """
+                        INSERT INTO google_turn_metrics
+                            (call_sid, tenant_id, turn_number, user_text, bot_text,
+                             stt_latency_ms, llm_latency_ms, tts_latency_ms, total_latency_ms,
+                             tools_called, node_name, stage3_text, stt_confidence, build_sha,
+                             validation_breakdown, tts_situation, tts_mood,
+                             stt_ms, extract_ms, l2_ms, tool_ms, total_ms, tts_first_byte_ms, tts_ttfb_ms,
+                             layer1_decision, layer2_raw_output, layer3_changes)
+                        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13,$14,$15::jsonb,$16,$17,
+                                $18,$19,$20,$21,$22,$23,$24,
+                                $25::jsonb,$26::text,$27::jsonb)
+                        """,
+                        *values,
+                    )
+            finally:
+                await conn.close()
+
+        # ===== FINALIZE PATH: full columns, bulk executemany() via pre-existing conn =====
+        elif path_type == "finalize":
+            if not call_id:
+                logger.warning("[METRICS] finalize path requires call_id, skipping")
+                return
+            if not conn:
+                logger.warning("[METRICS] finalize path requires pre-existing conn, skipping")
+                return
+
+            values = (
+                call_id,
+                self.call_sid,
+                self.tenant_id,
+                int(tm.get("turn_number") or 0),
+                tm.get("user_text") or "",
+                tm.get("bot_text") or "",
+                int(tm.get("stt_latency_ms") or 0),
+                int(tm.get("llm_latency_ms") or 0),
+                int(tm.get("tts_latency_ms") or 0),
+                int(tm.get("total_latency_ms") or 0),
+                json.dumps(tm.get("tools_called") or []),
+                tm.get("node_name"),
+                tm.get("stage3_text") or tm.get("bot_text") or "",
+                tm.get("stt_confidence"),
+                build_sha,
+                json.dumps(tm.get("validation_breakdown") or {}),
+                tm.get("tts_situation"),
+                tm.get("tts_mood"),
+                tm.get("prompt_tokens_in"),
+                tm.get("prompt_tokens_out"),
+                tm.get("max_output_tokens_config"),
+                tm.get("temperature_config"),
+                tm.get("top_p_config"),
+                _jd(tm.get("slot_state_json")),
+                _jd(tm.get("slot_state_diff")),
+                tm.get("slots_filled_count"),
+                tm.get("slots_confirmed_count"),
+                _jd(tm.get("slots_missing_required")),
+                _jd(tm.get("validations_fired_this_turn")),
+                _jd(tm.get("validations_completed_this_turn")),
+                _jd(tm.get("validations_pending_end_of_turn")),
+                tm.get("validation_cancellations"),
+                tm.get("raw_utterance_in_prompt"),
+                tm.get("prompt_snapshot_head"),
+                _jd(tm.get("intent_flags_active")),
+                tm.get("node_active"),
+                tm.get("prompt_had_multiple_intents"),
+                tm.get("mood_confidence"),
+                _jd(tm.get("mood_signals_matched")),
+                tm.get("barge_in_attempted"),
+                tm.get("barge_in_succeeded"),
+                tm.get("barge_in_latency_ms"),
+                tm.get("loop_detected_in_stream"),
+                tm.get("loop_reason"),
+                tm.get("stream_aborted_at_sentence"),
+                tm.get("cross_turn_similarity_max"),
+                _jd(tm.get("subsystems_fired")),
+                tm.get("tts_rate_pct"),
+                tm.get("stt_ms"),
+                tm.get("extract_ms"),
+                tm.get("l2_ms"),
+                tm.get("tool_ms"),
+                tm.get("tts_first_byte_ms"),
+                tm.get("total_ms"),
+                tm.get("extract_tokens_in"),
+                tm.get("extract_tokens_out"),
+                tm.get("cost_eur"),
+                _jd(tm.get("tool_durations")),
+                tm.get("error_codes") or [],
+                tm.get("intent_classify_ms"),
+                tm.get("worker_p50_ms"),
+                tm.get("worker_p95_ms"),
+                tm.get("context_build_ms"),
+                tm.get("generator_ttft_ms"),
+                tm.get("tts_ttfb_ms"),
+                tm.get("eot_event_type"),
+                tm.get("eot_confidence"),
+                tm.get("eot_latency_ms"),
+                tm.get("backchannel_fired"),
+                tm.get("eot_followed_immediately"),
+                tm.get("slot_extraction_latency_ms"),
+                _jd(tm.get("slot_retention_status")),
+                _jd(tm.get("validation_passes")),
+                tm.get("intent"),
+                tm.get("turn_type"),
+                tm.get("worker_profile"),
+                _jd(tm.get("layer1_decision")),
+                tm.get("layer2_raw_output"),
+                _jd(tm.get("layer3_changes")),
+            )
+
+            try:
+                turn_number = int(tm.get("turn_number") or 0)
                 await conn.execute(
                     "DELETE FROM google_turn_metrics WHERE call_sid = $1 AND turn_number = $2",
                     self.call_sid,
-                    int(tm.get("turn_number") or 0),
+                    turn_number,
                 )
+
                 await conn.execute(
                     """
                     INSERT INTO google_turn_metrics
-                        (call_sid, tenant_id, turn_number, user_text, bot_text,
+                        (call_id, call_sid, tenant_id, turn_number,
+                         user_text, bot_text,
                          stt_latency_ms, llm_latency_ms, tts_latency_ms, total_latency_ms,
-                         tools_called, node_name, stage3_text, stt_confidence, build_sha,
+                         tools_called, node_name, stage3_text,
+                         stt_confidence, build_sha,
                          validation_breakdown, tts_situation, tts_mood,
-                         stt_ms, extract_ms, l2_ms, tool_ms, total_ms, tts_first_byte_ms, tts_ttfb_ms,
+                         prompt_tokens_in, prompt_tokens_out, max_output_tokens_config,
+                         temperature_config, top_p_config,
+                         slot_state_json, slot_state_diff,
+                         slots_filled_count, slots_confirmed_count, slots_missing_required,
+                         validations_fired_this_turn, validations_completed_this_turn,
+                         validations_pending_end_of_turn, validation_cancellations,
+                         raw_utterance_in_prompt, prompt_snapshot_head,
+                         intent_flags_active, node_active, prompt_had_multiple_intents,
+                         mood_confidence, mood_signals_matched,
+                         barge_in_attempted, barge_in_succeeded, barge_in_latency_ms,
+                         loop_detected_in_stream, loop_reason,
+                         stream_aborted_at_sentence, cross_turn_similarity_max,
+                         subsystems_fired, tts_rate_pct,
+                         stt_ms, extract_ms, l2_ms, tool_ms, tts_first_byte_ms, total_ms,
+                         extract_tokens_in, extract_tokens_out, cost_eur,
+                         tool_durations, error_codes,
+                         intent_classify_ms, worker_p50_ms, worker_p95_ms,
+                         context_build_ms, generator_ttft_ms, tts_ttfb_ms,
+                         eot_event_type, eot_confidence, eot_latency_ms,
+                         backchannel_fired, eot_followed_immediately,
+                         slot_extraction_latency_ms, slot_retention_status, validation_passes,
+                         intent, turn_type, worker_profile,
                          layer1_decision, layer2_raw_output, layer3_changes)
-                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13,$14,$15::jsonb,$16,$17,
-                            $18,$19,$20,$21,$22,$23,$24,
-                            $25::jsonb,$26::text,$27::jsonb)
+                    VALUES (
+                        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12,$13,$14,$15,
+                        $16::jsonb,$17,$18,
+                        $19,$20,$21,$22,$23,
+                        $24::jsonb,$25::jsonb,$26,$27,$28::jsonb,
+                        $29::jsonb,$30::jsonb,$31::jsonb,$32,
+                        $33,$34,
+                        $35::jsonb,$36,$37,
+                        $38,$39::jsonb,
+                        $40,$41,$42,
+                        $43,$44,$45,$46,
+                        $47::jsonb,$48,
+                        $49,$50,$51,$52,$53,$54,
+                        $55,$56,$57,
+                        $58::jsonb,$59::text[],
+                        $60,$61,$62,$63,$64,$65,
+                        $66,$67,$68,$69,$70,
+                        $71,$72::jsonb,$73::jsonb,
+                        $74,$75,$76,
+                        $77::jsonb,$78::text,$79::jsonb
+                    )
                     """,
                     *values,
                 )
-        finally:
-            await conn.close()
+            except Exception as err:
+                logger.warning(f"[METRICS] finalize write failed for turn {turn_number}: {err}")
+                raise
+
+        # ===== TEXT_MODE PATH: delegates to database.persist_turn_metrics() =====
+        elif path_type == "text_mode":
+            if not call_id:
+                logger.warning("[METRICS] text_mode path requires call_id, skipping")
+                return
+
+            try:
+                from server.database import persist_turn_metrics as _persist_turn_metrics
+
+                await _persist_turn_metrics(call_id, self.call_sid, [tm])
+            except Exception as err:
+                logger.warning(f"[METRICS] text_mode write failed for call {self.call_sid}: {err}")
+                raise
 
     async def _write_call_to_postgres(self, session_data: dict, reason: str):
         """Write demo call record to PostgreSQL google_calls table."""
@@ -1927,7 +2122,7 @@ class BrowserBrainService(FrameProcessor):
 
             # Per-turn metrics (drives the Call Analysis dashboard turn view).
             # Sprint 0 expansion: every observability column is written through
-            # the shared persist_turn_metrics path via the fuller INSERT below
+            # the unified persist_turn_metric() path with path_type='finalize'
             # so the Postgres rows carry slot/validation/mood/loop/subsystem
             # fields (not just latency + text like the legacy path did).
             if turn_metrics:
@@ -1935,15 +2130,6 @@ class BrowserBrainService(FrameProcessor):
                     from server.brain.layer1.persist import build_turn_metrics_extra as _build_turn_metrics_extra
                 except Exception:
                     _build_turn_metrics_extra = lambda _s: {}  # noqa: E731
-
-                try:
-                    from server.core.obs import get_build_sha
-                    _build_sha = get_build_sha()
-                except Exception:
-                    _build_sha = None
-
-                def _jd(val):
-                    return json.dumps(val, ensure_ascii=False) if val is not None else None
 
                 _turn_numbers = [int(tm.get("turn_number") or 0) for tm in turn_metrics]
                 if _turn_numbers:
@@ -1953,149 +2139,13 @@ class BrowserBrainService(FrameProcessor):
                         _turn_numbers,
                     )
 
-                await conn.executemany(
-                    """
-                    INSERT INTO google_turn_metrics
-                        (call_id, call_sid, tenant_id, turn_number,
-                         user_text, bot_text,
-                         stt_latency_ms, llm_latency_ms, tts_latency_ms, total_latency_ms,
-                         tools_called, node_name, stage3_text,
-                         stt_confidence, build_sha,
-                         validation_breakdown, tts_situation, tts_mood,
-                         prompt_tokens_in, prompt_tokens_out, max_output_tokens_config,
-                         temperature_config, top_p_config,
-                         slot_state_json, slot_state_diff,
-                         slots_filled_count, slots_confirmed_count, slots_missing_required,
-                         validations_fired_this_turn, validations_completed_this_turn,
-                         validations_pending_end_of_turn, validation_cancellations,
-                         raw_utterance_in_prompt, prompt_snapshot_head,
-                         intent_flags_active, node_active, prompt_had_multiple_intents,
-                         mood_confidence, mood_signals_matched,
-                         barge_in_attempted, barge_in_succeeded, barge_in_latency_ms,
-                         loop_detected_in_stream, loop_reason,
-                         stream_aborted_at_sentence, cross_turn_similarity_max,
-                         subsystems_fired, tts_rate_pct,
-                         stt_ms, extract_ms, l2_ms, tool_ms, tts_first_byte_ms, total_ms,
-                         extract_tokens_in, extract_tokens_out, cost_eur,
-                         tool_durations, error_codes,
-                         intent_classify_ms, worker_p50_ms, worker_p95_ms,
-                         context_build_ms, generator_ttft_ms, tts_ttfb_ms,
-                         eot_event_type, eot_confidence, eot_latency_ms,
-                         backchannel_fired, eot_followed_immediately,
-                         slot_extraction_latency_ms, slot_retention_status, validation_passes,
-                         intent, turn_type, worker_profile,
-                         layer1_decision, layer2_raw_output, layer3_changes)
-                    VALUES (
-                        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12,$13,$14,$15,
-                        $16::jsonb,$17,$18,
-                        $19,$20,$21,$22,$23,
-                        $24::jsonb,$25::jsonb,$26,$27,$28::jsonb,
-                        $29::jsonb,$30::jsonb,$31::jsonb,$32,
-                        $33,$34,
-                        $35::jsonb,$36,$37,
-                        $38,$39::jsonb,
-                        $40,$41,$42,
-                        $43,$44,$45,$46,
-                        $47::jsonb,$48,
-                        $49,$50,$51,$52,$53,$54,
-                        $55,$56,$57,
-                        $58::jsonb,$59::text[],
-                        $60,$61,$62,$63,$64,$65,
-                        $66,$67,$68,$69,$70,
-                        $71,$72::jsonb,$73::jsonb,
-                        $74,$75,$76,
-                        $77::jsonb,$78::text,$79::jsonb
+                for tm in turn_metrics:
+                    await self.persist_turn_metric(
+                        tm,
+                        path_type="finalize",
+                        call_id=call_uuid,
+                        conn=conn,
                     )
-                    """,
-                    [
-                        (
-                            call_uuid,
-                            self.call_sid,
-                            self.tenant_id,
-                            int(tm.get("turn_number") or 0),
-                            tm.get("user_text") or "",
-                            tm.get("bot_text") or "",
-                            int(tm.get("stt_latency_ms") or 0),
-                            int(tm.get("llm_latency_ms") or 0),
-                            int(tm.get("tts_latency_ms") or 0),
-                            int(tm.get("total_latency_ms") or 0),
-                            json.dumps(tm.get("tools_called") or []),
-                            tm.get("node_name"),
-                            tm.get("stage3_text") or tm.get("bot_text") or "",
-                            tm.get("stt_confidence"),
-                            _build_sha,
-                            json.dumps(tm.get("validation_breakdown") or {}),
-                            tm.get("tts_situation"),
-                            tm.get("tts_mood"),
-                            tm.get("prompt_tokens_in"),
-                            tm.get("prompt_tokens_out"),
-                            tm.get("max_output_tokens_config"),
-                            tm.get("temperature_config"),
-                            tm.get("top_p_config"),
-                            _jd(tm.get("slot_state_json")),
-                            _jd(tm.get("slot_state_diff")),
-                            tm.get("slots_filled_count"),
-                            tm.get("slots_confirmed_count"),
-                            _jd(tm.get("slots_missing_required")),
-                            _jd(tm.get("validations_fired_this_turn")),
-                            _jd(tm.get("validations_completed_this_turn")),
-                            _jd(tm.get("validations_pending_end_of_turn")),
-                            tm.get("validation_cancellations"),
-                            tm.get("raw_utterance_in_prompt"),
-                            tm.get("prompt_snapshot_head"),
-                            _jd(tm.get("intent_flags_active")),
-                            tm.get("node_active"),
-                            tm.get("prompt_had_multiple_intents"),
-                            tm.get("mood_confidence"),
-                            _jd(tm.get("mood_signals_matched")),
-                            tm.get("barge_in_attempted"),
-                            tm.get("barge_in_succeeded"),
-                            tm.get("barge_in_latency_ms"),
-                            tm.get("loop_detected_in_stream"),
-                            tm.get("loop_reason"),
-                            tm.get("stream_aborted_at_sentence"),
-                            tm.get("cross_turn_similarity_max"),
-                            _jd(tm.get("subsystems_fired")),
-                            tm.get("tts_rate_pct"),
-                            # Phase 9 A1 per-stage latency
-                            tm.get("stt_ms"),
-                            tm.get("extract_ms"),
-                            tm.get("l2_ms"),
-                            tm.get("tool_ms"),
-                            tm.get("tts_first_byte_ms"),
-                            tm.get("total_ms"),
-                            tm.get("extract_tokens_in"),
-                            tm.get("extract_tokens_out"),
-                            tm.get("cost_eur"),
-                            _jd(tm.get("tool_durations")),
-                            tm.get("error_codes") or [],
-                            # Phase 8.6 v4 latency layers
-                            tm.get("intent_classify_ms"),
-                            tm.get("worker_p50_ms"),
-                            tm.get("worker_p95_ms"),
-                            tm.get("context_build_ms"),
-                            tm.get("generator_ttft_ms"),
-                            tm.get("tts_ttfb_ms"),
-                            tm.get("eot_event_type"),
-                            tm.get("eot_confidence"),
-                            tm.get("eot_latency_ms"),
-                            tm.get("backchannel_fired"),
-                            tm.get("eot_followed_immediately"),
-                            tm.get("slot_extraction_latency_ms"),
-                            _jd(tm.get("slot_retention_status")),
-                            _jd(tm.get("validation_passes")),
-                            # Phase A-D patch 1: intent classification columns
-                            tm.get("intent"),
-                            tm.get("turn_type"),
-                            tm.get("worker_profile"),
-                            # Phase 0B: Layer trace observability
-                            _jd(tm.get("layer1_decision")),
-                            tm.get("layer2_raw_output"),
-                            _jd(tm.get("layer3_changes")),
-                        )
-                        for tm in turn_metrics
-                    ],
-                )
                 logger.info(
                     f"[BRAIN] PostgreSQL: {len(turn_metrics)} turn_metric rows written"
                 )

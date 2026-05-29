@@ -1,0 +1,517 @@
+{
+  "version": "1",
+  "timestamp": "2026-05-29T17:45:41Z",
+  "metrics": {
+    "total_scenarios": 11,
+    "passed_scenarios": 11,
+    "failed_scenarios": 0,
+    "l1_pass_rate": 100.0,
+    "l2_pass_rate": 100.0,
+    "l3_pass_rate": 81.81818181818183,
+    "avg_overall_score": 0.9636363636363636,
+    "avg_latency_ms": 0.05198202349922874
+  },
+  "results": {
+    "after_hours_pre_order": {
+      "scenario_id": "after_hours_pre_order",
+      "overall_status": "pass",
+      "overall_score": 1.0,
+      "l1_score": 1.0,
+      "l2_score": 1.0,
+      "l3_score": 1.0,
+      "execution_spans": [
+        {
+          "operation": "classify",
+          "layer": "layer2",
+          "status": "ok",
+          "latency_ms": 61.13310681656804,
+          "name": "llm_call"
+        }
+      ],
+      "per_turn_latencies_ms": [
+        0.0767974853515625
+      ],
+      "total_latency_ms": 0.08059851825237274,
+      "issues": [],
+      "bot_responses": [
+        "Verstanden. Wie lautet Ihr Name?"
+      ],
+      "tools_called": [],
+      "timestamp": "2026-05-29T17:45:41Z",
+      "seed": 42
+    },
+    "commit_gate_order_ambiguous": {
+      "scenario_id": "commit_gate_order_ambiguous",
+      "overall_status": "pass",
+      "overall_score": 1.0,
+      "l1_score": 1.0,
+      "l2_score": 1.0,
+      "l3_score": 1.0,
+      "execution_spans": [
+        {
+          "operation": "classify",
+          "layer": "layer2",
+          "status": "ok",
+          "latency_ms": 77.50293183691193,
+          "name": "llm_call"
+        },
+        {
+          "operation": "respond",
+          "layer": "layer2",
+          "status": "ok",
+          "latency_ms": 63.95379285251439,
+          "name": "llm_call"
+        }
+      ],
+      "per_turn_latencies_ms": [
+        0.03211402893066406,
+        0.04625892639160156
+      ],
+      "total_latency_ms": 0.08348561823368073,
+      "issues": [],
+      "bot_responses": [
+        "Danke! Ihre Bestellung wird verarbeitet.",
+        "Gerne helfe ich Ihnen. Was m\u00f6chten Sie bestellen?"
+      ],
+      "tools_called": [],
+      "timestamp": "2026-05-29T17:45:41Z",
+      "seed": 42
+    },
+    "commit_gate_reservation_ambiguous": {
+      "scenario_id": "commit_gate_reservation_ambiguous",
+      "overall_status": "pass",
+      "overall_score": 0.8,
+      "l1_score": 1.0,
+      "l2_score": 1.0,
+      "l3_score": 0.8,
+      "execution_spans": [
+        {
+          "operation": "classify",
+          "layer": "layer2",
+          "status": "ok",
+          "latency_ms": 117.66994874229113,
+          "name": "llm_call"
+        },
+        {
+          "operation": "respond",
+          "layer": "layer2",
+          "status": "ok",
+          "latency_ms": 104.53665337483497,
+          "name": "llm_call"
+        }
+      ],
+      "per_turn_latencies_ms": [
+        0.011426925659179688,
+        0.006108283996582031
+      ],
+      "total_latency_ms": 0.019756145775318146,
+      "issues": [
+        "Span 0 (classify): 117.66994874229113ms > 100ms SLA"
+      ],
+      "bot_responses": [
+        "Willkommen bei Doboo! Wie kann ich Ihnen heute helfen?",
+        "Verstanden. Wie lautet Ihr Name?"
+      ],
+      "tools_called": [],
+      "timestamp": "2026-05-29T17:45:41Z",
+      "seed": 42
+    },
+    "confirmation_intent_no_leak": {
+      "scenario_id": "confirmation_intent_no_leak",
+      "overall_status": "pass",
+      "overall_score": 1.0,
+      "l1_score": 1.0,
+      "l2_score": 1.0,
+      "l3_score": 1.0,
+      "execution_spans": [
+        {
+          "operation": "classify",
+          "layer": "layer2",
+          "status": "ok",
+          "latency_ms": 92.19218196852705,
+          "name": "llm_call"
+        },
+        {
+          "operation": "respond",
+          "layer": "layer2",
+          "status": "ok",
+          "latency_ms": 59.369523986159244,
+          "name": "llm_call"
+        },
+        {
+          "operation": "respond",
+          "layer": "layer2",
+          "status": "ok",
+          "latency_ms": 100.53552881033625,
+          "name": "llm_call"
+        },
+        {
+          "operation": "respond",
+          "layer": "layer2",
+          "status": "ok",
+          "latency_ms": 106.1245062938613,
+          "name": "llm_call"
+        },
+        {
+          "operation": "respond",
+          "layer": "layer2",
+          "status": "ok",
+          "latency_ms": 114.98844377795233,
+          "name": "llm_call"
+        }
+      ],
+      "per_turn_latencies_ms": [
+        0.04264640808105469,
+        0.006137847900390625,
+        0.013777732849121094,
+        0.0038518905639648438,
+        0.012457847595214844
+      ],
+      "total_latency_ms": 0.09200628846883774,
+      "issues": [],
+      "bot_responses": [
+        "Willkommen bei Doboo! Wie kann ich Ihnen heute helfen?",
+        "Danke! Ihre Bestellung wird verarbeitet.",
+        "Willkommen bei Doboo! Wie kann ich Ihnen heute helfen?",
+        "Verstanden. Wie lautet Ihr Name?",
+        "Gerne helfe ich Ihnen. Was m\u00f6chten Sie bestellen?"
+      ],
+      "tools_called": [],
+      "timestamp": "2026-05-29T17:45:41Z",
+      "seed": 42
+    },
+    "delivery_address_flow": {
+      "scenario_id": "delivery_address_flow",
+      "overall_status": "pass",
+      "overall_score": 1.0,
+      "l1_score": 1.0,
+      "l2_score": 1.0,
+      "l3_score": 1.0,
+      "execution_spans": [
+        {
+          "operation": "classify",
+          "layer": "layer2",
+          "status": "ok",
+          "latency_ms": 91.95198209616586,
+          "name": "llm_call"
+        },
+        {
+          "operation": "respond",
+          "layer": "layer2",
+          "status": "ok",
+          "latency_ms": 108.92656838759086,
+          "name": "llm_call"
+        },
+        {
+          "operation": "respond",
+          "layer": "layer2",
+          "status": "ok",
+          "latency_ms": 136.9300320792934,
+          "name": "llm_call"
+        },
+        {
+          "operation": "respond",
+          "layer": "layer2",
+          "status": "ok",
+          "latency_ms": 130.5819251832808,
+          "name": "llm_call"
+        }
+      ],
+      "per_turn_latencies_ms": [
+        0.02422046661376953,
+        0.006969451904296875,
+        0.0035572052001953125,
+        0.0034036636352539062
+      ],
+      "total_latency_ms": 0.04123803228139877,
+      "issues": [],
+      "bot_responses": [
+        "Verstanden. Wie lautet Ihr Name?",
+        "Willkommen bei Doboo! Wie kann ich Ihnen heute helfen?",
+        "Verstanden. Wie lautet Ihr Name?",
+        "Willkommen bei Doboo! Wie kann ich Ihnen heute helfen?"
+      ],
+      "tools_called": [],
+      "timestamp": "2026-05-29T17:45:41Z",
+      "seed": 42
+    },
+    "off_menu_pivot": {
+      "scenario_id": "off_menu_pivot",
+      "overall_status": "pass",
+      "overall_score": 1.0,
+      "l1_score": 1.0,
+      "l2_score": 1.0,
+      "l3_score": 1.0,
+      "execution_spans": [
+        {
+          "operation": "classify",
+          "layer": "layer2",
+          "status": "ok",
+          "latency_ms": 92.26143981535026,
+          "name": "llm_call"
+        },
+        {
+          "operation": "respond",
+          "layer": "layer2",
+          "status": "ok",
+          "latency_ms": 65.54794998117815,
+          "name": "llm_call"
+        },
+        {
+          "operation": "respond",
+          "layer": "layer2",
+          "status": "ok",
+          "latency_ms": 126.3494129006524,
+          "name": "llm_call"
+        }
+      ],
+      "per_turn_latencies_ms": [
+        0.03341197967529297,
+        0.0059299468994140625,
+        0.0038080215454101562
+      ],
+      "total_latency_ms": 0.045894645154476166,
+      "issues": [],
+      "bot_responses": [
+        "Verstanden. Wie lautet Ihr Name?",
+        "Gerne helfe ich Ihnen. Was m\u00f6chten Sie bestellen?",
+        "Verstanden. Wie lautet Ihr Name?"
+      ],
+      "tools_called": [],
+      "timestamp": "2026-05-29T17:45:41Z",
+      "seed": 42
+    },
+    "order_bebimbap_multi_item": {
+      "scenario_id": "order_bebimbap_multi_item",
+      "overall_status": "pass",
+      "overall_score": 1.0,
+      "l1_score": 1.0,
+      "l2_score": 1.0,
+      "l3_score": 1.0,
+      "execution_spans": [
+        {
+          "operation": "classify",
+          "layer": "layer2",
+          "status": "ok",
+          "latency_ms": 59.27458433801479,
+          "name": "llm_call"
+        }
+      ],
+      "per_turn_latencies_ms": [
+        0.02086639404296875
+      ],
+      "total_latency_ms": 0.023162923753261566,
+      "issues": [],
+      "bot_responses": [
+        "Willkommen bei Doboo! Wie kann ich Ihnen heute helfen?"
+      ],
+      "tools_called": [],
+      "timestamp": "2026-05-29T17:45:41Z",
+      "seed": 42
+    },
+    "philipp_stress_test": {
+      "scenario_id": "philipp_stress_test",
+      "overall_status": "pass",
+      "overall_score": 1.0,
+      "l1_score": 1.0,
+      "l2_score": 1.0,
+      "l3_score": 1.0,
+      "execution_spans": [
+        {
+          "operation": "classify",
+          "layer": "layer2",
+          "status": "ok",
+          "latency_ms": 85.89793804846283,
+          "name": "llm_call"
+        },
+        {
+          "operation": "respond",
+          "layer": "layer2",
+          "status": "ok",
+          "latency_ms": 110.37260313668911,
+          "name": "llm_call"
+        },
+        {
+          "operation": "respond",
+          "layer": "layer2",
+          "status": "ok",
+          "latency_ms": 54.34504429230972,
+          "name": "llm_call"
+        },
+        {
+          "operation": "respond",
+          "layer": "layer2",
+          "status": "ok",
+          "latency_ms": 103.62280914547007,
+          "name": "llm_call"
+        }
+      ],
+      "per_turn_latencies_ms": [
+        0.012422561645507812,
+        0.0047130584716796875,
+        0.0026693344116210938,
+        0.0036907196044921875
+      ],
+      "total_latency_ms": 0.038539059460163116,
+      "issues": [],
+      "bot_responses": [
+        "Danke! Ihre Bestellung wird verarbeitet.",
+        "Gerne helfe ich Ihnen. Was m\u00f6chten Sie bestellen?",
+        "Willkommen bei Doboo! Wie kann ich Ihnen heute helfen?",
+        "Gerne helfe ich Ihnen. Was m\u00f6chten Sie bestellen?"
+      ],
+      "tools_called": [],
+      "timestamp": "2026-05-29T17:45:41Z",
+      "seed": 42
+    },
+    "reservation_basic": {
+      "scenario_id": "reservation_basic",
+      "overall_status": "pass",
+      "overall_score": 0.8,
+      "l1_score": 1.0,
+      "l2_score": 1.0,
+      "l3_score": 0.8,
+      "execution_spans": [
+        {
+          "operation": "classify",
+          "layer": "layer2",
+          "status": "ok",
+          "latency_ms": 142.229537202816,
+          "name": "llm_call"
+        },
+        {
+          "operation": "respond",
+          "layer": "layer2",
+          "status": "ok",
+          "latency_ms": 105.2040631273227,
+          "name": "llm_call"
+        },
+        {
+          "operation": "respond",
+          "layer": "layer2",
+          "status": "ok",
+          "latency_ms": 112.86397994944434,
+          "name": "llm_call"
+        },
+        {
+          "operation": "respond",
+          "layer": "layer2",
+          "status": "ok",
+          "latency_ms": 136.17069003107773,
+          "name": "llm_call"
+        },
+        {
+          "operation": "respond",
+          "layer": "layer2",
+          "status": "ok",
+          "latency_ms": 69.228859025666,
+          "name": "llm_call"
+        }
+      ],
+      "per_turn_latencies_ms": [
+        0.02130413055419922,
+        0.00524139404296875,
+        0.0035982131958007812,
+        0.01529693603515625,
+        0.004528045654296875
+      ],
+      "total_latency_ms": 0.06281491369009018,
+      "issues": [
+        "Span 0 (classify): 142.229537202816ms > 100ms SLA"
+      ],
+      "bot_responses": [
+        "Willkommen bei Doboo! Wie kann ich Ihnen heute helfen?",
+        "Gerne helfe ich Ihnen. Was m\u00f6chten Sie bestellen?",
+        "Danke! Ihre Bestellung wird verarbeitet.",
+        "Gerne helfe ich Ihnen. Was m\u00f6chten Sie bestellen?",
+        "Danke! Ihre Bestellung wird verarbeitet."
+      ],
+      "tools_called": [],
+      "timestamp": "2026-05-29T17:45:41Z",
+      "seed": 42
+    },
+    "takeaway_simple": {
+      "scenario_id": "takeaway_simple",
+      "overall_status": "pass",
+      "overall_score": 1.0,
+      "l1_score": 1.0,
+      "l2_score": 1.0,
+      "l3_score": 1.0,
+      "execution_spans": [
+        {
+          "operation": "classify",
+          "layer": "layer2",
+          "status": "ok",
+          "latency_ms": 54.58243836556622,
+          "name": "llm_call"
+        },
+        {
+          "operation": "respond",
+          "layer": "layer2",
+          "status": "ok",
+          "latency_ms": 127.30683407886919,
+          "name": "llm_call"
+        },
+        {
+          "operation": "respond",
+          "layer": "layer2",
+          "status": "ok",
+          "latency_ms": 135.5317721015147,
+          "name": "llm_call"
+        },
+        {
+          "operation": "respond",
+          "layer": "layer2",
+          "status": "ok",
+          "latency_ms": 60.100142940972916,
+          "name": "llm_call"
+        }
+      ],
+      "per_turn_latencies_ms": [
+        0.01759815216064453,
+        0.00567626953125,
+        0.02175617218017578,
+        0.00519561767578125
+      ],
+      "total_latency_ms": 0.054105184972286224,
+      "issues": [],
+      "bot_responses": [
+        "Danke! Ihre Bestellung wird verarbeitet.",
+        "Verstanden. Wie lautet Ihr Name?",
+        "Danke! Ihre Bestellung wird verarbeitet.",
+        "Verstanden. Wie lautet Ihr Name?"
+      ],
+      "tools_called": [],
+      "timestamp": "2026-05-29T17:45:41Z",
+      "seed": 42
+    },
+    "wine_not_denied": {
+      "scenario_id": "wine_not_denied",
+      "overall_status": "pass",
+      "overall_score": 1.0,
+      "l1_score": 1.0,
+      "l2_score": 1.0,
+      "l3_score": 1.0,
+      "execution_spans": [
+        {
+          "operation": "classify",
+          "layer": "layer2",
+          "status": "ok",
+          "latency_ms": 95.34103023684355,
+          "name": "llm_call"
+        }
+      ],
+      "per_turn_latencies_ms": [
+        0.028024673461914062
+      ],
+      "total_latency_ms": 0.030200928449630737,
+      "issues": [],
+      "bot_responses": [
+        "Willkommen bei Doboo! Wie kann ich Ihnen heute helfen?"
+      ],
+      "tools_called": [],
+      "timestamp": "2026-05-29T17:45:41Z",
+      "seed": 42
+    }
+  }
+}

@@ -68,11 +68,12 @@ def test_adk_turn_processor_wires_layer_trace():
 
 
 def test_brain_service_persists_layer_columns_in_live_writer():
-    """The live per-turn writer must also persist the layer columns (not just the
-    finalize batch), so live telephony rows are not blind on layer1/2/3."""
+    """The unified persist_turn_metric() with path_type='live' must also persist
+    the layer columns (not just the finalize batch), so live telephony rows are
+    not blind on layer1/2/3."""
     import inspect
     from server import brain_service as bs
 
-    src = inspect.getsource(bs.BrowserBrainService._persist_turn_metric_live)
+    src = inspect.getsource(bs.BrowserBrainService.persist_turn_metric)
     for col in ("layer1_decision", "layer2_raw_output", "layer3_changes"):
-        assert col in src, f"live writer must persist {col}"
+        assert col in src, f"persist_turn_metric must handle {col} in live path"
