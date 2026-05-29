@@ -29,15 +29,15 @@ not a verdict. Codex must verify each item before relying on it.
 ### Validation Harness
 
 - `server/validation/AGENTS.md`
-- `server/validation/scenario_based_loop.py`
+- `server/validation/loop_runner_v2.py` (Phase 4b: deterministic regression gate)
 - `server/validation/phase_runner.py`
 - `server/validation/scenario_generator.py`
-- `server/validation/grok_auditor_integration.py`
-- `server/validation/haiku_fix_generator.py`
-- `server/validation/fix_applier.py`
 - `server/validation/postgres_metrics_fetcher.py`
 - `server/validation/known_issues_advisor.py`
 - `server/validation/known_issues.json`
+
+Deprecated/archived:
+- `server/validation/scenario_based_loop.py` (Phase 4c: deleted)
 
 ### Product Behavior
 

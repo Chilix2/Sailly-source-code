@@ -10,15 +10,15 @@ against raw evidence. The harness can be wrong even when the bot is right.
 
 Primary files to read for validation work:
 
-- `scenario_based_loop.py`
+- `loop_runner_v2.py` (Phase 4b: deterministic regression gate, replaces scenario_based_loop)
 - `phase_runner.py`
 - `scenario_generator.py`
-- `grok_auditor_integration.py`
-- `haiku_fix_generator.py`
-- `fix_applier.py`
 - `postgres_metrics_fetcher.py`
 - `known_issues_advisor.py`
 - `known_issues.json`
+
+Deprecated/archived:
+- `scenario_based_loop.py` (Phase 4c: deleted; whack-a-mole anti-pattern replaced by loop_runner_v2)
 
 ## Runtime Contract
 

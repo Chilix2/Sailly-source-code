@@ -29,13 +29,12 @@ Record each file read end-to-end:
 - [ ] `docs/codex_evidence_pack.md`
 - [ ] `server/validation/AGENTS.md`
 - [ ] `server/brain/AGENTS.md`
-- [ ] `server/validation/scenario_based_loop.py`
+- [ ] `server/validation/loop_runner_v2.py` (Phase 4b: deterministic regression gate)
 - [ ] `server/validation/phase_runner.py`
-- [ ] `server/validation/grok_auditor_integration.py`
-- [ ] `server/validation/haiku_fix_generator.py`
-- [ ] `server/validation/fix_applier.py`
+- [ ] `server/validation/postgres_metrics_fetcher.py`
 - [ ] `server/validation/known_issues_advisor.py`
 - [ ] `server/validation/known_issues.json`
+- [ ] ~~`server/validation/scenario_based_loop.py`~~ (Phase 4c: deleted)
 - [ ] `server/brain/v4_pipeline.py`
 - [ ] `server/brain/conversation_state.py`
 - [ ] `server/main.py`
