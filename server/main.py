@@ -1685,6 +1685,7 @@ async def get_call_turns(call_sid: str, tenant: str = Query(...), request: Reque
         from server.database import get_pool
         pool = await get_pool()
         async with pool.acquire() as conn:
+            # Fetch turn metrics
             rows = await conn.fetch(
                 """
                 SELECT
@@ -1702,6 +1703,43 @@ async def get_call_turns(call_sid: str, tenant: str = Query(...), request: Reque
                 """,
                 call_sid,
             )
+            
+            # Phase 2: Fetch ExecutionSpan traces (indexed by turn_number for easy lookup)
+            span_rows = await conn.fetch(
+                """
+                SELECT
+                    turn_number, span_id, parent_span_id, layer, operation, name, model,
+                    latency_ms, ttft_ms, status, tokens_in, tokens_out, finish_reason, io
+                FROM google_turn_spans
+                WHERE call_sid = $1
+                ORDER BY turn_number ASC, span_id ASC
+                """,
+                call_sid,
+            )
+            
+            # Build spans map: {turn_number: [span_dicts]}
+            spans_by_turn = {}
+            for span_row in span_rows:
+                turn_num = span_row["turn_number"]
+                if turn_num not in spans_by_turn:
+                    spans_by_turn[turn_num] = []
+                span_dict = {
+                    "span_id": span_row["span_id"],
+                    "parent_span_id": span_row["parent_span_id"],
+                    "layer": span_row["layer"],
+                    "operation": span_row["operation"],
+                    "name": span_row["name"],
+                    "model": span_row["model"],
+                    "latency_ms": span_row["latency_ms"],
+                    "ttft_ms": span_row["ttft_ms"],
+                    "status": span_row["status"],
+                    "tokens_in": span_row["tokens_in"],
+                    "tokens_out": span_row["tokens_out"],
+                    "finish_reason": span_row["finish_reason"],
+                    "io": span_row["io"],
+                }
+                spans_by_turn[turn_num].append(span_dict)
+
     except Exception as e:
         logger.warning(f"[ADMIN-TURNS] query failed: {e!r}")
         return JSONResponse(status_code=503, content={"error": "db_unavailable"})
@@ -1719,41 +1757,44 @@ async def get_call_turns(call_sid: str, tenant: str = Query(...), request: Reque
                 tc = _json.loads(tc)
             except Exception:
                 tc = []
-        turns.append(
-            {
-                "turn_number": r["turn_number"],
-                "user_text": r["user_text"] or "",
-                "bot_text": r["bot_text"] or "",
-                "stt_latency_ms": r["stt_latency_ms"],
-                "llm_latency_ms": r["llm_latency_ms"],
-                "total_latency_ms": r["total_latency_ms"],
-                "tools_called": tc or [],
-                "node_name": r["node_name"],
-                "stt_confidence": r["stt_confidence"],
-                "build_sha": r["build_sha"],
-                "tenant_id": r["tenant_id"],
-                "created_at": r["created_at"].isoformat() if r["created_at"] else None,
-                # Phase 0B layer trace observability
-                "layer1_decision": r["layer1_decision"],
-                "layer2_raw_output": r["layer2_raw_output"],
-                "layer3_changes": r["layer3_changes"],
-                # Phase 9 stage timings
-                "stt_ms": r["stt_ms"],
-                "extract_ms": r["extract_ms"],
-                "l2_ms": r["l2_ms"],
-                "tool_ms": r["tool_ms"],
-                "tts_ttfb_ms": r["tts_ttfb_ms"],
-                # Routing context (populated today via shadow classify)
-                "intent": r["intent"],
-                "turn_type": r["turn_type"],
-                "worker_profile": r["worker_profile"],
-                # Final pipeline text + adaptive TTS conditioning
-                "stage3_text": r["stage3_text"],
-                "tts_situation": r["tts_situation"],
-                "tts_mood": r["tts_mood"],
-                "validation_breakdown": r["validation_breakdown"],
-            }
-        )
+        
+        turn_num = r["turn_number"]
+        turn_dict = {
+            "turn_number": turn_num,
+            "user_text": r["user_text"] or "",
+            "bot_text": r["bot_text"] or "",
+            "stt_latency_ms": r["stt_latency_ms"],
+            "llm_latency_ms": r["llm_latency_ms"],
+            "total_latency_ms": r["total_latency_ms"],
+            "tools_called": tc or [],
+            "node_name": r["node_name"],
+            "stt_confidence": r["stt_confidence"],
+            "build_sha": r["build_sha"],
+            "tenant_id": r["tenant_id"],
+            "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+            # Phase 0B layer trace observability
+            "layer1_decision": r["layer1_decision"],
+            "layer2_raw_output": r["layer2_raw_output"],
+            "layer3_changes": r["layer3_changes"],
+            # Phase 9 stage timings
+            "stt_ms": r["stt_ms"],
+            "extract_ms": r["extract_ms"],
+            "l2_ms": r["l2_ms"],
+            "tool_ms": r["tool_ms"],
+            "tts_ttfb_ms": r["tts_ttfb_ms"],
+            # Routing context (populated today via shadow classify)
+            "intent": r["intent"],
+            "turn_type": r["turn_type"],
+            "worker_profile": r["worker_profile"],
+            # Final pipeline text + adaptive TTS conditioning
+            "stage3_text": r["stage3_text"],
+            "tts_situation": r["tts_situation"],
+            "tts_mood": r["tts_mood"],
+            "validation_breakdown": r["validation_breakdown"],
+            # Phase 2: ExecutionSpan traces (OTel-shaped)
+            "execution_spans": spans_by_turn.get(turn_num, []),
+        }
+        turns.append(turn_dict)
     return {"call_sid": call_sid, "turn_count": len(turns), "turns": turns}
 
 

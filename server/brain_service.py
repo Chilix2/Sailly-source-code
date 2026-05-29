@@ -2099,6 +2099,60 @@ class BrowserBrainService(FrameProcessor):
                 logger.info(
                     f"[BRAIN] PostgreSQL: {len(turn_metrics)} turn_metric rows written"
                 )
+                
+                # Phase 2: Persist ExecutionSpan traces to google_turn_spans (flat OTel-shaped table)
+                spans_to_write = []
+                for tm in turn_metrics:
+                    execution_spans = tm.get("execution_spans") or []
+                    turn_number = int(tm.get("turn_number") or 0)
+                    for span_dict in execution_spans:
+                        span_row = (
+                            self.call_sid,
+                            turn_number,
+                            self.tenant_id,
+                            span_dict.get("span_id"),
+                            span_dict.get("parent_span_id"),
+                            span_dict.get("layer"),  # 1, 2, 3
+                            span_dict.get("operation"),  # stt, classify, chat, execute_tool, policy, tts, etc.
+                            span_dict.get("name"),  # human-readable name (e.g., "select_node", "TinyGenerator LLM")
+                            span_dict.get("model"),  # model name if applicable
+                            int(span_dict.get("latency_ms") or 0),
+                            int(span_dict.get("ttft_ms") or 0) if span_dict.get("ttft_ms") else None,
+                            span_dict.get("status"),  # "ok", "error", "blocked"
+                            int(span_dict.get("tokens_in") or 0) if span_dict.get("tokens_in") else None,
+                            int(span_dict.get("tokens_out") or 0) if span_dict.get("tokens_out") else None,
+                            span_dict.get("finish_reason"),  # for LLM spans
+                            _jd(span_dict.get("io")),  # metadata dict (JSONB)
+                        )
+                        spans_to_write.append(span_row)
+                
+                if spans_to_write:
+                    await conn.executemany(
+                        """
+                        INSERT INTO google_turn_spans
+                            (call_sid, turn_number, tenant_id, span_id, parent_span_id, layer,
+                             operation, name, model, latency_ms, ttft_ms, status,
+                             tokens_in, tokens_out, finish_reason, io)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16::jsonb)
+                        ON CONFLICT (call_sid, turn_number, span_id) DO UPDATE SET
+                            parent_span_id = EXCLUDED.parent_span_id,
+                            layer = EXCLUDED.layer,
+                            operation = EXCLUDED.operation,
+                            name = EXCLUDED.name,
+                            model = EXCLUDED.model,
+                            latency_ms = EXCLUDED.latency_ms,
+                            ttft_ms = EXCLUDED.ttft_ms,
+                            status = EXCLUDED.status,
+                            tokens_in = EXCLUDED.tokens_in,
+                            tokens_out = EXCLUDED.tokens_out,
+                            finish_reason = EXCLUDED.finish_reason,
+                            io = EXCLUDED.io
+                        """,
+                        spans_to_write,
+                    )
+                    logger.info(
+                        f"[BRAIN] PostgreSQL: {len(spans_to_write)} execution spans written"
+                    )
 
         finally:
             await conn.close()
