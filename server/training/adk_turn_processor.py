@@ -260,6 +260,9 @@ class ADKTurnProcessor:
         bot_response: str = ""
         # Reset per-turn observability trace so a stale trace can't leak forward.
         self._current_layer_trace = None
+        # Initialize TurnTimings for per-stage latency instrumentation
+        from server.brain.contracts.turn_timings import TurnTimings
+        self.state._turn_timings = TurnTimings()
         # Phase 2: per-turn ExecutionSpan collector (OTel gen_ai-shaped). t0 anchors
         # all relative timings. Defensive — never breaks the live turn.
         import time as _time_mod
@@ -310,6 +313,9 @@ class ADKTurnProcessor:
                 ),
                 io={"chars_out": len(bot_response or "")},
             )
+            # Stamp l2_done_at (LLM call complete)
+            if self.state._turn_timings:
+                self.state._turn_timings.l2_done_at = _time_mod.monotonic()
 
             # Parse tool calls from response [validated ~286]
             turn_tools = list(gemini_runner._parse_tool_calls(bot_response))
@@ -526,6 +532,10 @@ class ADKTurnProcessor:
             # Remove failed/blocked tools so loop escape and all_tools are accurate
             if failed_tool_names:
                 turn_tools = [t for t in turn_tools if t not in failed_tool_names]
+            
+            # Stamp tool_done_at (all tools executed)
+            if self.state._turn_timings:
+                self.state._turn_timings.tool_done_at = _time_mod.monotonic()
 
             # ── Loop escape hatch ──────────────────────────────── [validated ~462]
             # A3: Raised from 5 to 8 turns to reduce premature end_call.
