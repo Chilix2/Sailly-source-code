@@ -83,6 +83,12 @@ _DELIVERY_INTENT_KW = [
 
 @dataclass
 class ConversationState:
+    # 4-stack tracing fields (for observability and multi-tenant isolation)
+    tenant_id: Optional[str] = None  # doboo, pizzeria_napoli, etc.
+    call_id: Optional[str] = None    # unique call identifier for cross-component tracing
+    user_id: Optional[str] = None    # customer/user identifier
+    fsm_phase: Optional[str] = None  # current FSM phase (GREETING, INFO, ORDER, RESERVE, READBACK, COMMITTED)
+    
     order_intent: bool = False
     selected_dish: Optional[str] = None
     phone_number: Optional[str] = None
@@ -165,15 +171,23 @@ class ConversationState:
     def to_dict(self) -> dict:
         """Serialize ConversationState to JSON-safe dict for Redis persistence."""
         return {
+            # 4-stack tracing fields
+            "tenant_id": self.tenant_id,
+            "call_id": self.call_id,
+            "user_id": self.user_id,
+            "fsm_phase": self.fsm_phase,
+            # Order fields
             "order_intent": self.order_intent,
             "selected_dish": self.selected_dish,
             "phone_number": self.phone_number,
             "order_created": self.order_created,
+            # Reservation fields
             "reservation_intent": self.reservation_intent,
             "party_size": self.party_size,
             "reservation_date": self.reservation_date,
             "reservation_time": self.reservation_time,
             "reservation_created": self.reservation_created,
+            # Tool call tracking
             "menu_fetched": self.menu_fetched,
             "check_availability_called": self.check_availability_called,
             "get_date_info_called": self.get_date_info_called,
@@ -197,15 +211,23 @@ class ConversationState:
         if not data:
             return cls()
         return cls(
+            # 4-stack tracing fields
+            tenant_id=data.get("tenant_id"),
+            call_id=data.get("call_id"),
+            user_id=data.get("user_id"),
+            fsm_phase=data.get("fsm_phase"),
+            # Order fields
             order_intent=data.get("order_intent", False),
             selected_dish=data.get("selected_dish"),
             phone_number=data.get("phone_number"),
             order_created=data.get("order_created", False),
+            # Reservation fields
             reservation_intent=data.get("reservation_intent", False),
             party_size=data.get("party_size"),
             reservation_date=data.get("reservation_date"),
             reservation_time=data.get("reservation_time"),
             reservation_created=data.get("reservation_created", False),
+            # Tool call tracking
             menu_fetched=data.get("menu_fetched", False),
             check_availability_called=data.get("check_availability_called", False),
             get_date_info_called=data.get("get_date_info_called", False),
