@@ -7,6 +7,12 @@ them into harness-compatible JSONL scenario files. This lets you:
   1. Find calls that expose specific bugs (e.g. tool not fired, forbidden phrase)
   2. Turn them into regression tests that prevent regressions
 
+Schema Bridge (Phase 4 foundation):
+  - Postgres: google_turn_metrics has user_utterance → converted to role=user with text field
+  - Tools: tools_called (array or JSON string) → role=assert with type=tool
+  - Assertions: Universal forbid checks (technisches problem, etc.) added per scenario
+  - Output: Harness-compatible JSONL (see harness.py for format)
+
 Usage:
     # List recent production calls
     python -m server.tests.regression.replay_tool list
@@ -157,6 +163,7 @@ def turns_to_jsonl(
     lines.append(json.dumps(meta))
 
     for turn in turns:
+        # Database field is 'user_utterance' but JSONL harness expects 'text' in role=user
         utterance = (turn.get("user_utterance") or "").strip()
         if utterance:
             lines.append(json.dumps({"role": "user", "text": utterance}))
