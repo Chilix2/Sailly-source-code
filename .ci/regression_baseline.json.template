@@ -1,0 +1,17 @@
+{
+  "version": "1",
+  "timestamp": "2026-05-29T19:32:00Z",
+  "description": "Regression baseline snapshot. Auto-populated after first successful CI gate run.",
+  "metrics": {
+    "total_scenarios": 0,
+    "passed_scenarios": 0,
+    "failed_scenarios": 0,
+    "error_scenarios": 0,
+    "l1_pass_rate": 0.0,
+    "l2_pass_rate": 0.0,
+    "l3_pass_rate": 0.0,
+    "avg_overall_score": 0.0,
+    "avg_latency_ms": 0.0
+  },
+  "results": {}
+}
