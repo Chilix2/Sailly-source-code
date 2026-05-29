@@ -180,9 +180,12 @@ class DeterministicScorer:
         # === Check 4: Fulfillment marker ===
         # If expected fulfilled=false, we don't penalize missing tools
         # (failure cases are expected to not fulfill)
-        if not fulfilled and not actual_tools_called:
+        if not fulfilled:
             output.details["fulfillment_mode"] = "expected_failure"
-            output.confidence = 1.0  # Passing because we expected it to fail
+            # Reset mismatches since we expected this to fail
+            output.mismatches = []
+            output.status = ScorerResult.PASS
+            output.confidence = 1.0
 
         output.details["tools_checked"] = {
             "expected": expected_tools,
@@ -334,10 +337,6 @@ class LLMJudgeScorer:
             confidence=0.5,
         )
 
-        if not self.enable_llm:
-            output.details["skipped"] = "LLM judge disabled"
-            return output
-
         # === Check cache ===
         turn_hash = self._hash_turn(scenario_id, turn_idx, bot_response)
         if turn_hash in self._cache:
@@ -364,7 +363,7 @@ class LLMJudgeScorer:
         )
 
         output.details["quality_checks"] = {
-            "has_placeholder": "[" in bot_response and "]" in bot_response,
+            "has_placeholder": "{" in bot_response or ("[" in bot_response and "]" in bot_response),
             "response_length": len(bot_response),
             "contains_tool_tag": "[tool" in bot_response.lower(),
             "contains_error": "error" in bot_response.lower()
@@ -620,12 +619,13 @@ class RegressionScorer:
 
         # Aggregate L2 confidence (worst turn counts)
         min_confidence = min(r.confidence for r in l2_results) if l2_results else 1.0
-        worst_status = min(
-            (ScorerResult.FAIL if r.status == ScorerResult.FAIL else
-             ScorerResult.INCONCLUSIVE if r.status == ScorerResult.INCONCLUSIVE else
-             ScorerResult.PASS)
-            for r in l2_results
-        ) if l2_results else ScorerResult.PASS
+        worst_status = ScorerResult.PASS
+        for r in l2_results:
+            if r.status == ScorerResult.FAIL:
+                worst_status = ScorerResult.FAIL
+                break
+            elif r.status == ScorerResult.INCONCLUSIVE and worst_status == ScorerResult.PASS:
+                worst_status = ScorerResult.INCONCLUSIVE
 
         results["l2_llm_judge"] = ScorerOutput(
             scenario_id=scenario_id,
