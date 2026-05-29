@@ -34,6 +34,11 @@ from server.brain.tiny_generator import TinyGenerator
 from server.brain.worker_executor import execute as worker_execute
 from server.brain.worker_router import route
 from server.brain.workers import ExecutionResult, WorkerContext, WorkerOutput
+from server.brain.pipeline_helpers import (
+    format_address_for_speech,
+    _state_snapshot_for_gate,
+    _default_menu_price_label,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -173,15 +178,6 @@ def _split_tts_sentence_chunks(text: str) -> list[str]:
     if tail:
         chunks.append(tail)
     return chunks
-
-
-def format_address_for_speech(address: str) -> str:
-    """Remove country suffixes that are unnecessary in local restaurant speech."""
-    text = (address or "").strip()
-    for suffix in (", Germany", ", Deutschland", ", DE"):
-        if text.endswith(suffix):
-            return text[: -len(suffix)].strip().rstrip(",")
-    return text
 
 
 def _iso_to_spoken_german(iso: str) -> str:
@@ -428,28 +424,6 @@ def _build_worker_ctx(
     )
 
 
-def _state_snapshot_for_gate(state) -> dict:
-    """Subset of ConversationState fields used by the universal commit gate.
-
-    Maps the canonical state field names onto the slot names declared in
-    COMMIT_TOOLS_REQUIRED_SLOTS so the gate's slot-filled check works
-    transparently for both reservation and order intents.
-    """
-    items = getattr(state, "selected_items", None)
-    if not items:
-        # Fall back to single dish as a one-element list so the gate sees it.
-        sd = getattr(state, "selected_dish", None)
-        items = [sd] if sd else None
-    return {
-        "party_size": getattr(state, "party_size", None),
-        "reservation_date": getattr(state, "reservation_date", None),
-        "reservation_time": getattr(state, "reservation_time", None),
-        "customer_name": getattr(state, "customer_name", None) or getattr(state, "first_name", None),
-        "phone_number": getattr(state, "phone_number", None),
-        "order_items": items,
-    }
-
-
 def _dedupe_order_items(items) -> list:
     """Return order items without duplicate names, preserving first mention order."""
     result = []
@@ -481,46 +455,6 @@ def _join_german_list(parts: list[str]) -> str:
     if len(parts) <= 1:
         return parts[0] if parts else ""
     return ", ".join(parts[:-1]) + " und " + parts[-1]
-
-
-def _default_menu_price_label(item: dict, preferred_size: str | None = None) -> tuple[float | None, str]:
-    """Return (price, label) for a menu item, respecting caller-stated size preference.
-
-    If ``preferred_size`` is given (e.g. "0.5L", "groß"), prefer the variant
-    whose ``size`` field contains that string (case-insensitive). Falls back to
-    the first delivery-eligible catalog variant, not the cheapest.
-    """
-    name = str(item.get("name") or "").strip()
-    price = item.get("price") or item.get("preis")
-    if price is not None:
-        return float(price), name
-    variants = item.get("variants") or []
-    candidates = []
-    if isinstance(variants, list):
-        for variant in variants:
-            if not isinstance(variant, dict):
-                continue
-            variant_price = variant.get("price") or variant.get("preis")
-            if variant_price is None:
-                continue
-            eligible = variant.get("delivery_eligible", True) is not False
-            size = str(variant.get("size") or "").strip()
-            candidates.append((not eligible, float(variant_price), size))
-    if not candidates:
-        return None, name
-    # P2_11: prefer caller-stated size over cheapest variant
-    if preferred_size:
-        _pref = preferred_size.lower().replace(",", ".")
-        for _not_eligible, _vp, _vs in candidates:
-            if not _not_eligible and _pref in _vs.lower().replace(",", "."):
-                label = f"{name} {_vs}".strip() if _vs else name
-                return _vp, label
-    _not_eligible, selected_price, selected_size = next(
-        (row for row in candidates if not row[0]),
-        candidates[0],
-    )
-    label = f"{name} {selected_size}".strip() if selected_size else name
-    return selected_price, label
 
 
 def _format_menu_for_context(menu: dict, *, limit: int = 20, include_description: bool = False) -> str:

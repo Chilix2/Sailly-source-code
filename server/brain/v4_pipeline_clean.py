@@ -22,6 +22,9 @@ with a smaller, focused file that:
 
 Key: ctx=TenantConfig from session ONLY, never hardcoded.
 Signature is backward-compatible with v4_pipeline_legacy for gradual migration.
+
+FALLBACK GATE: Set environment variable SAILLY_FSM_EMERGENCY_FALLBACK=1 to enable
+silent fallback to legacy pipeline. Default is NO FALLBACK (Phase 2 hardening).
 """
 from __future__ import annotations
 
@@ -33,6 +36,16 @@ import time
 from typing import Awaitable, Callable, Optional
 
 logger = logging.getLogger(__name__)
+
+# ── Fallback Gate ────────────────────────────────────────────────────────────
+# Phase 2: Disable silent fallback by default. Only allow fallback if emergency flag is set.
+_ENABLE_LEGACY_FALLBACK = os.getenv("SAILLY_FSM_EMERGENCY_FALLBACK", "0") == "1"
+
+if _ENABLE_LEGACY_FALLBACK:
+    logger.warning("[v4_pipeline_clean] Legacy fallback ENABLED via SAILLY_FSM_EMERGENCY_FALLBACK=1")
+else:
+    logger.info("[v4_pipeline_clean] Legacy fallback DISABLED (clean FSM only; set SAILLY_FSM_EMERGENCY_FALLBACK=1 to enable)")
+
 
 
 def _sanitize_tts_text(text: str) -> str:
@@ -94,40 +107,50 @@ async def _load_tenant_ctx(tenant_id: Optional[str]) -> Optional[object]:
         return None
 
 
-class ConversationSlots:
-    """Slots interface: extracted state from ConversationState for FSM."""
-    
-    def __init__(self, state: object):
-        """Initialize from ConversationState."""
-        self.customer_name = getattr(state, 'customer_name', None)
-        self.customer_phone = getattr(state, 'phone_number', None)
-        self.order_items = getattr(state, 'order_items', [])
-        self.order_total_price = getattr(state, 'order_total_price', None)
-        self.delivery_address = getattr(state, 'delivery_address', None)
-        self.delivery_confirmed = getattr(state, 'delivery_confirmed', False)
-        self.pickup_confirmed = getattr(state, 'pickup_confirmed', False)
-        self.reservation_date = getattr(state, 'reservation_date', None)
-        self.reservation_time = getattr(state, 'reservation_time', None)
-        self.reservation_party_size = getattr(state, 'reservation_party_size', None)
-        self.order_created = getattr(state, 'order_created', False)
-        self.reservation_created = getattr(state, 'reservation_created', False)
-        self.end_call_stage = getattr(state, 'end_call_stage', 'idle')
-    
-    def apply_to_state(self, state: object) -> None:
-        """Write Slots back to ConversationState after FSM step()."""
-        state.customer_name = self.customer_name
-        state.phone_number = self.customer_phone
-        state.order_items = self.order_items
-        state.order_total_price = self.order_total_price
-        state.delivery_address = self.delivery_address
-        state.delivery_confirmed = self.delivery_confirmed
-        state.pickup_confirmed = self.pickup_confirmed
-        state.reservation_date = self.reservation_date
-        state.reservation_time = self.reservation_time
-        state.reservation_party_size = self.reservation_party_size
-        state.order_created = self.order_created
-        state.reservation_created = self.reservation_created
-        state.end_call_stage = self.end_call_stage
+from server.brain.conversation_fsm import ConversationSlots
+
+def _state_to_slots(state: object) -> ConversationSlots:
+    """Convert ConversationState to FSM ConversationSlots dataclass."""
+    return ConversationSlots(
+        phone=getattr(state, 'phone_number', None),
+        name=getattr(state, 'customer_name', None),
+        address=getattr(state, 'delivery_address', None),
+        city=getattr(state, 'city', None),
+        postcode=getattr(state, 'postcode', None),
+        order_type=getattr(state, 'order_type', None),
+        payment_method=getattr(state, 'payment_method', None),
+        reservation_date=getattr(state, 'reservation_date', None),
+        reservation_time=getattr(state, 'reservation_time', None),
+        party_size=getattr(state, 'reservation_party_size', None),
+        intent=getattr(state, 'order_intent', None),
+        confirmed=getattr(state, 'order_confirmed', False),
+    )
+
+def _slots_to_state(slots: ConversationSlots, state: object) -> None:
+    """Apply FSM ConversationSlots back to ConversationState."""
+    if slots.phone:
+        state.phone_number = slots.phone
+    if slots.name:
+        state.customer_name = slots.name
+    if slots.address:
+        state.delivery_address = slots.address
+    if slots.city:
+        state.city = slots.city
+    if slots.postcode:
+        state.postcode = slots.postcode
+    if slots.order_type:
+        state.order_type = slots.order_type
+    if slots.payment_method:
+        state.payment_method = slots.payment_method
+    if slots.reservation_date:
+        state.reservation_date = slots.reservation_date
+    if slots.reservation_time:
+        state.reservation_time = slots.reservation_time
+    if slots.party_size:
+        state.reservation_party_size = slots.party_size
+    if slots.intent:
+        state.order_intent = slots.intent
+    state.order_confirmed = slots.confirmed
 
 
 async def _fsm_dispatch(
@@ -137,28 +160,59 @@ async def _fsm_dispatch(
     user_text: str,
     turn_idx: int,
     executor: Optional[object],
-) -> Optional[ConversationSlots]:
-    """Dispatch to conversation_fsm.step() with proper ctx handling."""
+) -> tuple[Optional[ConversationSlots], list[str]]:  # (updated_slots, tools_called)
+    """Dispatch to conversation_fsm.step() with proper ctx handling.
+    
+    ConversationFSM.step() is SYNCHRONOUS and returns a decision dict, not updated slots.
+    We must instantiate FSM, call step, and extract decision.
+    """
     if ctx is None:
         logger.error("[v4_pipeline_clean] ctx is None; FSM dispatch not possible")
-        return None
+        return None, []
     try:
-        from server.brain import conversation_fsm
-        updated_slots = await conversation_fsm.step(
+        from server.brain.conversation_fsm import ConversationFSM
+        # Instantiate FSM with context
+        fsm = ConversationFSM(ctx=ctx)
+        
+        # Convert state.slots to ConversationSlots if needed
+        if not isinstance(slots, ConversationSlots):
+            logger.warning(f"[v4_pipeline_clean] slots not ConversationSlots; attempting conversion")
+            slots = ConversationSlots()
+        
+        # Call synchronous step() method
+        decision = fsm.step(
             slots=slots,
-            executor=executor,
+            user_utterance=user_text,
             ctx=ctx,
-            user_text=user_text,
-            turn_idx=turn_idx,
         )
-        logger.debug(f"[v4_pipeline_clean] T{turn_idx} FSM dispatch OK")
-        return updated_slots
-    except ImportError:
-        logger.error("[v4_pipeline_clean] conversation_fsm module not found; skipping FSM dispatch")
-        return slots
+        
+        logger.debug(f"[v4_pipeline_clean] T{turn_idx} FSM step OK; phase={decision.get('phase')}")
+        
+        # Track tool calls for return
+        tools_called = []
+        
+        # Extract tool calls from decision if phase is COMMITTED
+        if decision.get('tool_calls'):
+            tool_calls = decision['tool_calls']
+            if executor:
+                for tool_call in tool_calls:
+                    try:
+                        tool_name = tool_call.get('name') if isinstance(tool_call, dict) else getattr(tool_call, 'name', 'unknown')
+                        await executor.execute_tool(tool_call)
+                        tools_called.append(tool_name)
+                    except Exception as e:
+                        logger.error(f"[v4_pipeline_clean] Tool execution failed: {e}")
+        
+        # Return updated slots from decision (slots object, not dict)
+        # FSM returns slots.to_dict() in decision, so we use the original slots object
+        return slots, tools_called
+        
+    except ImportError as e:
+        logger.error(f"[v4_pipeline_clean] ConversationFSM import failed: {e}")
+        return None, []
     except Exception as e:
         logger.error(f"[v4_pipeline_clean] FSM dispatch failed: {e}", exc_info=True)
-        return None
+        return None, []
 
 
 async def _tts_done_ack(tts_queue: Optional[asyncio.Queue]) -> None:
@@ -278,7 +332,10 @@ async def process_turn_v4(
         has_fsm = False
     
     if not has_fsm or ctx is None:
-        logger.debug(f"[v4_pipeline_clean] T{turn_idx} FSM not available (has_fsm={has_fsm}, ctx={ctx is not None}); falling back to legacy pipeline")
+        if not _ENABLE_LEGACY_FALLBACK:
+            logger.error(f"[v4_pipeline_clean] T{turn_idx} FSM not available (has_fsm={has_fsm}, ctx={ctx is not None}) and fallback DISABLED; raising error")
+            raise RuntimeError(f"FSM dispatch prerequisites not met and emergency fallback disabled")
+        logger.debug(f"[v4_pipeline_clean] T{turn_idx} FSM not available; using legacy fallback (emergency mode)")
         return await _fallback_to_legacy(
             user_text=user_text,
             turn_idx=turn_idx,
@@ -293,8 +350,8 @@ async def process_turn_v4(
             speculative_generator_result=speculative_generator_result,
         )
     
-    slots = ConversationSlots(state)
-    updated_slots = await _fsm_dispatch(
+    slots = _state_to_slots(state)
+    updated_slots, tools_called = await _fsm_dispatch(
         slots=slots,
         ctx=ctx,
         state=state,
@@ -304,7 +361,10 @@ async def process_turn_v4(
     )
     
     if updated_slots is None:
-        logger.warning(f"[v4_pipeline_clean] T{turn_idx} FSM dispatch returned None; falling back to legacy")
+        if not _ENABLE_LEGACY_FALLBACK:
+            logger.error(f"[v4_pipeline_clean] T{turn_idx} FSM dispatch returned None and fallback DISABLED; raising error")
+            raise RuntimeError(f"FSM dispatch failed and emergency fallback disabled")
+        logger.warning(f"[v4_pipeline_clean] T{turn_idx} FSM dispatch returned None; using legacy fallback")
         return await _fallback_to_legacy(
             user_text=user_text,
             turn_idx=turn_idx,
@@ -319,7 +379,7 @@ async def process_turn_v4(
             speculative_generator_result=speculative_generator_result,
         )
     
-    updated_slots.apply_to_state(state)
+    _slots_to_state(updated_slots, state)
     
     response_text = f"T{turn_idx} processed successfully"
     if tts_callback:
@@ -345,7 +405,7 @@ async def process_turn_v4(
     return {
         'clean_text': user_text,
         'raw_response': response_text,
-        'tools_called': [],
+        'tools_called': tools_called,
         'should_end': should_end,
         'end_reason': 'farewell' if should_end else '',
         'elapsed_ms': elapsed_ms,

@@ -1,0 +1,36 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(./sailly-voice-agent-key.json)",
+      "Read(./.git/)",
+      "Bash(rm -rf *)",
+      "Bash(curl *)",
+      "Bash(sudo *)"
+    ],
+    "ask": [
+      "Bash(*)",
+      "Write(./server/brain/)",
+      "Write(./server/core/)",
+      "Write(./configs/tenants/)",
+      "Edit(./conversation_state.py)",
+      "Edit(./conversation_fsm.py)"
+    ],
+    "allow": [
+      "Read(./server/)",
+      "Read(./configs/)",
+      "Read(./CLAUDE.md)",
+      "Read(./RUNBOOK.md)",
+      "Write(./RUNBOOK.md)",
+      "Write(/tmp/)",
+      "Glob",
+      "Grep"
+    ]
+  },
+  "context": {
+    "max_tokens": 150000,
+    "progressive_disclosure": true,
+    "session_bridge_file": "RUNBOOK.md"
+  }
+}

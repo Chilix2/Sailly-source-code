@@ -1,13 +1,17 @@
 """
-Daily billing and usage logger for cost backtracking.
+Daily billing and usage logger for cost backtracking and 4-stack failure analysis.
 
 Logs per-call usage (TTS chars, LLM tokens, STT seconds) with timestamps,
-run IDs, and model names so daily totals can be reconciled against
-Google Cloud invoice SKU lines.
+run IDs, call_id, tenant_id, FSM phase, and model names so daily totals can be 
+reconciled against Google Cloud invoice SKU lines. Enables cross-component tracing:
+- Stack 1 (Telephony): SIP/WebRTC connection, call setup
+- Stack 2 (Audio): VAD/ASR codec, voice activity
+- Stack 3 (Intelligence): LLM, FSM phase transitions
+- Stack 4 (Output): TTS encoding
 
 Example output (JSONL):
 ```json
-{"timestamp":"2026-04-12T10:15:30Z","run_id":"val_iter8_001","event_type":"call_complete","tts_engine":"gemini-flash","tts_chars":1250,"gemini_in":450,"gemini_out":120,"deepgram_seconds":15.3,"cost_usd":0.0412}
+{"timestamp":"2026-04-12T10:15:30Z","run_id":"val_iter8_001","event_type":"call_complete","call_id":"conv_abc123","tenant_id":"doboo","user_id":"user_xyz","fsm_phase":"ORDER","tts_engine":"gemini-flash","tts_chars":1250,"gemini_in":450,"gemini_out":120,"deepgram_seconds":15.3,"cost_usd":0.0412}
 {"timestamp":"2026-04-12T10:16:45Z","run_id":"val_iter8_001","event_type":"daily_summary","date":"2026-04-12","total_tts_chars":125000,"total_gemini_in":45000,"total_gemini_out":12000,"total_deepgram_sec":300.5,"total_cost_usd":4.56}
 ```
 """
@@ -69,10 +73,14 @@ class BillingLogger:
         gemini_output_tokens: int = 0,
         deepgram_seconds: float = 0.0,
         cost_usd: float = 0.0,
+        call_id: Optional[str] = None,
+        tenant_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        fsm_phase: Optional[str] = None,
         extra_fields: Optional[Dict[str, Any]] = None,
     ) -> None:
         """
-        Log a single API call with usage details.
+        Log a single API call with usage details (4-stack tracing enabled).
 
         Args:
             tts_chars: Number of characters synthesized (TTS).
@@ -80,6 +88,10 @@ class BillingLogger:
             gemini_output_tokens: LLM output tokens (Gemini).
             deepgram_seconds: Duration of audio processed (STT).
             cost_usd: Estimated USD cost for this call.
+            call_id: Unique call identifier (for cross-component tracing).
+            tenant_id: Tenant identifier (doboo, pizzeria_napoli, etc.).
+            user_id: User/customer identifier.
+            fsm_phase: Current FSM phase (GREETING, INFO, ORDER, etc.).
             extra_fields: Additional context (e.g., {"scenario_id": "p1-order-01"}).
         """
         timestamp_utc = datetime.now(timezone.utc).isoformat() + "Z"
@@ -95,6 +107,16 @@ class BillingLogger:
             "deepgram_seconds": round(deepgram_seconds, 2),
             "cost_usd": round(cost_usd, 5),
         }
+        
+        # Add 4-stack tracing fields (for observability)
+        if call_id:
+            record["call_id"] = call_id
+        if tenant_id:
+            record["tenant_id"] = tenant_id
+        if user_id:
+            record["user_id"] = user_id
+        if fsm_phase:
+            record["fsm_phase"] = fsm_phase
         
         if extra_fields:
             record.update(extra_fields)

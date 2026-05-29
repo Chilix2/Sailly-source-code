@@ -72,9 +72,13 @@ class V4TurnProcessor:
 
         # Populate known items from tenant config so dish extraction works
         _tid = tenant_id or "doboo"
+        self._tenant_config = None  # Initialize placeholder
+        self._tenant = None  # Will hold tenant context for slot extraction
         try:
             from server.core.tenant_config import load_tenant_config
             _tenant_cfg = load_tenant_config(_tid)
+            self._tenant_config = _tenant_cfg  # Store for downstream access
+            self._tenant = _tenant_cfg  # Also store as _tenant for v4_turn_processor slot extraction
             # Set global context for module-level functions to access tenant config
             set_tenant_context(_tenant_cfg)
             
