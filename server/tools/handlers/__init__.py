@@ -22,7 +22,6 @@ from server.tools.handlers.end_call import handle as _end_call_handle
 from server.tools.handlers.get_menu import handle as _get_menu_handle
 from server.tools.handlers.get_date_info import handle as _get_date_info_handle
 from server.tools.handlers.faq import handle as _faq_handle
-from server.tools.handlers.update_state import handle as _update_state_handle
 # PR-7 / FINDING-012 — new handlers
 from server.tools.handlers.modify_order import handle as _modify_order_handle
 from server.tools.handlers.cancel_order import handle as _cancel_order_handle
@@ -51,5 +50,4 @@ ALL_HANDLERS: dict = {
     "get_menu": _get_menu_handle,
     "get_date_info": _get_date_info_handle,
     "faq": _faq_handle,
-    "update_state": _update_state_handle,  # deprecated; kept for grace period (FINDING-026)
 }
